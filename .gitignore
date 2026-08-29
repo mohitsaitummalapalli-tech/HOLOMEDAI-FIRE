@@ -1,0 +1,73 @@
+# Environments and Virtualenvs
+.venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Python Bytecode and Cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# Packaging & Distribution
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Environment Variables & Secrets
+.env
+.env.*
+!.env.example
+
+# Runtime & Generated Artifacts
+artifacts/
+*.log
+*.sqlite3
+
+# Operating System Files (Windows / macOS / Linux)
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store
+
+# IDEs and Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Unity Generated / Cache (while preserving Assets/, Packages/, ProjectSettings/)
+/[Ll]ibrary/
+/[Tt]emp/
+/[Oo]bj/
+/[Bb]uild/
+/[Bb]uilds/
+/[Ll]ogs/
+/[Uu]ser[Ss]ettings/
+/[Mm]emoryCaptures/
+/[Rr]ecordings/
+AssetBundles/
+*.csproj
+*.unityproj
+*.sln
+*.suo
+*.user
+*.userprefs
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.opendb
+*.VC.db

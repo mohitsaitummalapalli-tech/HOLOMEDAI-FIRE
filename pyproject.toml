@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "holomed"
+version = "0.1.0"
+description = "HoloMed AI - Foundational Architecture"
+readme = "README.md"
+requires-python = ">=3.14,<3.15"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [
+    { name = "HoloMed AI Team" }
+]
+dependencies = []
+
+[project.optional-dependencies]
+test = [
+    "pytest>=9.1.1,<10.0.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["python"]
+
+[tool.pytest.ini_options]
+minversion = "9.1"
+testpaths = ["tests"]
+pythonpath = ["python"]
