@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "HoloMedErrorPayload",
+  "description": "Standardized structured error payload carried within a HoloMed MessageEnvelope when message_type is ERROR.",
+  "type": "object",
+  "required": [
+    "error_code",
+    "error_message",
+    "details",
+    "recoverable"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "error_code": {
+      "type": "string",
+      "pattern": "^ERR_[A-Z0-9_]+$",
+      "maxLength": 64,
+      "description": "Standard machine-readable error code."
+    },
+    "error_message": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024,
+      "description": "Human-readable diagnostic error message."
+    },
+    "details": {
+      "type": "object",
+      "description": "Arbitrary diagnostic key-value context associated with the error."
+    },
+    "recoverable": {
+      "type": "boolean",
+      "description": "Flag indicating whether the client or sender may retry the operation."
+    }
+  }
+}

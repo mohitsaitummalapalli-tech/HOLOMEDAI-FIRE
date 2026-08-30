@@ -1,0 +1,18 @@
+{
+  "causation_id": "10000000-0000-4000-8000-000000000001",
+  "correlation_id": "10000000-0000-4000-8000-000000000001",
+  "message_id": "40000000-0000-4000-8000-000000000004",
+  "message_name": "device.camera.start.response",
+  "message_type": "RESPONSE",
+  "metadata": {
+    "duration_ms": 12.5
+  },
+  "payload": {
+    "active": true,
+    "session_id": "sess_123"
+  },
+  "protocol_version": "1.0",
+  "source": "device.camera",
+  "target": "core.orchestrator",
+  "timestamp_utc": "2026-08-29T20:00:00.000000Z"
+}

@@ -1,0 +1,19 @@
+{
+  "causation_id": null,
+  "correlation_id": "30000000-0000-4000-8000-000000000003",
+  "message_id": "30000000-0000-4000-8000-000000000003",
+  "message_name": "device.camera.frame_ready",
+  "message_type": "EVENT",
+  "metadata": {
+    "sequence_id": 1
+  },
+  "payload": {
+    "frame_number": 42,
+    "height": 1080,
+    "width": 1920
+  },
+  "protocol_version": "1.0",
+  "source": "device.camera",
+  "target": null,
+  "timestamp_utc": "2026-08-29T20:00:00.000000Z"
+}

@@ -1,0 +1,20 @@
+{
+  "causation_id": "20000000-0000-4000-8000-000000000002",
+  "correlation_id": "20000000-0000-4000-8000-000000000002",
+  "message_id": "50000000-0000-4000-8000-000000000005",
+  "message_name": "device.camera.get_status.error",
+  "message_type": "ERROR",
+  "metadata": {},
+  "payload": {
+    "details": {
+      "device_id": "cam_0"
+    },
+    "error_code": "ERR_DEVICE_UNAVAILABLE",
+    "error_message": "Camera device is disconnected or busy.",
+    "recoverable": true
+  },
+  "protocol_version": "1.0",
+  "source": "device.camera",
+  "target": "core.orchestrator",
+  "timestamp_utc": "2026-08-29T20:00:00.000000Z"
+}

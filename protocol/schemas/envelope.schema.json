@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "HoloMedMessageEnvelope",
+  "description": "Canonical message envelope format for all HoloMed AI inter-subsystem communication.",
+  "type": "object",
+  "required": [
+    "protocol_version",
+    "message_id",
+    "correlation_id",
+    "causation_id",
+    "message_type",
+    "message_name",
+    "source",
+    "target",
+    "timestamp_utc",
+    "payload",
+    "metadata"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "protocol_version": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+      "description": "Semantic protocol version in MAJOR.MINOR format without leading zeroes."
+    },
+    "message_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      "description": "Canonical lowercase UUIDv4 uniquely identifying this message."
+    },
+    "correlation_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+      "description": "Canonical lowercase UUID tracing the root operation/transaction."
+    },
+    "causation_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+      "description": "Canonical lowercase UUID of the direct parent message causing this message, or null for root messages."
+    },
+    "message_type": {
+      "type": "string",
+      "enum": [
+        "COMMAND",
+        "QUERY",
+        "EVENT",
+        "RESPONSE",
+        "ERROR"
+      ],
+      "description": "Message category classification."
+    },
+    "message_name": {
+      "type": "string",
+      "pattern": "^[a-z0-9_]+(\\.[a-z0-9_]+)*$",
+      "maxLength": 128,
+      "description": "Lowercase dot-separated semantic topic or action name."
+    },
+    "source": {
+      "type": "string",
+      "pattern": "^[a-z0-9_]+(\\.[a-z0-9_]+)*$",
+      "maxLength": 128,
+      "description": "Lowercase dot-separated identifier of the originating subsystem."
+    },
+    "target": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[a-z0-9_]+(\\.[a-z0-9_]+)*$",
+      "maxLength": 128,
+      "description": "Lowercase dot-separated destination identifier, or null for unaddressed broadcast messages."
+    },
+    "timestamp_utc": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{6}Z$",
+      "description": "Strict ISO 8601 UTC timestamp with 6-digit microsecond precision and trailing Z suffix."
+    },
+    "payload": {
+      "type": "object",
+      "description": "Domain-specific message payload object or ErrorPayload."
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Contextual protocol, tracing, and routing metadata."
+    }
+  },
+  "if": {
+    "properties": {
+      "message_type": {
+        "const": "ERROR"
+      }
+    }
+  },
+  "then": {
+    "properties": {
+      "payload": {
+        "$ref": "error.schema.json"
+      }
+    }
+  }
+}

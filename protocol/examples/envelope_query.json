@@ -1,0 +1,15 @@
+{
+  "causation_id": null,
+  "correlation_id": "20000000-0000-4000-8000-000000000002",
+  "message_id": "20000000-0000-4000-8000-000000000002",
+  "message_name": "device.camera.get_status",
+  "message_type": "QUERY",
+  "metadata": {},
+  "payload": {
+    "include_diagnostics": true
+  },
+  "protocol_version": "1.0",
+  "source": "core.orchestrator",
+  "target": "device.camera",
+  "timestamp_utc": "2026-08-29T20:00:00.000000Z"
+}

@@ -1,0 +1,22 @@
+{
+  "causation_id": null,
+  "correlation_id": "10000000-0000-4000-8000-000000000001",
+  "message_id": "10000000-0000-4000-8000-000000000001",
+  "message_name": "device.camera.start",
+  "message_type": "COMMAND",
+  "metadata": {
+    "trace_id": "trc_1001"
+  },
+  "payload": {
+    "device_id": "cam_0",
+    "fps": 60,
+    "resolution": [
+      1920,
+      1080
+    ]
+  },
+  "protocol_version": "1.0",
+  "source": "core.orchestrator",
+  "target": "device.camera",
+  "timestamp_utc": "2026-08-29T20:00:00.000000Z"
+}
