@@ -129,13 +129,11 @@ class RuntimeEngine:
             raise InvalidStateTransitionError(f"Cannot initialize engine from state: {self._state.name}")
 
         # 2. Phase 1: Candidate Construction and Validation (Zero Mutation on Failure)
+        # NOTE: No engine state mutation is permitted until Phase 2 atomic activation.
         candidate_epoch_id = self._next_epoch_id
         candidate_config = load_config() if config is None else config
         if not isinstance(candidate_config, AppConfig):
             raise ServiceLifecycleError(f"config must be AppConfig, got {type(candidate_config).__name__}")
-
-        if candidate_config.gemini_api_key:
-            self._secret_filter.set_secrets((candidate_config.gemini_api_key,))
 
         candidate_context = RuntimeContext(
             app_config=candidate_config,
@@ -181,6 +179,7 @@ class RuntimeEngine:
             candidate_service_states[name] = ServiceState.UNINITIALIZED
 
         # 3. Phase 2: Atomic Activation
+        # All Phase 1 validation has passed; now mutate engine state atomically.
         self._state = RuntimeState.INITIALIZING
         self._active_epoch = ConfigurationEpoch(
             epoch_id=candidate_epoch_id,
@@ -193,6 +192,9 @@ class RuntimeEngine:
         self._services = candidate_services
         self._service_states = candidate_service_states
         self._active_topology = candidate_topology
+        # Secret filter registration deferred to Phase 2 to maintain Phase 1 zero-mutation guarantee.
+        if candidate_config.gemini_api_key:
+            self._secret_filter.set_secrets((candidate_config.gemini_api_key,))
 
         # 4. Phase 3: Service Initialization in Topological Order
         initialized_services: list[str] = []
