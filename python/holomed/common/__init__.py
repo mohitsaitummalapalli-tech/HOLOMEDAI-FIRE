@@ -1,1 +1,5 @@
-"""HoloMed AI - Common primitives and utilities."""
+"""Foundational shared definitions for HoloMed AI."""
+
+from holomed.common.exceptions import HoloMedError
+
+__all__ = ["HoloMedError"]

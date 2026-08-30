@@ -1,1 +1,88 @@
-"""HoloMed AI - Runtime orchestration and lifecycle management."""
+"""Runtime orchestration, lifecycle management, and health subsystem for HoloMed AI."""
+
+from holomed.runtime.context import RuntimeContext, TraceContext
+from holomed.runtime.exceptions import (
+    HealthCheckError,
+    HoloMedRuntimeError,
+    InvalidStateTransitionError,
+    ResourceCleanupRequiredError,
+    ServiceDependencyCycleError,
+    ServiceDependencyError,
+    ServiceDependencyMissingError,
+    ServiceDuplicateRegistrationError,
+    ServiceInitializationError,
+    ServiceLifecycleError,
+    ServiceRegistrationError,
+    ServiceShutdownError,
+    ServiceStartupError,
+    ShutdownFailureRecord,
+)
+from holomed.runtime.health import HealthEvaluator
+from holomed.runtime.lifecycle import RuntimeEngine
+from holomed.runtime.logging import (
+    SecretFilter,
+    StructuredLogger,
+    configure_logging,
+    serialize_log_record,
+)
+from holomed.runtime.models import (
+    ConfigurationEpoch,
+    EpochDiagnosticRecord,
+    HealthStatus,
+    OwnedResourceSet,
+    ResourceHandle,
+    ResourceOwnershipRecord,
+    ResourceStatus,
+    RuntimeHealth,
+    RuntimeState,
+    ServiceHealth,
+)
+from holomed.runtime.service import (
+    IService,
+    ServiceFactory,
+    ServiceRegistration,
+    ServiceState,
+    compile_topology,
+    find_cycle,
+)
+
+__all__ = [
+    "ConfigurationEpoch",
+    "EpochDiagnosticRecord",
+    "HealthCheckError",
+    "HealthEvaluator",
+    "HealthStatus",
+    "HoloMedRuntimeError",
+    "IService",
+    "InvalidStateTransitionError",
+    "OwnedResourceSet",
+    "ResourceCleanupRequiredError",
+    "ResourceHandle",
+    "ResourceOwnershipRecord",
+    "ResourceStatus",
+    "RuntimeContext",
+    "RuntimeEngine",
+    "RuntimeHealth",
+    "RuntimeState",
+    "SecretFilter",
+    "ServiceDependencyCycleError",
+    "ServiceDependencyError",
+    "ServiceDependencyMissingError",
+    "ServiceDuplicateRegistrationError",
+    "ServiceFactory",
+    "ServiceHealth",
+    "ServiceInitializationError",
+    "ServiceLifecycleError",
+    "ServiceRegistration",
+    "ServiceRegistrationError",
+    "ServiceShutdownError",
+    "ServiceStartupError",
+    "ServiceState",
+    "ShutdownFailureRecord",
+    "StructuredLogger",
+    "TraceContext",
+    "compile_topology",
+    "configure_logging",
+    "find_cycle",
+    "serialize_log_record",
+]
