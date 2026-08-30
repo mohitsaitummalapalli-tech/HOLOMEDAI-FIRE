@@ -1,7 +1,7 @@
 # Runtime & Configuration Specification
 
-**Milestone**: M00.3 — Configuration & Runtime Foundation  
-**Status**: Contract Locked & Authoritative  
+**Milestone**: M00.3 — Configuration & Runtime Foundation
+**Status**: Contract Locked & Authoritative
 **Standard Compliance**: Standard Library Only (CPython 3.14.x)
 
 ---
