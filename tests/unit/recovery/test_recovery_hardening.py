@@ -62,6 +62,7 @@ class TestRecoveryHardening:
         secret_filter,
         logger,
         runtime_context,
+        make_recovery_capability,
     ) -> None:
         svc = _make_started_service(
             mock_dispatcher,
@@ -76,10 +77,12 @@ class TestRecoveryHardening:
         )
         cloud = make_fiducial_cloud()
         for i in range(MAX_ACTIVE_RECOVERY_SESSIONS):
-            svc.stage_candidate(f"session-{i:03d}", "plan-01", cloud)
+            cap = make_recovery_capability(svc, f"session-{i:03d}", seq=1)
+            svc.stage_candidate(f"session-{i:03d}", "plan-01", cloud, sequence_number=1, capability=cap)
 
+        cap_overflow = make_recovery_capability(svc, "session-overflow", seq=1)
         with pytest.raises(RecoveryCapacityError, match="Max active"):
-            svc.stage_candidate("session-overflow", "plan-01", cloud)
+            svc.stage_candidate("session-overflow", "plan-01", cloud, sequence_number=1, capability=cap_overflow)
 
     def test_reentrancy_protection(
         self,
@@ -92,6 +95,7 @@ class TestRecoveryHardening:
         secret_filter,
         logger,
         runtime_context,
+        make_recovery_capability,
     ) -> None:
         svc = _make_started_service(
             mock_dispatcher,
@@ -105,16 +109,17 @@ class TestRecoveryHardening:
             runtime_context,
         )
         cloud = make_fiducial_cloud()
+        cap = make_recovery_capability(svc, "session-01", seq=1)
 
         svc._in_transaction = True
         with pytest.raises(RecoveryLifecycleError, match="Reentrant"):
-            svc.stage_candidate("session-01", "plan-01", cloud)
+            svc.stage_candidate("session-01", "plan-01", cloud, sequence_number=1, capability=cap)
 
         with pytest.raises(RecoveryLifecycleError, match="Reentrant"):
-            svc.verify_candidate("session-01", make_recovery_authorization(), (0, 0, 0), (0, 0, 0))
+            svc.verify_candidate("session-01", make_recovery_authorization(), (0, 0, 0), (0, 0, 0), sequence_number=1, capability=cap)
 
         with pytest.raises(RecoveryLifecycleError, match="Reentrant"):
-            svc.activate_recovery("session-01")
+            svc.activate_recovery("session-01", sequence_number=1, capability=cap)
 
         svc._in_transaction = False
 

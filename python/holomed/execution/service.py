@@ -577,11 +577,19 @@ class ClinicalExecutionGatewayService(IService):
                 )
                 return res
 
+            cap = _create_execution_capability(
+                service_instance_id=id(self._navigation_service),
+                session_id=session_id,
+                action="TRAJECTORY_ALIGNMENT",
+                sequence_number=request.sequence_number,
+            )
             try:
                 self._navigation_service.bind_trajectory(
                     session_id=session_id,
                     trajectory_id=request.trajectory_id,
                     plan_trajectory=request.plan_trajectory,
+                    sequence_number=request.sequence_number,
+                    capability=cap,
                 )
             except Exception as e:
                 raw_err = str(e)
@@ -610,6 +618,8 @@ class ClinicalExecutionGatewayService(IService):
                         session_id=session_id,
                     )
                 return res
+            finally:
+                cap.invalidate()
 
             # 4. Step 4: Success Resolution
             exec_status = (
@@ -771,6 +781,12 @@ class ClinicalExecutionGatewayService(IService):
                 return res
 
             rec_status: Optional[RecoveryStatusRecord] = None
+            cap = _create_execution_capability(
+                service_instance_id=id(self._recovery_service),
+                session_id=session_id,
+                action="RECOVERY_REORIENTATION",
+                sequence_number=request.sequence_number,
+            )
             try:
                 op = request.recovery_operation.upper()
                 if op == "STAGE":
@@ -781,6 +797,8 @@ class ClinicalExecutionGatewayService(IService):
                         plan_id=request.plan_id,
                         cloud=request.cloud,
                         now_utc=request.now_utc,
+                        sequence_number=request.sequence_number,
+                        capability=cap,
                     )
                 elif op == "VERIFY":
                     if request.authorization is None or request.checkpoint_plan_mm is None or request.checkpoint_measured_mm is None:
@@ -791,6 +809,8 @@ class ClinicalExecutionGatewayService(IService):
                         checkpoint_plan_mm=request.checkpoint_plan_mm,
                         checkpoint_measured_mm=request.checkpoint_measured_mm,
                         now_utc=request.now_utc,
+                        sequence_number=request.sequence_number,
+                        capability=cap,
                     )
                 elif op == "ACTIVATE":
                     rec_status = self._recovery_service.activate_recovery(
@@ -801,6 +821,8 @@ class ClinicalExecutionGatewayService(IService):
                         registration_error_mm=request.registration_error_mm,
                         static_margin_mm=request.static_margin_mm,
                         now_utc=request.now_utc,
+                        sequence_number=request.sequence_number,
+                        capability=cap,
                     )
                 elif op == "RESET":
                     self._recovery_service.reset_recovery(session_id)
@@ -836,6 +858,8 @@ class ClinicalExecutionGatewayService(IService):
                         session_id=session_id,
                     )
                 return res
+            finally:
+                cap.invalidate()
 
             # 4. Step 4: Success Resolution
             exec_status = (

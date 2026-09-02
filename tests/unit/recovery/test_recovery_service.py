@@ -122,6 +122,7 @@ class TestRecoveryServiceStateMachine:
         secret_filter,
         logger,
         runtime_context,
+        make_recovery_capability,
     ) -> None:
         svc = _make_started_service(
             mock_dispatcher,
@@ -138,36 +139,46 @@ class TestRecoveryServiceStateMachine:
         auth = make_recovery_authorization()
 
         # Step 1: Stage candidate -> SOLVED
-        candidate = svc.stage_candidate("session-01", "plan-01", cloud)
-        assert candidate.session_id == "session-01"
+        cap1 = make_recovery_capability(svc, "session-01", seq=1)
+        candidate = svc.stage_candidate("session-01", "plan-01", cloud, capability=cap1)
+        assert candidate.plan_id == "plan-01"
         status = svc.get_recovery_status("session-01")
         assert status.state == RecoveryState.SOLVED
 
         # Step 2: Verify candidate -> VERIFIED
+        cap2 = make_recovery_capability(svc, "session-01", seq=2)
         snapshot = svc.verify_candidate(
             session_id="session-01",
             authorization=auth,
             checkpoint_plan_mm=(100.0, 0.0, 0.0),
             checkpoint_measured_mm=(100.4, 0.0, 0.0),
+            sequence_number=2,
+            capability=cap2,
         )
         assert snapshot.passed is True
         status = svc.get_recovery_status("session-01")
         assert status.state == RecoveryState.VERIFIED
 
         # Step 3: Activate recovery -> ACTIVATED
-        status_rec = svc.activate_recovery("session-01")
+        cap3 = make_recovery_capability(svc, "session-01", seq=3)
+        status_rec = svc.activate_recovery("session-01", sequence_number=3, capability=cap3)
         assert status_rec.state == RecoveryState.ACTIVATED
         assert status_rec.registration_revision == 1
 
         # Second recovery advances registration_revision to 2
-        svc.stage_candidate("session-01", "plan-01", cloud)
+        cap4 = make_recovery_capability(svc, "session-01", seq=4)
+        svc.stage_candidate("session-01", "plan-01", cloud, sequence_number=4, capability=cap4)
+        cap5 = make_recovery_capability(svc, "session-01", seq=5)
         svc.verify_candidate(
             session_id="session-01",
             authorization=auth,
             checkpoint_plan_mm=(100.0, 0.0, 0.0),
             checkpoint_measured_mm=(100.4, 0.0, 0.0),
+            sequence_number=5,
+            capability=cap5,
         )
-        status_rec2 = svc.activate_recovery("session-01")
+        cap6 = make_recovery_capability(svc, "session-01", seq=6)
+        status_rec2 = svc.activate_recovery("session-01", sequence_number=6, capability=cap6)
         assert status_rec2.registration_revision == 2
 
     def test_failed_state_is_latching(
@@ -181,6 +192,7 @@ class TestRecoveryServiceStateMachine:
         secret_filter,
         logger,
         runtime_context,
+        make_recovery_capability,
     ) -> None:
         svc = _make_started_service(
             mock_dispatcher,
@@ -194,36 +206,42 @@ class TestRecoveryServiceStateMachine:
             runtime_context,
         )
         cloud = make_fiducial_cloud()
-        svc.stage_candidate("session-01", "plan-01", cloud)
+        cap1 = make_recovery_capability(svc, "session-01", seq=1)
+        svc.stage_candidate("session-01", "plan-01", cloud, capability=cap1)
         auth = make_recovery_authorization()
 
         # Fail verification with large drift
+        cap2 = make_recovery_capability(svc, "session-01", seq=2)
         with pytest.raises(Exception):
             svc.verify_candidate(
                 session_id="session-01",
                 authorization=auth,
                 checkpoint_plan_mm=(100.0, 0.0, 0.0),
                 checkpoint_measured_mm=(105.0, 0.0, 0.0),  # 5.0 mm drift > 1.5 mm
+                sequence_number=2,
+                capability=cap2,
             )
 
         status = svc.get_recovery_status("session-01")
         assert status.state == RecoveryState.FAILED
 
         # In FAILED state, subsequent calls raise RecoveryLifecycleError (latching!)
+        cap3 = make_recovery_capability(svc, "session-01", seq=3)
         with pytest.raises(RecoveryLifecycleError, match="latching state FAILED"):
-            svc.stage_candidate("session-01", "plan-01", cloud)
+            svc.stage_candidate("session-01", "plan-01", cloud, sequence_number=3, capability=cap3)
 
         # Resetting session permits recovery restart
         svc.reset_session("session-01")
         assert svc.get_recovery_status("session-01").state == RecoveryState.IDLE
-        svc.stage_candidate("session-01", "plan-01", cloud)
+        cap4 = make_recovery_capability(svc, "session-01", seq=4)
+        svc.stage_candidate("session-01", "plan-01", cloud, sequence_number=4, capability=cap4)
         assert svc.get_recovery_status("session-01").state == RecoveryState.SOLVED
 
 
 class TestRecoveryServiceRoutes:
-    """Tests for dispatcher command and query route handlers."""
+    """Tests for dispatcher route hardening and status query."""
 
-    def test_stage_and_verify_command_routes(
+    def test_routes_hardened_and_status_query(
         self,
         mock_dispatcher,
         mock_registration_service,
@@ -235,77 +253,36 @@ class TestRecoveryServiceRoutes:
         logger,
         runtime_context,
     ) -> None:
-        svc = _make_started_service(
-            mock_dispatcher,
-            mock_registration_service,
-            mock_drift_service,
-            mock_proximity_service,
-            mock_navigation_service,
-            mock_persistence_service,
-            secret_filter,
-            logger,
-            runtime_context,
+        # Verify that initialize only registers recovery.status.get query
+        from holomed.core.dispatcher import MessageDispatcher
+        real_disp = MessageDispatcher()
+        real_disp.initialize(runtime_context)
+        svc = RecoveryService(
+            dispatcher=real_disp,
+            registration_service=mock_registration_service,
+            drift_service=mock_drift_service,
+            proximity_service=mock_proximity_service,
+            navigation_service=mock_navigation_service,
+            persistence_service=mock_persistence_service,
+            secret_filter=secret_filter,
+            logger=logger,
         )
+        svc.initialize(runtime_context)
+        real_disp.start()
+        svc.start()
 
-        # 1. recovery.stage command
-        stage_cmd = create_command(
-            message_name="recovery.stage",
-            source="test",
-            target="recovery_service",
-            payload={
-                "session_id": "session-01",
-                "plan_id": "plan-01",
-                "fiducials": [
-                    {"fiducial_id": "f1", "planned_point_mm": [100.0, 0.0, 0.0], "measured_point_mm": [100.2, 0.0, 0.0]},
-                    {"fiducial_id": "f2", "planned_point_mm": [0.0, 100.0, 0.0], "measured_point_mm": [0.0, 100.2, 0.0]},
-                    {"fiducial_id": "f3", "planned_point_mm": [0.0, -100.0, 0.0], "measured_point_mm": [0.0, -100.2, 0.0]},
-                    {"fiducial_id": "f4", "planned_point_mm": [0.0, 0.0, 100.0], "measured_point_mm": [0.0, 0.0, 100.2]},
-                ],
-            },
-        )
-        resp = svc.handle_stage_command(stage_cmd)
-        assert resp.payload["state"] == "SOLVED"
+        # Check dispatcher registrations
+        assert real_disp.subscription_registry.lookup_query("recovery.status.get") is not None
+        assert real_disp.subscription_registry.lookup_command("recovery.stage") is None
+        assert real_disp.subscription_registry.lookup_command("recovery.verify") is None
+        assert real_disp.subscription_registry.lookup_command("recovery.activate") is None
 
-        # 2. recovery.verify command
-        auth = make_recovery_authorization()
-        verify_cmd = create_command(
-            message_name="recovery.verify",
-            source="test",
-            target="recovery_service",
-            payload={
-                "session_id": "session-01",
-                "authorization": {
-                    "operator_id": auth.operator_id,
-                    "rationale": auth.rationale,
-                    "timestamp_utc": auth.timestamp_utc,
-                    "sequence_number": auth.sequence_number,
-                    "authorization_reference": auth.authorization_reference,
-                },
-                "checkpoint_plan_mm": [100.0, 0.0, 0.0],
-                "checkpoint_measured_mm": [100.3, 0.0, 0.0],
-            },
-        )
-        resp = svc.handle_verify_command(verify_cmd)
-        assert resp.payload["state"] == "VERIFIED"
-
-        # 3. recovery.activate command
-        act_cmd = create_command(
-            message_name="recovery.activate",
-            source="test",
-            target="recovery_service",
-            payload={"session_id": "session-01"},
-        )
-        resp = svc.handle_activate_command(act_cmd)
-        assert resp.payload["state"] == "ACTIVATED"
-        assert resp.payload["registration_revision"] == 1
-
-        # 4. recovery.status.get query
+        # recovery.status.get query works
         qry = create_query(
             message_name="recovery.status.get",
             source="test",
             target="recovery_service",
             payload={"session_id": "session-01"},
         )
-        resp = svc.handle_get_status_query(qry)
-        assert resp.payload["state"] == "ACTIVATED"
-        assert resp.payload["registration_revision"] == 1
+        resp = real_disp.dispatch(qry)
+        assert resp.payload["state"] == "IDLE"

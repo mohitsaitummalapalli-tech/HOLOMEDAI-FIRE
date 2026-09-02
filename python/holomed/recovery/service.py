@@ -30,6 +30,7 @@ from holomed.recovery.constants import (
 from holomed.recovery.evaluator import RecoveryEvaluator
 from holomed.recovery.exceptions import (
     RecoveryActivationError,
+    RecoveryAuthorizationError,
     RecoveryCapacityError,
     RecoveryConsistencyError,
     RecoveryLifecycleError,
@@ -138,11 +139,8 @@ class RecoveryService(IService):
         for res_id in STRUCTURAL_RESOURCE_IDS:
             self._resources.acquire(res_id)
 
-        # Register Dispatcher Routes
+        # Register Dispatcher Routes (M22: recovery.stage/verify/activate removed; query retained)
         if self._dispatcher is not None:
-            self._dispatcher.register_command_handler("recovery.stage", self.handle_stage_command, self.name)
-            self._dispatcher.register_command_handler("recovery.verify", self.handle_verify_command, self.name)
-            self._dispatcher.register_command_handler("recovery.activate", self.handle_activate_command, self.name)
             self._dispatcher.register_query_handler("recovery.status.get", self.handle_get_status_query, self.name)
 
         self._state = ServiceState.INITIALIZED
@@ -233,10 +231,37 @@ class RecoveryService(IService):
         plan_id: str,
         cloud: FiducialCloud,
         now_utc: Optional[str] = None,
+        sequence_number: int = 1,
+        capability: Any = None,
     ) -> StagedRegistrationCandidate:
         """Stage candidate fiducials and solve candidate transform entirely in isolated M17 memory."""
         if self._state != ServiceState.STARTED:
             raise RecoveryLifecycleError(f"Cannot stage candidate in state {self._state.name}")
+
+        # Strict execution capability verification
+        if capability is None:
+            raise RecoveryAuthorizationError(
+                "Direct uncoordinated call to stage_candidate rejected: missing execution capability"
+            )
+        if not getattr(capability, "is_active", False):
+            raise RecoveryAuthorizationError("Execution capability is inactive, expired, or replayed")
+        if getattr(capability, "session_id", None) != session_id:
+            raise RecoveryAuthorizationError(
+                f"Capability session mismatch: expected {session_id!r}, got {getattr(capability, 'session_id', None)!r}"
+            )
+        if getattr(capability, "action", None) != "RECOVERY_REORIENTATION":
+            raise RecoveryAuthorizationError(
+                f"Capability action mismatch: expected 'RECOVERY_REORIENTATION', got {getattr(capability, 'action', None)!r}"
+            )
+        if getattr(capability, "sequence_number", None) != sequence_number:
+            raise RecoveryAuthorizationError(
+                f"Capability sequence mismatch: expected {sequence_number}, got {getattr(capability, 'sequence_number', None)}"
+            )
+        if getattr(capability, "service_instance_id", None) != id(self):
+            raise RecoveryAuthorizationError(
+                f"Capability service binding mismatch: expected {id(self)}, got {getattr(capability, 'service_instance_id', None)}"
+            )
+
         if self._in_transaction:
             raise RecoveryLifecycleError("Reentrant call to stage_candidate rejected")
 
@@ -294,10 +319,37 @@ class RecoveryService(IService):
         checkpoint_plan_mm: Tuple[float, float, float],
         checkpoint_measured_mm: Tuple[float, float, float],
         now_utc: Optional[str] = None,
+        sequence_number: int = 1,
+        capability: Any = None,
     ) -> RecoveryVerificationSnapshot:
         """Verify physical checkpoint drift against the staged candidate transform."""
         if self._state != ServiceState.STARTED:
             raise RecoveryLifecycleError(f"Cannot verify candidate in state {self._state.name}")
+
+        # Strict execution capability verification
+        if capability is None:
+            raise RecoveryAuthorizationError(
+                "Direct uncoordinated call to verify_candidate rejected: missing execution capability"
+            )
+        if not getattr(capability, "is_active", False):
+            raise RecoveryAuthorizationError("Execution capability is inactive, expired, or replayed")
+        if getattr(capability, "session_id", None) != session_id:
+            raise RecoveryAuthorizationError(
+                f"Capability session mismatch: expected {session_id!r}, got {getattr(capability, 'session_id', None)!r}"
+            )
+        if getattr(capability, "action", None) != "RECOVERY_REORIENTATION":
+            raise RecoveryAuthorizationError(
+                f"Capability action mismatch: expected 'RECOVERY_REORIENTATION', got {getattr(capability, 'action', None)!r}"
+            )
+        if getattr(capability, "sequence_number", None) != sequence_number:
+            raise RecoveryAuthorizationError(
+                f"Capability sequence mismatch: expected {sequence_number}, got {getattr(capability, 'sequence_number', None)}"
+            )
+        if getattr(capability, "service_instance_id", None) != id(self):
+            raise RecoveryAuthorizationError(
+                f"Capability service binding mismatch: expected {id(self)}, got {getattr(capability, 'service_instance_id', None)}"
+            )
+
         if self._in_transaction:
             raise RecoveryLifecycleError("Reentrant call to verify_candidate rejected")
 
@@ -358,6 +410,8 @@ class RecoveryService(IService):
         registration_error_mm: float = 0.5,
         static_margin_mm: float = 0.0,
         now_utc: Optional[str] = None,
+        sequence_number: int = 1,
+        capability: Any = None,
     ) -> RecoveryStatusRecord:
         """Perform controlled sequential activation into M13 and rebind M16/M15/M14.
 
@@ -367,6 +421,31 @@ class RecoveryService(IService):
         """
         if self._state != ServiceState.STARTED:
             raise RecoveryLifecycleError(f"Cannot activate recovery in state {self._state.name}")
+
+        # Strict execution capability verification
+        if capability is None:
+            raise RecoveryAuthorizationError(
+                "Direct uncoordinated call to activate_recovery rejected: missing execution capability"
+            )
+        if not getattr(capability, "is_active", False):
+            raise RecoveryAuthorizationError("Execution capability is inactive, expired, or replayed")
+        if getattr(capability, "session_id", None) != session_id:
+            raise RecoveryAuthorizationError(
+                f"Capability session mismatch: expected {session_id!r}, got {getattr(capability, 'session_id', None)!r}"
+            )
+        if getattr(capability, "action", None) != "RECOVERY_REORIENTATION":
+            raise RecoveryAuthorizationError(
+                f"Capability action mismatch: expected 'RECOVERY_REORIENTATION', got {getattr(capability, 'action', None)!r}"
+            )
+        if getattr(capability, "sequence_number", None) != sequence_number:
+            raise RecoveryAuthorizationError(
+                f"Capability sequence mismatch: expected {sequence_number}, got {getattr(capability, 'sequence_number', None)}"
+            )
+        if getattr(capability, "service_instance_id", None) != id(self):
+            raise RecoveryAuthorizationError(
+                f"Capability service binding mismatch: expected {id(self)}, got {getattr(capability, 'service_instance_id', None)}"
+            )
+
         if self._in_transaction:
             raise RecoveryLifecycleError("Reentrant call to activate_recovery rejected")
 
@@ -432,11 +511,24 @@ class RecoveryService(IService):
 
                 # 4. Re-bind M14 Navigation (Transitions to IDLE)
                 if self._navigation_service is not None and plan_trajectory is not None:
-                    self._navigation_service.bind_trajectory(
+                    from holomed.execution._capability import _create_execution_capability
+
+                    cap_nav = _create_execution_capability(
+                        service_instance_id=id(self._navigation_service),
                         session_id=session_id,
-                        trajectory_id=plan_trajectory.trajectory_id,
-                        plan_trajectory=plan_trajectory,
+                        action="TRAJECTORY_ALIGNMENT",
+                        sequence_number=sequence_number,
                     )
+                    try:
+                        self._navigation_service.bind_trajectory(
+                            session_id=session_id,
+                            trajectory_id=plan_trajectory.trajectory_id,
+                            plan_trajectory=plan_trajectory,
+                            sequence_number=sequence_number,
+                            capability=cap_nav,
+                        )
+                    finally:
+                        cap_nav.invalidate()
 
                 # 5. Post-Activation Consistency Verification
                 RecoveryEvaluator.verify_post_activation_consistency(

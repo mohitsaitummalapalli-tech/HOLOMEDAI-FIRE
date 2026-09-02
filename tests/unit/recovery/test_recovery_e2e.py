@@ -31,6 +31,7 @@ class TestRecoveryE2E:
         secret_filter,
         logger,
         runtime_context,
+        make_recovery_capability,
     ) -> None:
         """Full surgical recovery scenario:
         1. Initialize & start RecoveryService.
@@ -58,7 +59,8 @@ class TestRecoveryE2E:
 
         # Step 1: Stage candidate fiducials
         cloud = make_fiducial_cloud(offset_mm=(1.0, 2.0, 0.5), jitter_mm=0.1)
-        candidate = svc.stage_candidate("session-01", "plan-01", cloud)
+        cap1 = make_recovery_capability(svc, "session-01", seq=1)
+        candidate = svc.stage_candidate("session-01", "plan-01", cloud, sequence_number=1, capability=cap1)
         assert candidate.quality_report.fre_rms_mm <= 1.5
         assert svc.get_recovery_status("session-01").state == RecoveryState.SOLVED
 
@@ -69,18 +71,22 @@ class TestRecoveryE2E:
             sequence_number=1,
             authorization_reference="REF-OR4-20250101",
         )
+        cap2 = make_recovery_capability(svc, "session-01", seq=2)
         snapshot = svc.verify_candidate(
             session_id="session-01",
             authorization=auth,
             checkpoint_plan_mm=(100.0, 0.0, 0.0),
             checkpoint_measured_mm=(101.2, 2.0, 0.5),  # drift = 0.2 mm <= 1.5 mm
+            sequence_number=2,
+            capability=cap2,
         )
         assert snapshot.passed is True
         assert snapshot.measured_drift_error_mm <= 1.5
         assert svc.get_recovery_status("session-01").state == RecoveryState.VERIFIED
 
         # Step 3: Activate recovery
-        status_rec = svc.activate_recovery("session-01")
+        cap3 = make_recovery_capability(svc, "session-01", seq=3)
+        status_rec = svc.activate_recovery("session-01", sequence_number=3, capability=cap3)
         assert status_rec.state == RecoveryState.ACTIVATED
         assert status_rec.registration_revision == 1
 

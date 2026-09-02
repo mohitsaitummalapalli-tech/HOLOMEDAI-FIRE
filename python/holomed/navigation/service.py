@@ -227,10 +227,42 @@ class NavigationService(IService):
     # Core Navigation Operations
     # -------------------------------------------------------------------------
 
-    def bind_trajectory(self, session_id: str, trajectory_id: str, plan_trajectory: TrajectoryPlan) -> None:
-        """Bind a surgical plan trajectory to a session using verified M13 registration."""
+    def bind_trajectory(
+        self,
+        session_id: str,
+        trajectory_id: str,
+        plan_trajectory: TrajectoryPlan,
+        sequence_number: int = 1,
+        capability: Any = None,
+    ) -> None:
+        """Bind a surgical plan trajectory to a session using verified M13 registration under an authoritative capability."""
         if self._state != ServiceState.STARTED:
             raise NavigationLifecycleError(f"Cannot bind trajectory in state {self._state.name}")
+
+        # Strict execution capability verification
+        if capability is None:
+            raise NavigationAuthorizationError(
+                "Direct uncoordinated call to bind_trajectory rejected: missing execution capability"
+            )
+        if not getattr(capability, "is_active", False):
+            raise NavigationAuthorizationError("Execution capability is inactive, expired, or replayed")
+        if getattr(capability, "session_id", None) != session_id:
+            raise NavigationAuthorizationError(
+                f"Capability session mismatch: expected {session_id!r}, got {getattr(capability, 'session_id', None)!r}"
+            )
+        if getattr(capability, "action", None) != "TRAJECTORY_ALIGNMENT":
+            raise NavigationAuthorizationError(
+                f"Capability action mismatch: expected 'TRAJECTORY_ALIGNMENT', got {getattr(capability, 'action', None)!r}"
+            )
+        if getattr(capability, "sequence_number", None) != sequence_number:
+            raise NavigationAuthorizationError(
+                f"Capability sequence mismatch: expected {sequence_number}, got {getattr(capability, 'sequence_number', None)}"
+            )
+        if getattr(capability, "service_instance_id", None) != id(self):
+            raise NavigationAuthorizationError(
+                f"Capability service binding mismatch: expected {id(self)}, got {getattr(capability, 'service_instance_id', None)}"
+            )
+
         if self._in_transaction:
             raise NavigationLifecycleError("Reentrant call to bind_trajectory rejected")
 
@@ -289,6 +321,10 @@ class NavigationService(IService):
         if getattr(capability, "sequence_number", None) != pose.sequence_number:
             raise NavigationAuthorizationError(
                 f"Capability sequence mismatch: expected {pose.sequence_number}, got {getattr(capability, 'sequence_number', None)}"
+            )
+        if getattr(capability, "service_instance_id", None) != id(self):
+            raise NavigationAuthorizationError(
+                f"Capability service binding mismatch: expected {id(self)}, got {getattr(capability, 'service_instance_id', None)}"
             )
 
         if self._in_transaction:
@@ -359,6 +395,10 @@ class NavigationService(IService):
         if getattr(capability, "action", None) != "TOOL_NAVIGATION":
             raise NavigationAuthorizationError(
                 f"Capability action mismatch: expected 'TOOL_NAVIGATION', got {getattr(capability, 'action', None)!r}"
+            )
+        if getattr(capability, "service_instance_id", None) != id(self):
+            raise NavigationAuthorizationError(
+                f"Capability service binding mismatch: expected {id(self)}, got {getattr(capability, 'service_instance_id', None)}"
             )
 
         if self._in_transaction:

@@ -133,3 +133,18 @@ def make_nav_capability():
         )
 
     return _factory
+
+
+@pytest.fixture
+def make_traj_capability():
+    from holomed.execution._capability import _create_execution_capability
+
+    def _factory(srv, session_id, seq=1):
+        return _create_execution_capability(
+            service_instance_id=id(srv),
+            session_id=session_id,
+            action="TRAJECTORY_ALIGNMENT",
+            sequence_number=seq,
+        )
+
+    return _factory

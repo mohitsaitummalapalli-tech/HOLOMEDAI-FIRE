@@ -103,6 +103,7 @@ class TestRecoveryIllegalTransitions:
         secret_filter,
         logger,
         runtime_context,
+        make_recovery_capability,
     ) -> None:
         svc = _make_started_service(
             mock_dispatcher,
@@ -116,17 +117,19 @@ class TestRecoveryIllegalTransitions:
             runtime_context,
         )
         auth = make_recovery_authorization()
+        cap = make_recovery_capability(svc, "session-01", seq=1)
 
         if invalid_action == "verify_from_idle":
             with pytest.raises(RecoveryLifecycleError, match="must be in SOLVED state"):
-                svc.verify_candidate("session-01", auth, (0, 0, 0), (0, 0, 0))
+                svc.verify_candidate("session-01", auth, (0, 0, 0), (0, 0, 0), sequence_number=1, capability=cap)
         elif invalid_action == "activate_from_idle":
             with pytest.raises(RecoveryLifecycleError, match="must be in VERIFIED state"):
-                svc.activate_recovery("session-01")
+                svc.activate_recovery("session-01", sequence_number=1, capability=cap)
         elif invalid_action == "activate_from_staged":
-            svc.stage_candidate("session-01", "plan-01", make_fiducial_cloud())
+            svc.stage_candidate("session-01", "plan-01", make_fiducial_cloud(), sequence_number=1, capability=cap)
+            cap2 = make_recovery_capability(svc, "session-01", seq=2)
             with pytest.raises(RecoveryLifecycleError, match="must be in VERIFIED state"):
-                svc.activate_recovery("session-01")
+                svc.activate_recovery("session-01", sequence_number=2, capability=cap2)
 
     def test_blocked_state_latching(
         self,
@@ -139,6 +142,7 @@ class TestRecoveryIllegalTransitions:
         secret_filter,
         logger,
         runtime_context,
+        make_recovery_capability,
     ) -> None:
         svc = _make_started_service(
             mock_dispatcher,
@@ -153,9 +157,10 @@ class TestRecoveryIllegalTransitions:
         )
         # Directly set state to BLOCKED
         svc._session_states["session-blocked"] = RecoveryState.BLOCKED
+        cap = make_recovery_capability(svc, "session-blocked", seq=1)
 
         with pytest.raises(RecoveryLifecycleError, match="latching state BLOCKED"):
-            svc.stage_candidate("session-blocked", "plan-01", make_fiducial_cloud())
+            svc.stage_candidate("session-blocked", "plan-01", make_fiducial_cloud(), sequence_number=1, capability=cap)
 
 
 class TestRecoveryMultiSessionIsolation:
@@ -172,6 +177,7 @@ class TestRecoveryMultiSessionIsolation:
         secret_filter,
         logger,
         runtime_context,
+        make_recovery_capability,
     ) -> None:
         svc = _make_started_service(
             mock_dispatcher,
@@ -188,8 +194,11 @@ class TestRecoveryMultiSessionIsolation:
         cloud_s1 = make_fiducial_cloud(offset_mm=(1.0, 0.0, 0.0))
         cloud_s2 = make_fiducial_cloud(offset_mm=(0.0, 2.0, 0.0))
 
-        c1 = svc.stage_candidate("session-01", "plan-01", cloud_s1)
-        c2 = svc.stage_candidate("session-02", "plan-02", cloud_s2)
+        cap1 = make_recovery_capability(svc, "session-01", seq=1)
+        cap2 = make_recovery_capability(svc, "session-02", seq=1)
+
+        c1 = svc.stage_candidate("session-01", "plan-01", cloud_s1, sequence_number=1, capability=cap1)
+        c2 = svc.stage_candidate("session-02", "plan-02", cloud_s2, sequence_number=1, capability=cap2)
 
         assert svc.get_recovery_status("session-01").state == RecoveryState.SOLVED
         assert svc.get_recovery_status("session-02").state == RecoveryState.SOLVED
@@ -198,7 +207,8 @@ class TestRecoveryMultiSessionIsolation:
 
         # Verify session 1 only
         auth1 = make_recovery_authorization()
-        svc.verify_candidate("session-01", auth1, (100.0, 0.0, 0.0), (101.0, 0.0, 0.0))
+        cap3 = make_recovery_capability(svc, "session-01", seq=2)
+        svc.verify_candidate("session-01", auth1, (100.0, 0.0, 0.0), (101.0, 0.0, 0.0), sequence_number=2, capability=cap3)
 
         assert svc.get_recovery_status("session-01").state == RecoveryState.VERIFIED
         assert svc.get_recovery_status("session-02").state == RecoveryState.SOLVED
@@ -218,20 +228,24 @@ class TestRecoveryPartialActivationFailures:
         secret_filter,
         logger,
         runtime_context,
+        make_recovery_capability,
     ) -> None:
         svc = _make_started_service(
             mock_dispatcher, mock_registration_service, mock_drift_service,
             mock_proximity_service, mock_navigation_service, mock_persistence_service,
             secret_filter, logger, runtime_context,
         )
-        svc.stage_candidate("session-01", "plan-01", make_fiducial_cloud())
-        svc.verify_candidate("session-01", make_recovery_authorization(), (100, 0, 0), (100, 0, 0))
+        cap1 = make_recovery_capability(svc, "session-01", seq=1)
+        svc.stage_candidate("session-01", "plan-01", make_fiducial_cloud(), sequence_number=1, capability=cap1)
+        cap2 = make_recovery_capability(svc, "session-01", seq=2)
+        svc.verify_candidate("session-01", make_recovery_authorization(), (100, 0, 0), (100, 0, 0), sequence_number=2, capability=cap2)
 
         mock_drift_service.bind_landmarks.side_effect = RuntimeError("Drift bind crashed")
         mock_dispatcher.dispatch.reset_mock()
 
+        cap3 = make_recovery_capability(svc, "session-01", seq=3)
         with pytest.raises(Exception):
-            svc.activate_recovery("session-01", landmarks=(MagicMock(),))
+            svc.activate_recovery("session-01", landmarks=(MagicMock(),), sequence_number=3, capability=cap3)
 
         assert svc.get_recovery_status("session-01").state == RecoveryState.FAILED
         event_names = [call[0][0].message_name for call in mock_dispatcher.dispatch.call_args_list]
@@ -249,20 +263,24 @@ class TestRecoveryPartialActivationFailures:
         secret_filter,
         logger,
         runtime_context,
+        make_recovery_capability,
     ) -> None:
         svc = _make_started_service(
             mock_dispatcher, mock_registration_service, mock_drift_service,
             mock_proximity_service, mock_navigation_service, mock_persistence_service,
             secret_filter, logger, runtime_context,
         )
-        svc.stage_candidate("session-01", "plan-01", make_fiducial_cloud())
-        svc.verify_candidate("session-01", make_recovery_authorization(), (100, 0, 0), (100, 0, 0))
+        cap1 = make_recovery_capability(svc, "session-01", seq=1)
+        svc.stage_candidate("session-01", "plan-01", make_fiducial_cloud(), sequence_number=1, capability=cap1)
+        cap2 = make_recovery_capability(svc, "session-01", seq=2)
+        svc.verify_candidate("session-01", make_recovery_authorization(), (100, 0, 0), (100, 0, 0), sequence_number=2, capability=cap2)
 
         mock_proximity_service.bind_zones.side_effect = RuntimeError("Proximity bind crashed")
         mock_dispatcher.dispatch.reset_mock()
 
+        cap3 = make_recovery_capability(svc, "session-01", seq=3)
         with pytest.raises(Exception):
-            svc.activate_recovery("session-01", zones=(MagicMock(),))
+            svc.activate_recovery("session-01", zones=(MagicMock(),), sequence_number=3, capability=cap3)
 
         assert svc.get_recovery_status("session-01").state == RecoveryState.FAILED
         event_names = [call[0][0].message_name for call in mock_dispatcher.dispatch.call_args_list]
@@ -280,20 +298,24 @@ class TestRecoveryPartialActivationFailures:
         secret_filter,
         logger,
         runtime_context,
+        make_recovery_capability,
     ) -> None:
         svc = _make_started_service(
             mock_dispatcher, mock_registration_service, mock_drift_service,
             mock_proximity_service, mock_navigation_service, mock_persistence_service,
             secret_filter, logger, runtime_context,
         )
-        svc.stage_candidate("session-01", "plan-01", make_fiducial_cloud())
-        svc.verify_candidate("session-01", make_recovery_authorization(), (100, 0, 0), (100, 0, 0))
+        cap1 = make_recovery_capability(svc, "session-01", seq=1)
+        svc.stage_candidate("session-01", "plan-01", make_fiducial_cloud(), sequence_number=1, capability=cap1)
+        cap2 = make_recovery_capability(svc, "session-01", seq=2)
+        svc.verify_candidate("session-01", make_recovery_authorization(), (100, 0, 0), (100, 0, 0), sequence_number=2, capability=cap2)
 
         mock_navigation_service.bind_trajectory.side_effect = RuntimeError("Navigation bind crashed")
         mock_dispatcher.dispatch.reset_mock()
 
+        cap3 = make_recovery_capability(svc, "session-01", seq=3)
         with pytest.raises(Exception):
-            svc.activate_recovery("session-01", plan_trajectory=MagicMock())
+            svc.activate_recovery("session-01", plan_trajectory=MagicMock(), sequence_number=3, capability=cap3)
 
         assert svc.get_recovery_status("session-01").state == RecoveryState.FAILED
         event_names = [call[0][0].message_name for call in mock_dispatcher.dispatch.call_args_list]
@@ -311,21 +333,25 @@ class TestRecoveryPartialActivationFailures:
         secret_filter,
         logger,
         runtime_context,
+        make_recovery_capability,
     ) -> None:
         svc = _make_started_service(
             mock_dispatcher, mock_registration_service, mock_drift_service,
             mock_proximity_service, mock_navigation_service, mock_persistence_service,
             secret_filter, logger, runtime_context,
         )
-        svc.stage_candidate("session-01", "plan-01", make_fiducial_cloud())
-        svc.verify_candidate("session-01", make_recovery_authorization(), (100, 0, 0), (100, 0, 0))
+        cap1 = make_recovery_capability(svc, "session-01", seq=1)
+        svc.stage_candidate("session-01", "plan-01", make_fiducial_cloud(), sequence_number=1, capability=cap1)
+        cap2 = make_recovery_capability(svc, "session-01", seq=2)
+        svc.verify_candidate("session-01", make_recovery_authorization(), (100, 0, 0), (100, 0, 0), sequence_number=2, capability=cap2)
 
         # Make post-activation drift service return unready state
         mock_drift_service.get_drift_status.return_value.state.value = "WARNING"
         mock_dispatcher.dispatch.reset_mock()
 
+        cap3 = make_recovery_capability(svc, "session-01", seq=3)
         with pytest.raises(Exception):
-            svc.activate_recovery("session-01", landmarks=(MagicMock(),))
+            svc.activate_recovery("session-01", landmarks=(MagicMock(),), sequence_number=3, capability=cap3)
 
         assert svc.get_recovery_status("session-01").state == RecoveryState.FAILED
         event_names = [call[0][0].message_name for call in mock_dispatcher.dispatch.call_args_list]
@@ -343,6 +369,7 @@ class TestRecoveryPartialActivationFailures:
         secret_filter,
         logger,
         runtime_context,
+        make_recovery_capability,
     ) -> None:
         svc = _make_started_service(
             mock_dispatcher, mock_registration_service, mock_drift_service,
@@ -350,26 +377,35 @@ class TestRecoveryPartialActivationFailures:
             secret_filter, logger, runtime_context,
         )
         # 1. Success -> Revision 1
-        svc.stage_candidate("session-01", "plan-01", make_fiducial_cloud())
-        svc.verify_candidate("session-01", make_recovery_authorization(), (100, 0, 0), (100, 0, 0))
-        rec1 = svc.activate_recovery("session-01")
+        cap1 = make_recovery_capability(svc, "session-01", seq=1)
+        svc.stage_candidate("session-01", "plan-01", make_fiducial_cloud(), sequence_number=1, capability=cap1)
+        cap2 = make_recovery_capability(svc, "session-01", seq=2)
+        svc.verify_candidate("session-01", make_recovery_authorization(), (100, 0, 0), (100, 0, 0), sequence_number=2, capability=cap2)
+        cap3 = make_recovery_capability(svc, "session-01", seq=3)
+        rec1 = svc.activate_recovery("session-01", sequence_number=3, capability=cap3)
         assert rec1.registration_revision == 1
 
         # 2. Failure on next cycle -> State FAILED, revision stays 1
-        svc.stage_candidate("session-01", "plan-01", make_fiducial_cloud())
-        svc.verify_candidate("session-01", make_recovery_authorization(), (100, 0, 0), (100, 0, 0))
+        cap4 = make_recovery_capability(svc, "session-01", seq=4)
+        svc.stage_candidate("session-01", "plan-01", make_fiducial_cloud(), sequence_number=4, capability=cap4)
+        cap5 = make_recovery_capability(svc, "session-01", seq=5)
+        svc.verify_candidate("session-01", make_recovery_authorization(), (100, 0, 0), (100, 0, 0), sequence_number=5, capability=cap5)
         mock_drift_service.bind_landmarks.side_effect = RuntimeError("Crash")
+        cap6 = make_recovery_capability(svc, "session-01", seq=6)
         with pytest.raises(Exception):
-            svc.activate_recovery("session-01", landmarks=(MagicMock(),))
+            svc.activate_recovery("session-01", landmarks=(MagicMock(),), sequence_number=6, capability=cap6)
         assert svc.get_recovery_status("session-01").registration_revision == 1
         assert svc.get_recovery_status("session-01").state == RecoveryState.FAILED
 
         # 3. Reset and retry -> Success -> Revision 2 (monotonic, no duplicate reuse)
         mock_drift_service.bind_landmarks.side_effect = None
         svc.reset_session("session-01")
-        svc.stage_candidate("session-01", "plan-01", make_fiducial_cloud())
-        svc.verify_candidate("session-01", make_recovery_authorization(), (100, 0, 0), (100, 0, 0))
-        rec2 = svc.activate_recovery("session-01")
+        cap7 = make_recovery_capability(svc, "session-01", seq=7)
+        svc.stage_candidate("session-01", "plan-01", make_fiducial_cloud(), sequence_number=7, capability=cap7)
+        cap8 = make_recovery_capability(svc, "session-01", seq=8)
+        svc.verify_candidate("session-01", make_recovery_authorization(), (100, 0, 0), (100, 0, 0), sequence_number=8, capability=cap8)
+        cap9 = make_recovery_capability(svc, "session-01", seq=9)
+        rec2 = svc.activate_recovery("session-01", sequence_number=9, capability=cap9)
         assert rec2.registration_revision == 2
 
 
@@ -387,6 +423,7 @@ class TestRecoveryInvariants:
         secret_filter,
         logger,
         runtime_context,
+        make_recovery_capability,
     ) -> None:
         svc = _make_started_service(
             mock_dispatcher,
@@ -403,9 +440,12 @@ class TestRecoveryInvariants:
 
         cloud = make_fiducial_cloud()
         auth = make_recovery_authorization()
-        svc.stage_candidate("session-01", "plan-01", cloud)
-        svc.verify_candidate("session-01", auth, (100.0, 0.0, 0.0), (100.0, 0.0, 0.0))
-        svc.activate_recovery("session-01")
+        cap1 = make_recovery_capability(svc, "session-01", seq=1)
+        svc.stage_candidate("session-01", "plan-01", cloud, sequence_number=1, capability=cap1)
+        cap2 = make_recovery_capability(svc, "session-01", seq=2)
+        svc.verify_candidate("session-01", auth, (100.0, 0.0, 0.0), (100.0, 0.0, 0.0), sequence_number=2, capability=cap2)
+        cap3 = make_recovery_capability(svc, "session-01", seq=3)
+        svc.activate_recovery("session-01", sequence_number=3, capability=cap3)
 
         # Runtime epoch remains strictly 1
         assert runtime_context.epoch_id == 1

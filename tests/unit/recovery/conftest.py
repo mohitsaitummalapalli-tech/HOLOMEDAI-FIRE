@@ -200,3 +200,18 @@ def mock_navigation_service() -> MagicMock:
 def mock_persistence_service() -> MagicMock:
     persist_svc = MagicMock(spec=PersistenceService)
     return persist_svc
+
+
+@pytest.fixture
+def make_recovery_capability():
+    from holomed.execution._capability import _create_execution_capability
+
+    def _factory(srv, session_id="session-01", seq=1):
+        return _create_execution_capability(
+            service_instance_id=id(srv),
+            session_id=session_id,
+            action="RECOVERY_REORIENTATION",
+            sequence_number=seq,
+        )
+
+    return _factory

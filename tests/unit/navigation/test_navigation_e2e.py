@@ -37,7 +37,19 @@ def test_e2e_complete_navigation_pipeline(
     nav_srv.start()
 
     # 1. Bind registered trajectory to session
-    nav_srv.bind_trajectory("sess_nav_01", sample_plan_trajectory.trajectory_id, sample_plan_trajectory)
+    cap_bind = _create_execution_capability(
+        service_instance_id=id(nav_srv),
+        session_id="sess_nav_01",
+        action="TRAJECTORY_ALIGNMENT",
+        sequence_number=1,
+    )
+    nav_srv.bind_trajectory(
+        "sess_nav_01",
+        sample_plan_trajectory.trajectory_id,
+        sample_plan_trajectory,
+        sequence_number=1,
+        capability=cap_bind,
+    )
     status_init = nav_srv.get_navigation_status("sess_nav_01")
     assert status_init.state == NavigationState.IDLE
 

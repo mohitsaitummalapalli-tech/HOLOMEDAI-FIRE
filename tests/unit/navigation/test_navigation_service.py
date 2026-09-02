@@ -67,9 +67,10 @@ def test_navigation_service_reentrancy_guard(
     srv.initialize(runtime_context)
     srv.start()
 
+    cap = _create_execution_capability(id(srv), "s1", "TRAJECTORY_ALIGNMENT", 1)
     srv._in_transaction = True
     with pytest.raises(NavigationLifecycleError):
-        srv.bind_trajectory("s1", "t1", sample_plan_trajectory)
+        srv.bind_trajectory("s1", "t1", sample_plan_trajectory, sequence_number=1, capability=cap)
 
     with pytest.raises(NavigationLifecycleError):
         srv.stop()
@@ -93,8 +94,13 @@ def test_navigation_service_requires_verified_m13_registration(
     srv.initialize(runtime_context)
     srv.start()
 
-    with pytest.raises(NavigationRegistrationMismatchError) as exc:
+    # Direct call without capability fails with authorization error
+    with pytest.raises(NavigationAuthorizationError):
         srv.bind_trajectory("sess_unverified", "traj_01", sample_plan_trajectory)
+
+    cap = _create_execution_capability(id(srv), "sess_unverified", "TRAJECTORY_ALIGNMENT", 1)
+    with pytest.raises(NavigationRegistrationMismatchError) as exc:
+        srv.bind_trajectory("sess_unverified", "traj_01", sample_plan_trajectory, sequence_number=1, capability=cap)
     assert "not have a verified M13 registration" in str(exc.value)
 
     srv.stop()
@@ -116,7 +122,8 @@ def test_navigation_service_fails_closed_if_registration_invalidated(
     srv.start()
 
     # 1. Bind trajectory to verified session
-    srv.bind_trajectory("sess_nav_01", "t1", sample_plan_trajectory)
+    cap_bind = _create_execution_capability(id(srv), "sess_nav_01", "TRAJECTORY_ALIGNMENT", 1)
+    srv.bind_trajectory("sess_nav_01", "t1", sample_plan_trajectory, sequence_number=1, capability=cap_bind)
 
     # 2. Submit initial pose
     pose = TrackedInstrumentPose(
@@ -177,7 +184,8 @@ def test_navigation_service_sequence_monotonicity_rejection(
     srv.initialize(runtime_context)
     srv.start()
 
-    srv.bind_trajectory("sess_nav_01", "t1", sample_plan_trajectory)
+    cap_bind = _create_execution_capability(id(srv), "sess_nav_01", "TRAJECTORY_ALIGNMENT", 1)
+    srv.bind_trajectory("sess_nav_01", "t1", sample_plan_trajectory, sequence_number=1, capability=cap_bind)
 
     pose1 = TrackedInstrumentPose(
         instrument_id="probe_01",
@@ -237,7 +245,8 @@ def test_navigation_service_dispatcher_routes(
     message_dispatcher.start()
     srv.start()
 
-    srv.bind_trajectory("sess_nav_01", "t1", sample_plan_trajectory)
+    cap_bind = _create_execution_capability(id(srv), "sess_nav_01", "TRAJECTORY_ALIGNMENT", 1)
+    srv.bind_trajectory("sess_nav_01", "t1", sample_plan_trajectory, sequence_number=1, capability=cap_bind)
 
     # 1. navigation.pose.submit is removed from dispatcher in M21 -> UnroutableMessageError
     pose_cmd = create_command(
@@ -297,7 +306,8 @@ def test_navigation_service_capacity_limits(
     srv.initialize(runtime_context)
     srv.start()
 
-    srv.bind_trajectory("sess_nav_01", "t1", sample_plan_trajectory)
+    cap_bind = _create_execution_capability(id(srv), "sess_nav_01", "TRAJECTORY_ALIGNMENT", 1)
+    srv.bind_trajectory("sess_nav_01", "t1", sample_plan_trajectory, sequence_number=1, capability=cap_bind)
 
     # Max 8 instruments per session
     for i in range(MAX_TRACKED_INSTRUMENTS_PER_SESSION):

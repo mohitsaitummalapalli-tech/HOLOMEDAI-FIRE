@@ -27,6 +27,7 @@ def _setup_verified_recovery(
     secret_filter,
     logger,
     runtime_context,
+    make_recovery_capability,
 ) -> RecoveryService:
     svc = RecoveryService(
         dispatcher=mock_dispatcher,
@@ -45,13 +46,17 @@ def _setup_verified_recovery(
     auth = make_recovery_authorization()
 
     # Stage candidate
-    svc.stage_candidate("session-01", "plan-01", cloud)
+    cap1 = make_recovery_capability(svc, "session-01", seq=1)
+    svc.stage_candidate("session-01", "plan-01", cloud, capability=cap1)
     # Verify candidate
+    cap2 = make_recovery_capability(svc, "session-01", seq=2)
     svc.verify_candidate(
         session_id="session-01",
         authorization=auth,
         checkpoint_plan_mm=(100.0, 0.0, 0.0),
         checkpoint_measured_mm=(100.2, 0.0, 0.0),
+        sequence_number=2,
+        capability=cap2,
     )
     return svc
 
@@ -70,6 +75,7 @@ class TestRecoveryActivationFailure:
         secret_filter,
         logger,
         runtime_context,
+        make_recovery_capability,
     ) -> None:
         """Prove that staging and verification happen in isolated memory with ZERO M13 mutation."""
         svc = RecoveryService(
@@ -92,8 +98,10 @@ class TestRecoveryActivationFailure:
         cloud = make_fiducial_cloud()
         auth = make_recovery_authorization()
 
-        svc.stage_candidate("session-01", "plan-01", cloud)
-        svc.verify_candidate("session-01", auth, (100.0, 0.0, 0.0), (100.2, 0.0, 0.0))
+        cap1 = make_recovery_capability(svc, "session-01", seq=1)
+        svc.stage_candidate("session-01", "plan-01", cloud, capability=cap1)
+        cap2 = make_recovery_capability(svc, "session-01", seq=2)
+        svc.verify_candidate("session-01", auth, (100.0, 0.0, 0.0), (100.2, 0.0, 0.0), sequence_number=2, capability=cap2)
 
         # Assert M13 was NEVER touched
         assert mock_registration_service.submit_fiducials.call_count == 0
@@ -111,6 +119,7 @@ class TestRecoveryActivationFailure:
         secret_filter,
         logger,
         runtime_context,
+        make_recovery_capability,
     ) -> None:
         """When M13 verify fails after submit succeeds, M17 enters FAILED, emits recovery.failed, and simulates no rollback."""
         svc = _setup_verified_recovery(
@@ -123,14 +132,16 @@ class TestRecoveryActivationFailure:
             secret_filter,
             logger,
             runtime_context,
+            make_recovery_capability,
         )
 
         # Make M13 verify_registration raise an error
         mock_registration_service.verify_registration.side_effect = RuntimeError("M13 drift verification failed")
         mock_dispatcher.dispatch.reset_mock()
 
+        cap3 = make_recovery_capability(svc, "session-01", seq=3)
         with pytest.raises(RecoveryActivationError, match="Recovery activation failed"):
-            svc.activate_recovery("session-01")
+            svc.activate_recovery("session-01", sequence_number=3, capability=cap3)
 
         status = svc.get_recovery_status("session-01")
         assert status.state == RecoveryState.FAILED
@@ -151,6 +162,7 @@ class TestRecoveryActivationFailure:
         secret_filter,
         logger,
         runtime_context,
+        make_recovery_capability,
     ) -> None:
         svc = _setup_verified_recovery(
             mock_dispatcher,
@@ -162,14 +174,18 @@ class TestRecoveryActivationFailure:
             secret_filter,
             logger,
             runtime_context,
+            make_recovery_capability,
         )
 
         mock_drift_service.bind_landmarks.side_effect = RuntimeError("Drift bind error")
 
+        cap3 = make_recovery_capability(svc, "session-01", seq=3)
         with pytest.raises(RecoveryActivationError):
             svc.activate_recovery(
                 session_id="session-01",
                 landmarks=(MagicMock(),),
+                sequence_number=3,
+                capability=cap3,
             )
 
         assert svc.get_recovery_status("session-01").state == RecoveryState.FAILED
@@ -185,6 +201,7 @@ class TestRecoveryActivationFailure:
         secret_filter,
         logger,
         runtime_context,
+        make_recovery_capability,
     ) -> None:
         svc = _setup_verified_recovery(
             mock_dispatcher,
@@ -196,10 +213,12 @@ class TestRecoveryActivationFailure:
             secret_filter,
             logger,
             runtime_context,
+            make_recovery_capability,
         )
 
         mock_persistence_service.record_audit.reset_mock()
-        status_rec = svc.activate_recovery("session-01")
+        cap3 = make_recovery_capability(svc, "session-01", seq=3)
+        status_rec = svc.activate_recovery("session-01", sequence_number=3, capability=cap3)
 
         assert status_rec.state == RecoveryState.ACTIVATED
         assert mock_persistence_service.record_audit.call_count == 1
