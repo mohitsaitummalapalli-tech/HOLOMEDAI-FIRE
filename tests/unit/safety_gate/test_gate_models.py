@@ -99,6 +99,7 @@ class TestGateEnumCompleteness:
             "TRAJECTORY_ALIGNMENT",
             "RECOVERY_REORIENTATION",
             "WORKFLOW_RESUMPTION",
+            "TOOL_INVOCATION",
         }
         assert {a.value for a in SafetyGateAction} == expected
 

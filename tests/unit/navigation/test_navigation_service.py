@@ -6,12 +6,15 @@ from __future__ import annotations
 import pytest
 
 from holomed.core.dispatcher import MessageDispatcher
+from holomed.core.exceptions import UnroutableMessageError
+from holomed.execution._capability import _create_execution_capability
 from holomed.navigation.constants import (
     DEFAULT_PATIENT_TRACKER_FRAME,
     MAX_ACTIVE_NAVIGATION_SESSIONS,
     MAX_TRACKED_INSTRUMENTS_PER_SESSION,
 )
 from holomed.navigation.exceptions import (
+    NavigationAuthorizationError,
     NavigationCapacityError,
     NavigationLifecycleError,
     NavigationRegistrationMismatchError,
@@ -128,7 +131,12 @@ def test_navigation_service_fails_closed_if_registration_invalidated(
         uncertainty=0.05,
         timestamp_utc="2026-09-01T12:00:00.000Z",
     )
-    srv.submit_pose(pose)
+    # Direct call without capability fails
+    with pytest.raises(NavigationAuthorizationError):
+        srv.submit_pose(pose)
+
+    cap1 = _create_execution_capability(id(srv), "sess_nav_01", "TOOL_NAVIGATION", 1)
+    srv.submit_pose(pose, cap1)
 
     # 3. Invalidate registration in M13 (e.g. drift error > 1.5mm)
     reg = verified_registration_service.get_registration("sess_nav_01")
@@ -144,8 +152,9 @@ def test_navigation_service_fails_closed_if_registration_invalidated(
     verified_registration_service._registrations["sess_nav_01"] = invalid_reg
 
     # 4. Evaluating now must raise NavigationRegistrationMismatchError and transition to INTERLOCKED!
+    cap2 = _create_execution_capability(id(srv), "sess_nav_01", "TOOL_NAVIGATION", 1)
     with pytest.raises(NavigationRegistrationMismatchError):
-        srv.evaluate("sess_nav_01", now_utc="2026-09-01T12:00:00.050Z")
+        srv.evaluate("sess_nav_01", now_utc="2026-09-01T12:00:00.050Z", capability=cap2)
 
     status = srv.get_navigation_status("sess_nav_01")
     assert status.state == NavigationState.INTERLOCKED
@@ -182,11 +191,13 @@ def test_navigation_service_sequence_monotonicity_rejection(
         uncertainty=0.05,
         timestamp_utc="2026-09-01T12:00:00.000Z",
     )
-    srv.submit_pose(pose1)
+    cap1 = _create_execution_capability(id(srv), "sess_nav_01", "TOOL_NAVIGATION", 10)
+    srv.submit_pose(pose1, cap1)
 
     # Replay sequence 10 -> rejected!
+    cap_replay = _create_execution_capability(id(srv), "sess_nav_01", "TOOL_NAVIGATION", 10)
     with pytest.raises(NavigationSequenceError) as exc:
-        srv.submit_pose(pose1)
+        srv.submit_pose(pose1, cap_replay)
     assert "Non-monotonic sequence number" in str(exc.value)
 
     # Older sequence 9 -> rejected!
@@ -202,8 +213,9 @@ def test_navigation_service_sequence_monotonicity_rejection(
         uncertainty=0.05,
         timestamp_utc="2026-09-01T12:00:00.000Z",
     )
+    cap_old = _create_execution_capability(id(srv), "sess_nav_01", "TOOL_NAVIGATION", 9)
     with pytest.raises(NavigationSequenceError):
-        srv.submit_pose(pose_old)
+        srv.submit_pose(pose_old, cap_old)
 
     srv.stop()
 
@@ -227,7 +239,7 @@ def test_navigation_service_dispatcher_routes(
 
     srv.bind_trajectory("sess_nav_01", "t1", sample_plan_trajectory)
 
-    # 1. navigation.pose.submit
+    # 1. navigation.pose.submit is removed from dispatcher in M21 -> UnroutableMessageError
     pose_cmd = create_command(
         "navigation.pose.submit",
         "surgeon_console",
@@ -243,11 +255,10 @@ def test_navigation_service_dispatcher_routes(
             "timestamp_utc": "2026-09-01T12:00:00.000Z",
         },
     )
-    resp_submit = message_dispatcher.dispatch(pose_cmd)
-    assert resp_submit.message_type.value == "RESPONSE"
-    assert resp_submit.payload["status"] == "STORED"
+    with pytest.raises(UnroutableMessageError, match="navigation.pose.submit"):
+        message_dispatcher.dispatch(pose_cmd)
 
-    # 2. navigation.evaluate
+    # 2. navigation.evaluate is removed from dispatcher in M21 -> UnroutableMessageError
     eval_cmd = create_command(
         "navigation.evaluate",
         "surgeon_console",
@@ -256,12 +267,10 @@ def test_navigation_service_dispatcher_routes(
             "now_utc": "2026-09-01T12:00:00.050Z",
         },
     )
-    resp_eval = message_dispatcher.dispatch(eval_cmd)
-    assert resp_eval.message_type.value == "RESPONSE"
-    assert resp_eval.payload["state"] == "ALIGNED"
-    assert resp_eval.payload["is_aligned"] is True
+    with pytest.raises(UnroutableMessageError, match="navigation.evaluate"):
+        message_dispatcher.dispatch(eval_cmd)
 
-    # 3. navigation.status.get
+    # 3. navigation.status.get remains active
     status_query = create_query(
         "navigation.status.get",
         "xr_client",
@@ -269,11 +278,7 @@ def test_navigation_service_dispatcher_routes(
     )
     resp_status = message_dispatcher.dispatch(status_query)
     assert resp_status.message_type.value == "RESPONSE"
-    assert resp_status.payload["state"] == "ALIGNED"
-    assert resp_status.payload["is_guidance_active"] is True
-    assert "xr_presentation" in resp_status.payload
-    # Check meter conversion: (10mm, 20mm, 50mm) -> (0.01m, 0.02m, 0.05m)
-    assert resp_status.payload["xr_presentation"]["tip_position_m"] == [0.01, 0.02, 0.05]
+    assert resp_status.payload["state"] == "IDLE"
 
     srv.stop()
 
@@ -308,7 +313,8 @@ def test_navigation_service_capacity_limits(
             uncertainty=0.1,
             timestamp_utc="2026-09-01T12:00:00Z",
         )
-        srv.submit_pose(p)
+        cap = _create_execution_capability(id(srv), "sess_nav_01", "TOOL_NAVIGATION", 1)
+        srv.submit_pose(p, cap)
 
     # 9th instrument exceeds capacity
     p_overflow = TrackedInstrumentPose(
@@ -323,7 +329,8 @@ def test_navigation_service_capacity_limits(
         uncertainty=0.1,
         timestamp_utc="2026-09-01T12:00:00Z",
     )
+    cap_over = _create_execution_capability(id(srv), "sess_nav_01", "TOOL_NAVIGATION", 1)
     with pytest.raises(NavigationCapacityError):
-        srv.submit_pose(p_overflow)
+        srv.submit_pose(p_overflow, cap_over)
 
     srv.stop()

@@ -13,6 +13,7 @@ from holomed.runtime.logging import SecretFilter
 from holomed.runtime.models import HealthStatus
 from holomed.runtime.service import ServiceState
 from holomed.tools.exceptions import (
+    ToolAuthorizationError,
     ToolEpochMismatchError,
     ToolLifecycleError,
 )
@@ -114,7 +115,18 @@ def test_d243_epoch_isolation_and_reset(
         causation_id=None,
         timestamp_utc="ts",
     )
-    res = srv.invoke_tool(ctx)
+    # Verify direct call without capability fails closed
+    with pytest.raises(ToolAuthorizationError):
+        srv.invoke_tool(ctx)
+
+    from holomed.execution._capability import _create_execution_capability
+    cap = _create_execution_capability(
+        service_instance_id=id(srv),
+        session_id=ctx.session_id,
+        action="TOOL_INVOCATION",
+        sequence_number=ctx.sequence_number,
+    )
+    res = srv.invoke_tool(ctx, cap)
     assert res.status == ToolExecutionStatus.SUCCESS
 
     # Reset with wrong epoch raises ToolEpochMismatchError
@@ -156,20 +168,27 @@ def test_d248_reentrancy_protection(
         causation_id=None,
         timestamp_utc="ts",
     )
+    from holomed.execution._capability import _create_execution_capability
+    cap = _create_execution_capability(
+        service_instance_id=id(srv),
+        session_id=ctx.session_id,
+        action="TOOL_INVOCATION",
+        sequence_number=ctx.sequence_number,
+    )
     with pytest.raises(ToolLifecycleError):
-        srv.invoke_tool(ctx)
+        srv.invoke_tool(ctx, cap)
 
     srv._in_transaction = False
     srv.stop()
 
 
-def test_dispatcher_routes_query_and_invoke(
+def test_dispatcher_routes_query_and_invoke_removed(
     runtime_context: RuntimeContext,
     device_manager: DeviceManager,
     message_dispatcher: MessageDispatcher,
     secret_filter: SecretFilter,
 ) -> None:
-    """Verify dispatcher queries and commands route cleanly to ToolService."""
+    """Verify dispatcher queries route cleanly and tools.invoke command is removed."""
     srv = ToolService(
         device_manager=device_manager,
         dispatcher=message_dispatcher,
@@ -186,7 +205,14 @@ def test_dispatcher_routes_query_and_invoke(
     assert resp_status.message_type.value == "RESPONSE"
     assert resp_status.payload["tool_count"] == 1
 
-    # Invoke tool via command
+    # Query tools.registry
+    q_reg = create_query("tools.registry", "test_client")
+    resp_reg = message_dispatcher.dispatch(q_reg)
+    assert resp_reg.message_type.value == "RESPONSE"
+    assert len(resp_reg.payload["tools"]) == 1
+
+    # In M21: tools.invoke is REMOVED from dispatcher, must raise UnroutableMessageError
+    from holomed.core.exceptions import UnroutableMessageError
     cmd_invoke = create_command(
         "tools.invoke",
         "test_client",
@@ -197,8 +223,7 @@ def test_dispatcher_routes_query_and_invoke(
             "sequence_number": 0,
         },
     )
-    resp_invoke = message_dispatcher.dispatch(cmd_invoke)
-    assert resp_invoke.message_type.value == "RESPONSE"
-    assert resp_invoke.payload["status"] == "SUCCESS"
+    with pytest.raises(UnroutableMessageError, match="tools.invoke"):
+        message_dispatcher.dispatch(cmd_invoke)
 
     srv.stop()

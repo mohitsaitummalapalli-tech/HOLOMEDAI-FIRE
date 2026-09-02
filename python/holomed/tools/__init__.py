@@ -16,6 +16,7 @@ from holomed.tools.exceptions import (
     ToolResourceIntegrityError,
     ToolSafetyError,
     ToolSecurityError,
+    ToolAuthorizationError,
     ToolSequenceError,
     ToolShutdownError,
     ToolValidationError,
@@ -58,6 +59,7 @@ __all__ = [
     "ToolRecursionError",
     "ToolSafetyError",
     "ToolSecurityError",
+    "ToolAuthorizationError",
     # Constants
     "MAX_REGISTERED_TOOLS",
     "MAX_TOOL_INVOCATION_DEPTH",

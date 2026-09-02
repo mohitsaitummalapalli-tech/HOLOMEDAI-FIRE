@@ -19,6 +19,7 @@ from holomed.navigation.constants import (
 )
 from holomed.navigation.evaluator import TrajectoryDeviationEvaluator
 from holomed.navigation.exceptions import (
+    NavigationAuthorizationError,
     NavigationCapacityError,
     NavigationError,
     NavigationFrameMismatchError,
@@ -140,9 +141,8 @@ class NavigationService(IService):
             self._resources.acquire(res_id)
 
         # Register Dispatcher Routes strictly during INITIALIZED
+        # M21: navigation.pose.submit and navigation.evaluate removed from dispatcher
         if self._dispatcher is not None:
-            self._dispatcher.register_command_handler("navigation.pose.submit", self.handle_submit_pose_command, self.name)
-            self._dispatcher.register_command_handler("navigation.evaluate", self.handle_evaluate_command, self.name)
             self._dispatcher.register_query_handler("navigation.status.get", self.handle_get_status_query, self.name)
 
         self._state = ServiceState.INITIALIZED
@@ -266,10 +266,31 @@ class NavigationService(IService):
         finally:
             self._in_transaction = False
 
-    def submit_pose(self, pose: TrackedInstrumentPose) -> None:
-        """Validate and store the latest tracked instrument pose for a session."""
+    def submit_pose(self, pose: TrackedInstrumentPose, capability: Any = None) -> None:
+        """Validate and store the latest tracked instrument pose for a session under an authoritative capability."""
         if self._state != ServiceState.STARTED:
             raise NavigationLifecycleError(f"Cannot submit pose in state {self._state.name}")
+
+        # Strict execution capability verification
+        if capability is None:
+            raise NavigationAuthorizationError(
+                "Direct uncoordinated call to submit_pose rejected: missing execution capability"
+            )
+        if not getattr(capability, "is_active", False):
+            raise NavigationAuthorizationError("Execution capability is inactive, expired, or replayed")
+        if getattr(capability, "session_id", None) != pose.session_id:
+            raise NavigationAuthorizationError(
+                f"Capability session mismatch: expected {pose.session_id!r}, got {getattr(capability, 'session_id', None)!r}"
+            )
+        if getattr(capability, "action", None) != "TOOL_NAVIGATION":
+            raise NavigationAuthorizationError(
+                f"Capability action mismatch: expected 'TOOL_NAVIGATION', got {getattr(capability, 'action', None)!r}"
+            )
+        if getattr(capability, "sequence_number", None) != pose.sequence_number:
+            raise NavigationAuthorizationError(
+                f"Capability sequence mismatch: expected {pose.sequence_number}, got {getattr(capability, 'sequence_number', None)}"
+            )
+
         if self._in_transaction:
             raise NavigationLifecycleError("Reentrant call to submit_pose rejected")
 
@@ -313,10 +334,33 @@ class NavigationService(IService):
         finally:
             self._in_transaction = False
 
-    def evaluate(self, session_id: str, instrument_id: Optional[str] = None, now_utc: Optional[str] = None) -> TrajectoryDeviationRecord:
-        """Evaluate the latest stored pose against the bound registered trajectory."""
+    def evaluate(
+        self,
+        session_id: str,
+        instrument_id: Optional[str] = None,
+        now_utc: Optional[str] = None,
+        capability: Any = None,
+    ) -> TrajectoryDeviationRecord:
+        """Evaluate the latest stored pose against the bound registered trajectory under an authoritative capability."""
         if self._state != ServiceState.STARTED:
             raise NavigationLifecycleError(f"Cannot evaluate navigation in state {self._state.name}")
+
+        # Strict execution capability verification
+        if capability is None:
+            raise NavigationAuthorizationError(
+                "Direct uncoordinated call to evaluate rejected: missing execution capability"
+            )
+        if not getattr(capability, "is_active", False):
+            raise NavigationAuthorizationError("Execution capability is inactive, expired, or replayed")
+        if getattr(capability, "session_id", None) != session_id:
+            raise NavigationAuthorizationError(
+                f"Capability session mismatch: expected {session_id!r}, got {getattr(capability, 'session_id', None)!r}"
+            )
+        if getattr(capability, "action", None) != "TOOL_NAVIGATION":
+            raise NavigationAuthorizationError(
+                f"Capability action mismatch: expected 'TOOL_NAVIGATION', got {getattr(capability, 'action', None)!r}"
+            )
+
         if self._in_transaction:
             raise NavigationLifecycleError("Reentrant call to evaluate rejected")
 

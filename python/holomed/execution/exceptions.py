@@ -42,6 +42,16 @@ class ExecutionGeometryError(ExecutionError):
     pass
 
 
+class ExecutionAuthorizationError(ExecutionError):
+    """Raised when an uncoordinated direct execution call or invalid capability is detected."""
+    pass
+
+
+class ExecutionSequenceError(ExecutionError):
+    """Raised when an execution request violates sequence monotonicity."""
+    pass
+
+
 class ExecutionShutdownError(ExecutionError):
     """Raised when service teardown encounters resource deallocation failures."""
 

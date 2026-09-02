@@ -14,6 +14,7 @@ from holomed.safety_gate.constants import (
     TRAJECTORY_ID_REGEX,
 )
 from holomed.safety_gate.exceptions import SafetyGateValidationError
+from holomed.tools.models import TOOL_ID_REGEX, ToolSafetyClassification
 
 
 class SafetyGateAction(str, Enum):
@@ -23,6 +24,7 @@ class SafetyGateAction(str, Enum):
     TRAJECTORY_ALIGNMENT = "TRAJECTORY_ALIGNMENT"
     RECOVERY_REORIENTATION = "RECOVERY_REORIENTATION"
     WORKFLOW_RESUMPTION = "WORKFLOW_RESUMPTION"
+    TOOL_INVOCATION = "TOOL_INVOCATION"
 
 
 class GateDecision(str, Enum):
@@ -72,6 +74,8 @@ class GateRequest:
     instrument_id: Optional[str] = None
     target_trajectory_id: Optional[str] = None
     recovery_revision: Optional[int] = None
+    tool_id: Optional[str] = None
+    safety_classification: Optional[ToolSafetyClassification] = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.session_id, str) or not SESSION_ID_REGEX.match(self.session_id):
@@ -82,6 +86,14 @@ class GateRequest:
             raise SafetyGateValidationError("sequence_number must be a positive integer >= 1")
         if not isinstance(self.now_utc, str) or not self.now_utc.strip():
             raise SafetyGateValidationError("now_utc must be a non-empty ISO-8601 string")
+        if self.tool_id is not None:
+            if not isinstance(self.tool_id, str) or not TOOL_ID_REGEX.match(self.tool_id):
+                raise SafetyGateValidationError(f"Invalid tool_id: {self.tool_id!r}")
+        if self.safety_classification is not None:
+            if not isinstance(self.safety_classification, ToolSafetyClassification):
+                raise SafetyGateValidationError(
+                    f"safety_classification must be ToolSafetyClassification, got {self.safety_classification!r}"
+                )
         if self.instrument_id is not None:
             if not isinstance(self.instrument_id, str) or not INSTRUMENT_ID_REGEX.match(self.instrument_id):
                 raise SafetyGateValidationError(f"Invalid instrument_id: {self.instrument_id!r}")

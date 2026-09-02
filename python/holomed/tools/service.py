@@ -34,6 +34,7 @@ from holomed.tools.exceptions import (
     ToolLifecycleError,
     ToolResourceIntegrityError,
     ToolSecurityError,
+    ToolAuthorizationError,
     ToolSequenceError,
     ToolShutdownError,
     ToolValidationError,
@@ -151,11 +152,7 @@ class ToolService(IService):
                 self.handle_registry_query,
                 self.name,
             )
-            self._dispatcher.register_command_handler(
-                "tools.invoke",
-                self.handle_invoke_command,
-                self.name,
-            )
+            # M21: tools.invoke dispatcher route removed. All clinical tool execution routes through execution.tool.invoke.
             self._dispatcher.register_query_handler(
                 "tools.result",
                 self.handle_result_query,
@@ -279,10 +276,30 @@ class ToolService(IService):
             },
         )
 
-    def invoke_tool(self, context: ToolInvocationContext) -> ToolResult:
-        """Execute a tool invocation context synchronously."""
+    def invoke_tool(self, context: ToolInvocationContext, capability: Any = None) -> ToolResult:
+        """Execute a tool invocation context synchronously under an authoritative capability."""
         if self._state != ServiceState.STARTED:
             raise ToolLifecycleError(f"Cannot invoke tool in state {self._state.name}")
+
+        # Strict execution capability verification
+        if capability is None:
+            raise ToolAuthorizationError(
+                "Direct uncoordinated call to invoke_tool rejected: missing execution capability"
+            )
+        if not getattr(capability, "is_active", False):
+            raise ToolAuthorizationError("Execution capability is inactive, expired, or replayed")
+        if getattr(capability, "session_id", None) != context.session_id:
+            raise ToolAuthorizationError(
+                f"Capability session mismatch: expected {context.session_id!r}, got {getattr(capability, 'session_id', None)!r}"
+            )
+        if getattr(capability, "action", None) != "TOOL_INVOCATION":
+            raise ToolAuthorizationError(
+                f"Capability action mismatch: expected 'TOOL_INVOCATION', got {getattr(capability, 'action', None)!r}"
+            )
+        if getattr(capability, "sequence_number", None) != context.sequence_number:
+            raise ToolAuthorizationError(
+                f"Capability sequence mismatch: expected {context.sequence_number}, got {getattr(capability, 'sequence_number', None)}"
+            )
 
         if self._in_transaction:
             raise ToolLifecycleError("Reentrant call to invoke_tool rejected by transaction guard")

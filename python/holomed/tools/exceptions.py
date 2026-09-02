@@ -70,3 +70,7 @@ class ToolSafetyError(ToolError):
 
 class ToolSecurityError(ToolError):
     """Raised when an invocation or parameter attempts code injection, sandbox escape, or prohibited execution."""
+
+
+class ToolAuthorizationError(ToolError):
+    """Raised when an invocation lacks an active, valid execution capability."""

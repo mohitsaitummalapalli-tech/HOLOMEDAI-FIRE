@@ -118,3 +118,18 @@ def verified_registration_service(
     )
     assert reg_srv.is_registration_verified("sess_nav_01") is True
     return reg_srv
+
+
+@pytest.fixture
+def make_nav_capability():
+    from holomed.execution._capability import _create_execution_capability
+
+    def _factory(srv, session_id, seq=1):
+        return _create_execution_capability(
+            service_instance_id=id(srv),
+            session_id=session_id,
+            action="TOOL_NAVIGATION",
+            sequence_number=seq,
+        )
+
+    return _factory

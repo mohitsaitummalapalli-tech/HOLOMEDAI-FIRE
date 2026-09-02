@@ -14,6 +14,7 @@ from holomed.safety_gate.models import (
     SafetyGateAction,
     SubsystemSnapshot,
 )
+from holomed.tools.models import ToolSafetyClassification
 
 
 class SafetyGateEvaluator:
@@ -498,29 +499,37 @@ class SafetyGateEvaluator:
                     subsystem_snapshots=tuple(snapshots),
                     evaluated_at_utc=request.now_utc,
                 )
-            return GateStatusRecord(
-                session_id=session_id,
-                decision=GateDecision.DENIED_INTERLOCKED,
-                severity=GateSeverity.BLOCKING,
-                reason_code=GateReasonCode.REGISTRATION_UNVERIFIED,
-                action=action,
-                sequence_number=request.sequence_number,
-                subsystem_snapshots=tuple(snapshots),
-                evaluated_at_utc=request.now_utc,
-            )
+            if action == SafetyGateAction.TOOL_INVOCATION and request.safety_classification == ToolSafetyClassification.TELEMETRY_RECORDING:
+                # Telemetry recording does not rely on anatomical registration
+                pass
+            else:
+                return GateStatusRecord(
+                    session_id=session_id,
+                    decision=GateDecision.DENIED_INTERLOCKED,
+                    severity=GateSeverity.BLOCKING,
+                    reason_code=GateReasonCode.REGISTRATION_UNVERIFIED,
+                    action=action,
+                    sequence_number=request.sequence_number,
+                    subsystem_snapshots=tuple(snapshots),
+                    evaluated_at_utc=request.now_utc,
+                )
 
         # Precedence 6: M10 Workflow Phase Blocked
         if m10_state in ("RECOVERY_REQUIRED", "ABORTED"):
-            return GateStatusRecord(
-                session_id=session_id,
-                decision=GateDecision.DENIED_INTERLOCKED,
-                severity=GateSeverity.BLOCKING,
-                reason_code=GateReasonCode.WORKFLOW_PHASE_BLOCKED,
-                action=action,
-                sequence_number=request.sequence_number,
-                subsystem_snapshots=tuple(snapshots),
-                evaluated_at_utc=request.now_utc,
-            )
+            if action == SafetyGateAction.TOOL_INVOCATION and request.safety_classification == ToolSafetyClassification.TELEMETRY_RECORDING:
+                # Telemetry recording is specifically permitted during recovery/aborted diagnostics
+                pass
+            else:
+                return GateStatusRecord(
+                    session_id=session_id,
+                    decision=GateDecision.DENIED_INTERLOCKED,
+                    severity=GateSeverity.BLOCKING,
+                    reason_code=GateReasonCode.WORKFLOW_PHASE_BLOCKED,
+                    action=action,
+                    sequence_number=request.sequence_number,
+                    subsystem_snapshots=tuple(snapshots),
+                    evaluated_at_utc=request.now_utc,
+                )
 
         # Precedence 7: M14 Navigation Interlocked or Trajectory Missing
         if action == SafetyGateAction.TOOL_NAVIGATION:

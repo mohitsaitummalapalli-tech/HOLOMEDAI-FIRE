@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import enum
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Any, Mapping, Optional, Tuple
 
 from holomed.drift.models import LandmarkDefinition
 from holomed.execution.constants import (
@@ -33,8 +33,8 @@ from holomed.safety_gate.models import (
     GateReasonCode,
     SafetyGateAction,
 )
-from holomed.tools.models import ToolSafetyClassification
-from holomed.workflow.models import WorkflowToolAuthorizationStatus
+from holomed.tools.models import TOOL_ID_REGEX, ToolResult, ToolSafetyClassification
+from holomed.workflow.models import WorkflowStateSnapshot, WorkflowToolAuthorizationStatus
 
 
 class ExecutionStatus(str, enum.Enum):
@@ -219,3 +219,105 @@ class NavigationExecutionStatusRecord:
     latest_result: NavigationExecutionResult
     epoch_id: int
     updated_at_utc: str
+
+
+@dataclass(frozen=True)
+class ToolExecutionRequest:
+    """Explicit request to execute a clinical tool under dual-gate evaluation."""
+
+    session_id: str
+    tool_id: str
+    sequence_number: int
+    now_utc: str
+    parameters: Mapping[str, Any]
+    safety_classification: ToolSafetyClassification
+    action: SafetyGateAction = SafetyGateAction.TOOL_INVOCATION
+    correlation_id: Optional[str] = None
+    causation_id: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.session_id, str) or not SESSION_ID_REGEX.match(self.session_id):
+            raise ExecutionValidationError(f"Invalid session_id: {self.session_id!r}")
+        if not isinstance(self.tool_id, str) or not TOOL_ID_REGEX.match(self.tool_id):
+            raise ExecutionValidationError(f"Invalid tool_id: {self.tool_id!r}")
+        if not isinstance(self.sequence_number, int) or self.sequence_number < 1:
+            raise ExecutionValidationError("sequence_number must be an integer >= 1")
+        if not isinstance(self.now_utc, str) or not self.now_utc.strip():
+            raise ExecutionValidationError("now_utc must be a non-empty ISO-8601 string")
+        if not isinstance(self.safety_classification, ToolSafetyClassification):
+            raise ExecutionValidationError(
+                f"safety_classification must be ToolSafetyClassification, got {self.safety_classification!r}"
+            )
+        if self.action != SafetyGateAction.TOOL_INVOCATION:
+            raise ExecutionValidationError(f"ToolExecutionRequest requires TOOL_INVOCATION, got {self.action.value}")
+
+
+@dataclass(frozen=True)
+class ToolExecutionResult:
+    """Canonical result of a coordinated clinical tool execution."""
+
+    session_id: str
+    tool_id: str
+    execution_status: ExecutionStatus
+    gate_decision: GateDecision
+    gate_reason_code: GateReasonCode
+    action: SafetyGateAction
+    sequence_number: int
+    executed_at_utc: str
+    workflow_status: Optional[WorkflowToolAuthorizationStatus] = None
+    tool_result: Optional[ToolResult] = None
+    error_message: Optional[str] = None
+    schema_version: str = EXECUTION_SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.session_id, str) or not SESSION_ID_REGEX.match(self.session_id):
+            raise ExecutionValidationError(f"Invalid session_id: {self.session_id!r}")
+        if not isinstance(self.sequence_number, int) or self.sequence_number < 1:
+            raise ExecutionValidationError("sequence_number must be an integer >= 1")
+
+
+@dataclass(frozen=True)
+class WorkflowResumptionExecutionRequest:
+    """Explicit request to trigger clinical workflow recovery resumption via execution gateway."""
+
+    session_id: str
+    sequence_number: int
+    now_utc: str
+    recovery_revision: int
+    cleared_interlock_ids: Tuple[str, ...]
+    action: SafetyGateAction = SafetyGateAction.WORKFLOW_RESUMPTION
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.session_id, str) or not SESSION_ID_REGEX.match(self.session_id):
+            raise ExecutionValidationError(f"Invalid session_id: {self.session_id!r}")
+        if not isinstance(self.sequence_number, int) or self.sequence_number < 1:
+            raise ExecutionValidationError("sequence_number must be an integer >= 1")
+        if not isinstance(self.now_utc, str) or not self.now_utc.strip():
+            raise ExecutionValidationError("now_utc must be a non-empty ISO-8601 string")
+        if not isinstance(self.recovery_revision, int) or self.recovery_revision < 1:
+            raise ExecutionValidationError("recovery_revision must be an integer >= 1")
+        if not isinstance(self.cleared_interlock_ids, tuple):
+            raise ExecutionValidationError("cleared_interlock_ids must be a tuple of strings")
+        if self.action != SafetyGateAction.WORKFLOW_RESUMPTION:
+            raise ExecutionValidationError(
+                f"WorkflowResumptionExecutionRequest requires WORKFLOW_RESUMPTION, got {self.action.value}"
+            )
+
+
+@dataclass(frozen=True)
+class WorkflowResumptionExecutionResult:
+    """Canonical result of a coordinated workflow recovery resumption."""
+
+    session_id: str
+    execution_status: ExecutionStatus
+    sequence_number: int
+    executed_at_utc: str
+    snapshot: Optional[WorkflowStateSnapshot] = None
+    error_message: Optional[str] = None
+    schema_version: str = EXECUTION_SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.session_id, str) or not SESSION_ID_REGEX.match(self.session_id):
+            raise ExecutionValidationError(f"Invalid session_id: {self.session_id!r}")
+        if not isinstance(self.sequence_number, int) or self.sequence_number < 1:
+            raise ExecutionValidationError("sequence_number must be an integer >= 1")
