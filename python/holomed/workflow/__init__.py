@@ -42,6 +42,7 @@ from holomed.workflow.models import (
     SafetyInterlock,
     WorkflowHealthStatus,
     WorkflowPhase,
+    WorkflowResumptionRequest,
     WorkflowStateSnapshot,
     WorkflowToolAuthorizationDecision,
     WorkflowToolAuthorizationStatus,
@@ -92,6 +93,7 @@ __all__ = [
     "AnatomicalCheckpoint",
     "WorkflowToolAuthorizationDecision",
     "WorkflowStateSnapshot",
+    "WorkflowResumptionRequest",
     # Constants
     "WORKFLOW_SCHEMA_VERSION",
     "MAX_ACTIVE_WORKFLOWS",

@@ -4,11 +4,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 import enum
 import math
 import re
 from types import MappingProxyType
-from typing import Any, Mapping, Optional, Sequence
+from typing import Any, Mapping, Optional, Sequence, Tuple
 
 from holomed.tools.models import ToolCategory, ToolSafetyClassification
 from holomed.workflow.exceptions import WorkflowValidationError
@@ -221,3 +222,36 @@ class WorkflowStateSnapshot:
             raise WorkflowValidationError("transition_count must be non-negative")
         if self.sequence_number < 0:
             raise WorkflowValidationError("sequence_number must be non-negative")
+
+
+@dataclass(frozen=True)
+class WorkflowResumptionRequest:
+    """Immutable request to resume workflow from recovery."""
+
+    session_id: str
+    sequence_number: int
+    now_utc: str
+    recovery_revision: int
+    cleared_interlock_ids: Tuple[str, ...]
+    reason: str = "Verified spatial recovery resumption"
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.session_id, str) or not PROCEDURE_ID_REGEX.match(self.session_id):
+            raise WorkflowValidationError(f"Invalid session_id syntax: {self.session_id!r}")
+        if not isinstance(self.sequence_number, int) or self.sequence_number < 1:
+            raise WorkflowValidationError("sequence_number must be a positive integer >= 1")
+        if not isinstance(self.recovery_revision, int) or self.recovery_revision < 1:
+            raise WorkflowValidationError("recovery_revision must be a positive integer >= 1")
+        if not isinstance(self.now_utc, str) or not self.now_utc.strip():
+            raise WorkflowValidationError("now_utc must be a non-empty ISO-8601 string")
+        try:
+            datetime.fromisoformat(self.now_utc.replace("Z", "+00:00"))
+        except Exception as e:
+            raise WorkflowValidationError(f"Invalid now_utc ISO-8601 format: {self.now_utc!r}") from e
+        if not isinstance(self.cleared_interlock_ids, tuple) or len(self.cleared_interlock_ids) == 0:
+            raise WorkflowValidationError("cleared_interlock_ids must be a non-empty tuple of string IDs")
+        for iid in self.cleared_interlock_ids:
+            if not isinstance(iid, str) or not iid.strip():
+                raise WorkflowValidationError(f"Invalid interlock_id in cleared_interlock_ids: {iid!r}")
+        if not isinstance(self.reason, str) or not self.reason.strip():
+            raise WorkflowValidationError("reason must be a non-empty string")

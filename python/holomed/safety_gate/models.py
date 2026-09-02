@@ -22,6 +22,7 @@ class SafetyGateAction(str, Enum):
     TOOL_NAVIGATION = "TOOL_NAVIGATION"
     TRAJECTORY_ALIGNMENT = "TRAJECTORY_ALIGNMENT"
     RECOVERY_REORIENTATION = "RECOVERY_REORIENTATION"
+    WORKFLOW_RESUMPTION = "WORKFLOW_RESUMPTION"
 
 
 class GateDecision(str, Enum):
@@ -70,6 +71,7 @@ class GateRequest:
     now_utc: str
     instrument_id: Optional[str] = None
     target_trajectory_id: Optional[str] = None
+    recovery_revision: Optional[int] = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.session_id, str) or not SESSION_ID_REGEX.match(self.session_id):
@@ -86,6 +88,9 @@ class GateRequest:
         if self.target_trajectory_id is not None:
             if not isinstance(self.target_trajectory_id, str) or not TRAJECTORY_ID_REGEX.match(self.target_trajectory_id):
                 raise SafetyGateValidationError(f"Invalid target_trajectory_id: {self.target_trajectory_id!r}")
+        if self.recovery_revision is not None:
+            if not isinstance(self.recovery_revision, int) or self.recovery_revision < 1:
+                raise SafetyGateValidationError("recovery_revision must be a positive integer >= 1")
 
 
 @dataclass(frozen=True)

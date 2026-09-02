@@ -37,6 +37,7 @@ from holomed.workflow.exceptions import (
     WorkflowLifecycleError,
     WorkflowResourceIntegrityError,
     WorkflowSafetyInterlockError,
+    WorkflowSequenceError,
     WorkflowSessionError,
     WorkflowShutdownError,
     WorkflowTransitionError,
@@ -52,6 +53,7 @@ from holomed.workflow.models import (
     ProcedureDefinition,
     SafetyInterlock,
     WorkflowPhase,
+    WorkflowResumptionRequest,
     WorkflowStateSnapshot,
     WorkflowToolAuthorizationDecision,
     WorkflowToolAuthorizationStatus,
@@ -450,6 +452,155 @@ class WorkflowService(IService):
         snapshot = sm.abort(sequence_number, reason)
         self._emit_event("workflow.aborted", {"session_id": session_id, "reason": reason})
         return snapshot
+
+    def resume_from_recovery(
+        self,
+        request: WorkflowResumptionRequest,
+        safety_gate_service: Any,
+    ) -> WorkflowStateSnapshot:
+        """Authoritatively transitions session from RECOVERY_REQUIRED to NAVIGATION
+        after verifying inline M18 WORKFLOW_RESUMPTION gate clearance and clearing explicit interlocks.
+        """
+        if self._state != ServiceState.STARTED:
+            raise WorkflowLifecycleError(f"Cannot resume from recovery in state {self._state.name}")
+        if self._in_transaction:
+            raise WorkflowLifecycleError("Reentrant call to resume_from_recovery rejected")
+
+        if not isinstance(request, WorkflowResumptionRequest):
+            raise WorkflowValidationError(f"Expected WorkflowResumptionRequest, got {type(request).__name__}")
+
+        self._in_transaction = True
+        capability = None
+        try:
+            session_id = request.session_id
+            if session_id not in self._workflows:
+                raise WorkflowSessionError(f"Session {session_id!r} has no active workflow")
+
+            sm = self._workflows[session_id]
+            if sm.current_phase != WorkflowPhase.RECOVERY_REQUIRED:
+                raise WorkflowTransitionError(
+                    f"Cannot resume from recovery: session {session_id!r} is in phase {sm.current_phase.name}, expected RECOVERY_REQUIRED"
+                )
+
+            # Step 1: Synchronous inline fresh M18 evaluation
+            if safety_gate_service is None:
+                raise WorkflowSafetyInterlockError("SafetyGateService is required for recovery resumption")
+
+            from holomed.safety_gate.models import GateDecision, GateRequest, SafetyGateAction
+
+            gate_req = GateRequest(
+                session_id=session_id,
+                action=SafetyGateAction.WORKFLOW_RESUMPTION,
+                sequence_number=request.sequence_number,
+                now_utc=request.now_utc,
+                recovery_revision=request.recovery_revision,
+            )
+            gate_rec = safety_gate_service.evaluate(gate_req)
+
+            if gate_rec.decision not in (GateDecision.PERMITTED_CLEAR, GateDecision.PERMITTED_WITH_CAUTION):
+                self._emit_event(
+                    "workflow.recovery.blocked",
+                    {
+                        "session_id": session_id,
+                        "reason": gate_rec.reason_code.value,
+                        "sequence_number": request.sequence_number,
+                    },
+                )
+                raise WorkflowSafetyInterlockError(
+                    f"M18 Safety Gate refused workflow resumption: {gate_rec.reason_code.value}"
+                )
+
+            if request.sequence_number <= sm.last_sequence_number:
+                raise WorkflowSequenceError(
+                    f"Sequence {request.sequence_number} must exceed last sequence {sm.last_sequence_number}"
+                )
+
+            # Create internal single-use transaction capability bound to active M10 transaction
+            from holomed.workflow._transaction import _create_recovery_capability
+
+            capability = _create_recovery_capability(
+                service_instance_id=id(self),
+                session_id=session_id,
+                workflow_id=sm.workflow_id,
+                recovery_revision=request.recovery_revision,
+                sequence_number=request.sequence_number,
+            )
+
+            # Step 2: Internal M10 staged transaction execution
+            try:
+                self._interlock_engine.stage_recovery_clearance(
+                    capability=capability,
+                    interlock_ids=request.cleared_interlock_ids,
+                )
+
+                sm.begin_recovery_resumption(capability=capability)
+
+                # Step 3: Audit persistence before commit
+                if self._persistence_service is not None:
+                    audit_payload = {
+                        "event": "workflow.recovery.resumed",
+                        "session_id": session_id,
+                        "recovery_revision": request.recovery_revision,
+                        "sequence_number": request.sequence_number,
+                        "cleared_interlock_ids": list(request.cleared_interlock_ids),
+                        "timestamp_utc": request.now_utc,
+                    }
+                    self._persistence_service.record_audit(
+                        audit_report=audit_payload,
+                        session_id=session_id,
+                    )
+
+                # Step 4: Commit internal mutations & Event emission
+                self._interlock_engine.commit_recovery_clearance(capability=capability)
+                snapshot = sm.commit_recovery_resumption(capability=capability)
+                self._total_transitions += 1
+
+                # Invalidate capability immediately upon successful commit
+                capability.invalidate()
+
+                self._emit_event(
+                    "workflow.recovery.resumed",
+                    {
+                        "session_id": session_id,
+                        "workflow_id": sm.workflow_id,
+                        "phase": WorkflowPhase.NAVIGATION.value,
+                        "sequence_number": request.sequence_number,
+                        "recovery_revision": request.recovery_revision,
+                        "cleared_interlock_ids": list(request.cleared_interlock_ids),
+                    },
+                )
+                self._emit_event(
+                    "workflow.phase.entered",
+                    {
+                        "session_id": session_id,
+                        "workflow_id": sm.workflow_id,
+                        "phase": WorkflowPhase.NAVIGATION.value,
+                        "sequence_number": request.sequence_number,
+                    },
+                )
+                return snapshot
+
+            except Exception as e:
+                # Rollback internal staged mutations using owner-internal mechanisms
+                sm.abort_recovery_resumption(capability=capability)
+                self._interlock_engine.abort_recovery_clearance(capability=capability)
+                if capability is not None:
+                    capability.invalidate()
+                self._emit_event(
+                    "workflow.recovery.failed",
+                    {
+                        "session_id": session_id,
+                        "reason": str(e),
+                        "sequence_number": request.sequence_number,
+                    },
+                )
+                raise
+
+        finally:
+            if capability is not None:
+                capability.invalidate()
+            self._in_transaction = False
+
 
     def authorize_tool(
         self,

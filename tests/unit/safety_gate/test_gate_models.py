@@ -94,7 +94,12 @@ class TestGateEnumCompleteness:
     """Tests confirming all enum values."""
 
     def test_actions(self) -> None:
-        expected = {"TOOL_NAVIGATION", "TRAJECTORY_ALIGNMENT", "RECOVERY_REORIENTATION"}
+        expected = {
+            "TOOL_NAVIGATION",
+            "TRAJECTORY_ALIGNMENT",
+            "RECOVERY_REORIENTATION",
+            "WORKFLOW_RESUMPTION",
+        }
         assert {a.value for a in SafetyGateAction} == expected
 
     def test_decisions(self) -> None:

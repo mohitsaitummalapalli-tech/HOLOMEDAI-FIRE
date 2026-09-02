@@ -34,6 +34,7 @@ class SafetyGateEvaluator:
         session_id = request.session_id
         action = request.action
         snapshots: List[SubsystemSnapshot] = []
+        session_mismatch: bool = False
 
         # ---------------------------------------------------------------------
         # 1. Query Subsystem States via Public Handles
@@ -42,79 +43,134 @@ class SafetyGateEvaluator:
         # M15 Proximity Protection
         m15_state: Optional[str] = None
         m15_epoch: Optional[int] = None
+        m15_rev: Optional[int] = None
+        m15_ts: Optional[str] = None
         if proximity_service is not None:
             try:
                 prox_status = proximity_service.get_proximity_status(session_id)
-                m15_state = prox_status.state.value
-                m15_epoch = prox_status.epoch_id
-                snapshots.append(
-                    SubsystemSnapshot(
-                        subsystem_name="proximity_service",
-                        state=m15_state,
-                        epoch_id=m15_epoch,
-                        is_nominal=m15_state == "SAFE",
-                        details={"monitored_zones": prox_status.monitored_zone_count},
+                if prox_status is not None:
+                    sid = getattr(prox_status, "session_id", None)
+                    if isinstance(sid, str) and sid != session_id:
+                        session_mismatch = True
+                    m15_state = prox_status.state.value if hasattr(prox_status.state, "value") else str(prox_status.state)
+                    m15_epoch = prox_status.epoch_id if isinstance(getattr(prox_status, "epoch_id", None), int) else None
+                    raw_rev = getattr(prox_status, "registration_revision", None) or getattr(prox_status, "recovery_revision", None)
+                    if isinstance(raw_rev, int):
+                        m15_rev = raw_rev
+                    raw_ts = (
+                        getattr(prox_status.last_evaluation, "evaluated_at_utc", None)
+                        if getattr(prox_status, "last_evaluation", None)
+                        else getattr(prox_status, "updated_at_utc", None)
                     )
-                )
+                    if isinstance(raw_ts, str):
+                        m15_ts = raw_ts
+                    snapshots.append(
+                        SubsystemSnapshot(
+                            subsystem_name="proximity_service",
+                            state=m15_state,
+                            epoch_id=m15_epoch,
+                            is_nominal=m15_state == "SAFE",
+                            details={"monitored_zones": getattr(prox_status, "monitored_zone_count", 0)},
+                        )
+                    )
             except Exception:
                 m15_state = "UNKNOWN"
 
         # M16 Landmark Drift
         m16_state: Optional[str] = None
         m16_epoch: Optional[int] = None
+        m16_rev: Optional[int] = None
+        m16_ts: Optional[str] = None
         if drift_service is not None:
             try:
                 drift_status = drift_service.get_drift_status(session_id)
-                m16_state = drift_status.state.value
-                m16_epoch = drift_status.epoch_id
-                snapshots.append(
-                    SubsystemSnapshot(
-                        subsystem_name="drift_service",
-                        state=m16_state,
-                        epoch_id=m16_epoch,
-                        is_nominal=m16_state in ("READY", "STABLE"),
-                        details={"bound_landmarks": drift_status.bound_landmark_count},
+                if drift_status is not None:
+                    sid = getattr(drift_status, "session_id", None)
+                    if isinstance(sid, str) and sid != session_id:
+                        session_mismatch = True
+                    m16_state = drift_status.state.value if hasattr(drift_status.state, "value") else str(drift_status.state)
+                    m16_epoch = drift_status.epoch_id if isinstance(getattr(drift_status, "epoch_id", None), int) else None
+                    raw_rev = getattr(drift_status, "registration_revision", None) or getattr(drift_status, "recovery_revision", None)
+                    if isinstance(raw_rev, int):
+                        m16_rev = raw_rev
+                    raw_ts = (
+                        getattr(drift_status.last_verification, "evaluated_at_utc", None)
+                        if getattr(drift_status, "last_verification", None)
+                        else getattr(drift_status, "updated_at_utc", None)
                     )
-                )
+                    if isinstance(raw_ts, str):
+                        m16_ts = raw_ts
+                    snapshots.append(
+                        SubsystemSnapshot(
+                            subsystem_name="drift_service",
+                            state=m16_state,
+                            epoch_id=m16_epoch,
+                            is_nominal=m16_state in ("READY", "STABLE"),
+                            details={"bound_landmarks": getattr(drift_status, "bound_landmark_count", 0)},
+                        )
+                    )
             except Exception:
                 m16_state = "UNKNOWN"
 
         # M17 Spatial Recovery
         m17_state: Optional[str] = None
         m17_rev: Optional[int] = None
+        m17_ts: Optional[str] = None
         if recovery_service is not None:
             try:
                 rec_status = recovery_service.get_recovery_status(session_id)
-                m17_state = rec_status.state.value
-                m17_rev = rec_status.registration_revision
-                snapshots.append(
-                    SubsystemSnapshot(
-                        subsystem_name="recovery_service",
-                        state=m17_state,
-                        epoch_id=None,  # registration_revision is NOT an epoch
-                        is_nominal=m17_state in ("IDLE", "ACTIVATED"),
-                        details={"registration_revision": m17_rev},
+                if rec_status is not None:
+                    sid = getattr(rec_status, "session_id", None)
+                    if isinstance(sid, str) and sid != session_id:
+                        session_mismatch = True
+                    m17_state = rec_status.state.value if hasattr(rec_status.state, "value") else str(rec_status.state)
+                    raw_rev = getattr(rec_status, "registration_revision", None)
+                    if isinstance(raw_rev, int):
+                        m17_rev = raw_rev
+                    raw_ts = getattr(rec_status, "updated_at_utc", None)
+                    if isinstance(raw_ts, str):
+                        m17_ts = raw_ts
+                    snapshots.append(
+                        SubsystemSnapshot(
+                            subsystem_name="recovery_service",
+                            state=m17_state,
+                            epoch_id=None,  # registration_revision is NOT an epoch
+                            is_nominal=m17_state in ("IDLE", "ACTIVATED"),
+                            details={"registration_revision": m17_rev},
+                        )
                     )
-                )
             except Exception:
                 m17_state = "UNKNOWN"
 
         # M13 Registration
         m13_state: Optional[str] = None
         m13_epoch: Optional[int] = None
+        m13_rev: Optional[int] = None
+        m13_ts: Optional[str] = None
         if registration_service is not None:
             try:
                 reg_record = registration_service.get_registration(session_id)
                 if reg_record is not None:
-                    m13_state = reg_record.state.value
-                    m13_epoch = reg_record.epoch_id
+                    sid = getattr(reg_record, "session_id", None)
+                    if isinstance(sid, str) and sid != session_id:
+                        session_mismatch = True
+                    m13_state = reg_record.state.value if hasattr(reg_record.state, "value") else str(reg_record.state)
+                    m13_epoch = reg_record.epoch_id if isinstance(getattr(reg_record, "epoch_id", None), int) else None
+                    raw_rev = getattr(reg_record, "revision", None) or getattr(reg_record, "registration_revision", None)
+                    if isinstance(raw_rev, int):
+                        m13_rev = raw_rev
+                    raw_ts = getattr(reg_record, "verified_at_utc", None) or (
+                        getattr(reg_record.transform, "created_at_utc", None) if getattr(reg_record, "transform", None) else None
+                    )
+                    if isinstance(raw_ts, str):
+                        m13_ts = raw_ts
                     snapshots.append(
                         SubsystemSnapshot(
                             subsystem_name="registration_service",
                             state=m13_state,
                             epoch_id=m13_epoch,
                             is_nominal=m13_state == "VERIFIED",
-                            details={"locked": reg_record.locked},
+                            details={"locked": getattr(reg_record, "locked", False)},
                         )
                     )
                 else:
@@ -128,14 +184,21 @@ class SafetyGateEvaluator:
             try:
                 wf_snapshot = workflow_service.get_workflow_state(session_id)
                 if wf_snapshot is not None:
-                    m10_state = wf_snapshot.current_phase.value
+                    sid = getattr(wf_snapshot, "session_id", None)
+                    if isinstance(sid, str) and sid != session_id:
+                        session_mismatch = True
+                    m10_state = (
+                        wf_snapshot.current_phase.value
+                        if hasattr(wf_snapshot.current_phase, "value")
+                        else str(wf_snapshot.current_phase)
+                    )
                     snapshots.append(
                         SubsystemSnapshot(
                             subsystem_name="workflow_service",
                             state=m10_state,
                             epoch_id=None,
                             is_nominal=m10_state not in ("RECOVERY_REQUIRED", "ABORTED"),
-                            details={"is_terminal": wf_snapshot.is_terminal},
+                            details={"is_terminal": getattr(wf_snapshot, "is_terminal", False)},
                         )
                     )
                 else:
@@ -150,24 +213,41 @@ class SafetyGateEvaluator:
         if navigation_service is not None:
             try:
                 nav_status = navigation_service.get_navigation_status(session_id)
-                m14_state = nav_status.state.value
-                m14_epoch = nav_status.epoch_id
-                has_bound_traj = nav_status.has_bound_trajectory
-                snapshots.append(
-                    SubsystemSnapshot(
-                        subsystem_name="navigation_service",
-                        state=m14_state,
-                        epoch_id=m14_epoch,
-                        is_nominal=m14_state in ("IDLE", "TRACKING"),
-                        details={"has_bound_trajectory": has_bound_traj},
+                if nav_status is not None:
+                    sid = getattr(nav_status, "session_id", None)
+                    if isinstance(sid, str) and sid != session_id:
+                        session_mismatch = True
+                    m14_state = nav_status.state.value if hasattr(nav_status.state, "value") else str(nav_status.state)
+                    m14_epoch = nav_status.epoch_id if isinstance(getattr(nav_status, "epoch_id", None), int) else None
+                    has_bound_traj = bool(getattr(nav_status, "has_bound_trajectory", False))
+                    snapshots.append(
+                        SubsystemSnapshot(
+                            subsystem_name="navigation_service",
+                            state=m14_state,
+                            epoch_id=m14_epoch,
+                            is_nominal=m14_state in ("IDLE", "TRACKING"),
+                            details={"has_bound_trajectory": has_bound_traj},
+                        )
                     )
-                )
             except Exception:
                 m14_state = "UNKNOWN"
 
         # ---------------------------------------------------------------------
         # 2. Strict Precedence Hierarchy Evaluation
         # ---------------------------------------------------------------------
+
+        # Precedence 0: Session Mismatch Check
+        if session_mismatch:
+            return GateStatusRecord(
+                session_id=session_id,
+                decision=GateDecision.DENIED_INTERLOCKED,
+                severity=GateSeverity.BLOCKING,
+                reason_code=GateReasonCode.SESSION_MISMATCH,
+                action=action,
+                sequence_number=request.sequence_number,
+                subsystem_snapshots=tuple(snapshots),
+                evaluated_at_utc=request.now_utc,
+            )
 
         # Precedence 1: M15 Critical Exclusion Zone Breach
         if m15_state in ("CRITICAL_BREACH", "INTERLOCKED"):
@@ -246,6 +326,153 @@ class SafetyGateEvaluator:
                     subsystem_snapshots=tuple(snapshots),
                     evaluated_at_utc=request.now_utc,
                 )
+
+        # ---------------------------------------------------------------------
+        # WORKFLOW_RESUMPTION Dedicated Precedence Path
+        # ---------------------------------------------------------------------
+        if action == SafetyGateAction.WORKFLOW_RESUMPTION:
+            # 1. M15 Proximity Check
+            if m15_state not in ("SAFE", "CLEAR"):
+                return GateStatusRecord(
+                    session_id=session_id,
+                    decision=GateDecision.DENIED_CRITICAL if m15_state == "CRITICAL_BREACH" else GateDecision.DENIED_INTERLOCKED,
+                    severity=GateSeverity.CRITICAL if m15_state == "CRITICAL_BREACH" else GateSeverity.BLOCKING,
+                    reason_code=GateReasonCode.CRITICAL_EXCLUSION_ZONE_BREACH,
+                    action=action,
+                    sequence_number=request.sequence_number,
+                    subsystem_snapshots=tuple(snapshots),
+                    evaluated_at_utc=request.now_utc,
+                )
+            if isinstance(m15_rev, int) and isinstance(m17_rev, int) and m15_rev != m17_rev:
+                return GateStatusRecord(
+                    session_id=session_id,
+                    decision=GateDecision.DENIED_INTERLOCKED,
+                    severity=GateSeverity.BLOCKING,
+                    reason_code=GateReasonCode.CRITICAL_EXCLUSION_ZONE_BREACH,
+                    action=action,
+                    sequence_number=request.sequence_number,
+                    subsystem_snapshots=tuple(snapshots),
+                    evaluated_at_utc=request.now_utc,
+                )
+            if isinstance(m15_ts, str) and isinstance(m17_ts, str) and m15_ts < m17_ts:
+                return GateStatusRecord(
+                    session_id=session_id,
+                    decision=GateDecision.DENIED_INTERLOCKED,
+                    severity=GateSeverity.BLOCKING,
+                    reason_code=GateReasonCode.CRITICAL_EXCLUSION_ZONE_BREACH,
+                    action=action,
+                    sequence_number=request.sequence_number,
+                    subsystem_snapshots=tuple(snapshots),
+                    evaluated_at_utc=request.now_utc,
+                )
+
+            # 2. M16 Landmark Drift Check: Must be STABLE
+            if m16_state != "STABLE":
+                return GateStatusRecord(
+                    session_id=session_id,
+                    decision=GateDecision.DENIED_INTERLOCKED,
+                    severity=GateSeverity.BLOCKING,
+                    reason_code=GateReasonCode.LANDMARK_DRIFT_EXCEEDED,
+                    action=action,
+                    sequence_number=request.sequence_number,
+                    subsystem_snapshots=tuple(snapshots),
+                    evaluated_at_utc=request.now_utc,
+                )
+            if isinstance(m16_rev, int) and isinstance(m17_rev, int) and m16_rev != m17_rev:
+                return GateStatusRecord(
+                    session_id=session_id,
+                    decision=GateDecision.DENIED_INTERLOCKED,
+                    severity=GateSeverity.BLOCKING,
+                    reason_code=GateReasonCode.LANDMARK_DRIFT_EXCEEDED,
+                    action=action,
+                    sequence_number=request.sequence_number,
+                    subsystem_snapshots=tuple(snapshots),
+                    evaluated_at_utc=request.now_utc,
+                )
+            if isinstance(m16_ts, str) and isinstance(m17_ts, str) and m16_ts < m17_ts:
+                return GateStatusRecord(
+                    session_id=session_id,
+                    decision=GateDecision.DENIED_INTERLOCKED,
+                    severity=GateSeverity.BLOCKING,
+                    reason_code=GateReasonCode.LANDMARK_DRIFT_EXCEEDED,
+                    action=action,
+                    sequence_number=request.sequence_number,
+                    subsystem_snapshots=tuple(snapshots),
+                    evaluated_at_utc=request.now_utc,
+                )
+
+            # 3. M17 Spatial Recovery Check: Must be ACTIVATED
+            if m17_state != "ACTIVATED":
+                return GateStatusRecord(
+                    session_id=session_id,
+                    decision=GateDecision.DENIED_INTERLOCKED,
+                    severity=GateSeverity.BLOCKING,
+                    reason_code=GateReasonCode.SPATIAL_RECOVERY_FAILED,
+                    action=action,
+                    sequence_number=request.sequence_number,
+                    subsystem_snapshots=tuple(snapshots),
+                    evaluated_at_utc=request.now_utc,
+                )
+            if isinstance(request.recovery_revision, int) and isinstance(m17_rev, int) and request.recovery_revision != m17_rev:
+                return GateStatusRecord(
+                    session_id=session_id,
+                    decision=GateDecision.DENIED_INTERLOCKED,
+                    severity=GateSeverity.BLOCKING,
+                    reason_code=GateReasonCode.SPATIAL_RECOVERY_FAILED,
+                    action=action,
+                    sequence_number=request.sequence_number,
+                    subsystem_snapshots=tuple(snapshots),
+                    evaluated_at_utc=request.now_utc,
+                )
+
+            # 4. M13 Registration Check: Must be VERIFIED
+            if m13_state != "VERIFIED":
+                return GateStatusRecord(
+                    session_id=session_id,
+                    decision=GateDecision.DENIED_INTERLOCKED,
+                    severity=GateSeverity.BLOCKING,
+                    reason_code=GateReasonCode.REGISTRATION_UNVERIFIED,
+                    action=action,
+                    sequence_number=request.sequence_number,
+                    subsystem_snapshots=tuple(snapshots),
+                    evaluated_at_utc=request.now_utc,
+                )
+            if isinstance(m13_rev, int) and isinstance(m17_rev, int) and m13_rev != m17_rev:
+                return GateStatusRecord(
+                    session_id=session_id,
+                    decision=GateDecision.DENIED_INTERLOCKED,
+                    severity=GateSeverity.BLOCKING,
+                    reason_code=GateReasonCode.REGISTRATION_UNVERIFIED,
+                    action=action,
+                    sequence_number=request.sequence_number,
+                    subsystem_snapshots=tuple(snapshots),
+                    evaluated_at_utc=request.now_utc,
+                )
+
+            # 5. M10 Workflow Phase Check: Must currently be RECOVERY_REQUIRED
+            if m10_state != "RECOVERY_REQUIRED":
+                return GateStatusRecord(
+                    session_id=session_id,
+                    decision=GateDecision.DENIED_INTERLOCKED,
+                    severity=GateSeverity.BLOCKING,
+                    reason_code=GateReasonCode.WORKFLOW_PHASE_BLOCKED,
+                    action=action,
+                    sequence_number=request.sequence_number,
+                    subsystem_snapshots=tuple(snapshots),
+                    evaluated_at_utc=request.now_utc,
+                )
+
+            # 6. All checks passed for WORKFLOW_RESUMPTION -> PERMITTED_CLEAR
+            return GateStatusRecord(
+                session_id=session_id,
+                decision=GateDecision.PERMITTED_CLEAR,
+                severity=GateSeverity.NONE,
+                reason_code=GateReasonCode.NONE,
+                action=action,
+                sequence_number=request.sequence_number,
+                subsystem_snapshots=tuple(snapshots),
+                evaluated_at_utc=request.now_utc,
+            )
 
         # Precedence 5: M13 Registration Unverified
         if m13_state != "VERIFIED":

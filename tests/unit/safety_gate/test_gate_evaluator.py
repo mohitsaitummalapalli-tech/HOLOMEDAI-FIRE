@@ -249,7 +249,7 @@ class TestSafetyGateEvaluatorPrecedence:
         """Matrix C: M15 WARNING isolation."""
         mock_registration_service.get_registration.return_value.state = RegistrationState.VERIFIED
         mock_proximity_service.get_proximity_status.return_value.state.value = "WARNING"
-        for act in SafetyGateAction:
+        for act in (SafetyGateAction.TOOL_NAVIGATION, SafetyGateAction.TRAJECTORY_ALIGNMENT, SafetyGateAction.RECOVERY_REORIENTATION):
             r_act = SafetyGateEvaluator.evaluate(
                 request=make_gate_request(action=act),
                 epoch_id=1,
@@ -262,6 +262,19 @@ class TestSafetyGateEvaluatorPrecedence:
             )
             assert r_act.decision == GateDecision.PERMITTED_WITH_CAUTION
             assert r_act.reason_code == GateReasonCode.APPROACHING_MARGIN
+
+        # WORKFLOW_RESUMPTION is strictly denied under proximity WARNING
+        r_res = SafetyGateEvaluator.evaluate(
+            request=make_gate_request(action=SafetyGateAction.WORKFLOW_RESUMPTION),
+            epoch_id=1,
+            workflow_service=mock_workflow_service,
+            registration_service=mock_registration_service,
+            navigation_service=mock_navigation_service,
+            proximity_service=mock_proximity_service,
+            drift_service=mock_drift_service,
+            recovery_service=mock_recovery_service,
+        )
+        assert r_res.decision == GateDecision.DENIED_INTERLOCKED
 
         """Matrix D: M17 FAILED isolation."""
         mock_proximity_service.get_proximity_status.return_value.state.value = "SAFE"

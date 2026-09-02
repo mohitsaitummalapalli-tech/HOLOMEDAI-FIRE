@@ -5,10 +5,13 @@ from __future__ import annotations
 
 from typing import Optional
 
+from holomed.workflow._transaction import _RecoveryTransactionCapability
 from holomed.workflow.exceptions import (
+    WorkflowAuthorizationError,
     WorkflowCapacityError,
     WorkflowSequenceError,
     WorkflowTransitionError,
+    WorkflowValidationError,
 )
 from holomed.workflow.models import (
     MAX_TRANSITIONS_PER_WORKFLOW,
@@ -90,6 +93,9 @@ class WorkflowStateMachine:
         self._transition_count: int = 0
         self._last_sequence: int = 0
         self._history: list[WorkflowPhase] = [initial_phase]
+        self._pending_resumption_prior: Optional[
+            tuple[WorkflowPhase, Optional[WorkflowPhase], int, int, list[WorkflowPhase]]
+        ] = None
 
     @property
     def workflow_id(self) -> str:
@@ -132,6 +138,11 @@ class WorkflowStateMachine:
             sequence_number=self._last_sequence,
             is_terminal=self.is_terminal,
         )
+
+    @property
+    def last_sequence_number(self) -> int:
+        """Return the sequence number of the most recent transition."""
+        return self._last_sequence
 
     def transition_to(
         self,
@@ -179,3 +190,77 @@ class WorkflowStateMachine:
     def abort(self, sequence_number: int, reason: str = "") -> WorkflowStateSnapshot:
         """Immediately and safely transition to ABORTED from any non-terminal state."""
         return self.transition_to(WorkflowPhase.ABORTED, sequence_number)
+
+    def begin_recovery_resumption(
+        self,
+        capability: _RecoveryTransactionCapability,
+    ) -> None:
+        """Stage transition from RECOVERY_REQUIRED to NAVIGATION using internal transaction capability."""
+        if not isinstance(capability, _RecoveryTransactionCapability) or not capability.is_active:
+            raise WorkflowAuthorizationError("Valid active _RecoveryTransactionCapability required")
+        if capability.session_id != self._session_id:
+            raise WorkflowAuthorizationError(
+                f"Capability session {capability.session_id!r} does not match workflow session {self._session_id!r}"
+            )
+        if capability.workflow_id != self._workflow_id:
+            raise WorkflowAuthorizationError(
+                f"Capability workflow {capability.workflow_id!r} does not match workflow {self._workflow_id!r}"
+            )
+        if self._current_phase != WorkflowPhase.RECOVERY_REQUIRED:
+            raise WorkflowTransitionError(
+                f"Cannot resume from recovery: current phase is {self._current_phase.name}, expected RECOVERY_REQUIRED"
+            )
+
+        sequence_number = capability.sequence_number
+        if sequence_number <= self._last_sequence:
+            raise WorkflowSequenceError(
+                f"Sequence {sequence_number} must exceed last sequence {self._last_sequence}"
+            )
+        if self._transition_count >= MAX_TRANSITIONS_PER_WORKFLOW:
+            raise WorkflowCapacityError(
+                f"Workflow transition capacity ({MAX_TRANSITIONS_PER_WORKFLOW}) exceeded"
+            )
+        if WorkflowPhase.NAVIGATION not in self._procedure.allowed_phases:
+            raise WorkflowTransitionError(
+                f"Phase NAVIGATION not permitted in procedure {self._procedure.procedure_id}"
+            )
+
+        self._pending_resumption_prior = (
+            self._current_phase,
+            self._previous_phase,
+            self._transition_count,
+            self._last_sequence,
+            list(self._history),
+        )
+        self._previous_phase = self._current_phase
+        self._current_phase = WorkflowPhase.NAVIGATION
+        self._transition_count += 1
+        self._last_sequence = sequence_number
+        self._history.append(WorkflowPhase.NAVIGATION)
+
+    def commit_recovery_resumption(
+        self,
+        capability: _RecoveryTransactionCapability,
+    ) -> WorkflowStateSnapshot:
+        """Commit staged recovery resumption and return current snapshot."""
+        if not isinstance(capability, _RecoveryTransactionCapability) or not capability.is_active:
+            raise WorkflowAuthorizationError("Valid active _RecoveryTransactionCapability required")
+        if capability.session_id != self._session_id or capability.workflow_id != self._workflow_id:
+            raise WorkflowAuthorizationError("Capability mismatch during commit")
+        self._pending_resumption_prior = None
+        return self.snapshot
+
+    def abort_recovery_resumption(
+        self,
+        capability: Optional[_RecoveryTransactionCapability] = None,
+    ) -> None:
+        """Abort staged recovery resumption, restoring pre-staged state."""
+        if self._pending_resumption_prior is not None:
+            (
+                self._current_phase,
+                self._previous_phase,
+                self._transition_count,
+                self._last_sequence,
+                self._history,
+            ) = self._pending_resumption_prior
+            self._pending_resumption_prior = None
