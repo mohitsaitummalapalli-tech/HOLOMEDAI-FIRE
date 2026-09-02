@@ -21,6 +21,7 @@ from holomed.protocol.models import MessageEnvelope
 from holomed.registration.constants import MAX_ACTIVE_REGISTRATIONS, MAX_ALLOWED_FRE_MM
 from holomed.registration.exceptions import (
     RegistrationAccuracyError,
+    RegistrationAuthorizationError,
     RegistrationCapacityError,
     RegistrationError,
     RegistrationLifecycleError,
@@ -125,12 +126,9 @@ class RegistrationService(IService):
         for res_id in STRUCTURAL_RESOURCE_IDS:
             self._resources.acquire(res_id)
 
-        # Register Dispatcher Routes strictly during INITIALIZED
+        # Register Dispatcher Routes strictly during INITIALIZED (M23: Read-only query only)
         if self._dispatcher is not None:
-            self._dispatcher.register_command_handler("registration.submit", self.handle_submit_command, self.name)
-            self._dispatcher.register_command_handler("registration.solve", self.handle_solve_command, self.name)
             self._dispatcher.register_query_handler("registration.get", self.handle_get_query, self.name)
-            self._dispatcher.register_command_handler("registration.verify", self.handle_verify_command, self.name)
 
         self._state = ServiceState.INITIALIZED
 
@@ -214,10 +212,39 @@ class RegistrationService(IService):
     # Core Registration Management APIs
     # -------------------------------------------------------------------------
 
-    def submit_fiducials(self, session_id: str, plan_id: str, cloud: FiducialCloud) -> RegistrationStatusRecord:
+    def submit_fiducials(
+        self,
+        session_id: str,
+        plan_id: str,
+        cloud: FiducialCloud,
+        *,
+        capability: Optional[Any] = None,
+        sequence_number: Optional[int] = None,
+    ) -> RegistrationStatusRecord:
         """Ingest fiducial point cloud for a session."""
         if self._state != ServiceState.STARTED:
             raise RegistrationLifecycleError(f"Cannot submit fiducials in state {self._state.name}")
+
+        # Capability Validation (M23)
+        if capability is None or not getattr(capability, "is_active", False):
+            raise RegistrationAuthorizationError("Registration execution requires an active capability")
+        if getattr(capability, "action", None) != "REGISTRATION_ALIGNMENT":
+            raise RegistrationAuthorizationError(
+                f"Capability action mismatch: expected 'REGISTRATION_ALIGNMENT', got {getattr(capability, 'action', None)!r}"
+            )
+        if getattr(capability, "session_id", None) != session_id:
+            raise RegistrationAuthorizationError(
+                f"Capability session mismatch: expected {session_id!r}, got {getattr(capability, 'session_id', None)!r}"
+            )
+        if sequence_number is not None and getattr(capability, "sequence_number", None) != sequence_number:
+            raise RegistrationAuthorizationError(
+                f"Capability sequence mismatch: expected {sequence_number}, got {getattr(capability, 'sequence_number', None)}"
+            )
+        if getattr(capability, "service_instance_id", None) != id(self):
+            raise RegistrationAuthorizationError(
+                f"Capability service binding mismatch: expected {id(self)}, got {getattr(capability, 'service_instance_id', None)}"
+            )
+
         if self._in_transaction:
             raise RegistrationLifecycleError("Reentrant call to submit_fiducials rejected")
 
@@ -254,10 +281,38 @@ class RegistrationService(IService):
         finally:
             self._in_transaction = False
 
-    def solve_registration(self, session_id: str, plan_id: str) -> RegistrationStatusRecord:
+    def solve_registration(
+        self,
+        session_id: str,
+        plan_id: str,
+        *,
+        capability: Optional[Any] = None,
+        sequence_number: Optional[int] = None,
+    ) -> RegistrationStatusRecord:
         """Solve 3D rigid transform and evaluate FRE."""
         if self._state != ServiceState.STARTED:
             raise RegistrationLifecycleError(f"Cannot solve registration in state {self._state.name}")
+
+        # Capability Validation (M23)
+        if capability is None or not getattr(capability, "is_active", False):
+            raise RegistrationAuthorizationError("Registration execution requires an active capability")
+        if getattr(capability, "action", None) != "REGISTRATION_ALIGNMENT":
+            raise RegistrationAuthorizationError(
+                f"Capability action mismatch: expected 'REGISTRATION_ALIGNMENT', got {getattr(capability, 'action', None)!r}"
+            )
+        if getattr(capability, "session_id", None) != session_id:
+            raise RegistrationAuthorizationError(
+                f"Capability session mismatch: expected {session_id!r}, got {getattr(capability, 'session_id', None)!r}"
+            )
+        if sequence_number is not None and getattr(capability, "sequence_number", None) != sequence_number:
+            raise RegistrationAuthorizationError(
+                f"Capability sequence mismatch: expected {sequence_number}, got {getattr(capability, 'sequence_number', None)}"
+            )
+        if getattr(capability, "service_instance_id", None) != id(self):
+            raise RegistrationAuthorizationError(
+                f"Capability service binding mismatch: expected {id(self)}, got {getattr(capability, 'service_instance_id', None)}"
+            )
+
         if self._in_transaction:
             raise RegistrationLifecycleError("Reentrant call to solve_registration rejected")
 
@@ -340,10 +395,34 @@ class RegistrationService(IService):
         operator_id: str,
         checkpoint_plan_mm: tuple[float, float, float],
         checkpoint_measured_mm: tuple[float, float, float],
+        *,
+        capability: Optional[Any] = None,
+        sequence_number: Optional[int] = None,
     ) -> RegistrationVerificationSnapshot:
         """Formally verify registration during WHO Safety Timeout and check drift."""
         if self._state != ServiceState.STARTED:
             raise RegistrationLifecycleError(f"Cannot verify registration in state {self._state.name}")
+
+        # Capability Validation (M23)
+        if capability is None or not getattr(capability, "is_active", False):
+            raise RegistrationAuthorizationError("Registration execution requires an active capability")
+        if getattr(capability, "action", None) != "REGISTRATION_ALIGNMENT":
+            raise RegistrationAuthorizationError(
+                f"Capability action mismatch: expected 'REGISTRATION_ALIGNMENT', got {getattr(capability, 'action', None)!r}"
+            )
+        if getattr(capability, "session_id", None) != session_id:
+            raise RegistrationAuthorizationError(
+                f"Capability session mismatch: expected {session_id!r}, got {getattr(capability, 'session_id', None)!r}"
+            )
+        if sequence_number is not None and getattr(capability, "sequence_number", None) != sequence_number:
+            raise RegistrationAuthorizationError(
+                f"Capability sequence mismatch: expected {sequence_number}, got {getattr(capability, 'sequence_number', None)}"
+            )
+        if getattr(capability, "service_instance_id", None) != id(self):
+            raise RegistrationAuthorizationError(
+                f"Capability service binding mismatch: expected {id(self)}, got {getattr(capability, 'service_instance_id', None)}"
+            )
+
         if session_id not in self._registrations:
             raise RegistrationValidationError(f"Registration not found for session {session_id!r}")
 

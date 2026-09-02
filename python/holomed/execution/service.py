@@ -28,6 +28,8 @@ from holomed.execution.models import (
     NavigationExecutionStatusRecord,
     RecoveryReorientationExecutionRequest,
     RecoveryReorientationExecutionResult,
+    RegistrationExecutionRequest,
+    RegistrationExecutionResult,
     ToolExecutionRequest,
     ToolExecutionResult,
     TrajectoryBindingExecutionRequest,
@@ -50,6 +52,7 @@ from holomed.protocol.builders import (
 from holomed.protocol.models import MessageEnvelope
 from holomed.recovery.models import RecoveryStatusRecord
 from holomed.recovery.service import RecoveryService
+from holomed.registration.service import RegistrationService
 from holomed.runtime.context import RuntimeContext
 from holomed.runtime.logging import SecretFilter, StructuredLogger
 from holomed.runtime.models import (
@@ -95,6 +98,7 @@ class ClinicalExecutionGatewayService(IService):
         persistence_service: Optional[PersistenceService] = None,
         recovery_service: Optional[RecoveryService] = None,
         tool_service: Optional[ToolService] = None,
+        registration_service: Optional[RegistrationService] = None,
         secret_filter: Optional[SecretFilter] = None,
         logger: Optional[StructuredLogger] = None,
     ) -> None:
@@ -105,6 +109,7 @@ class ClinicalExecutionGatewayService(IService):
         self._persistence_service = persistence_service
         self._recovery_service = recovery_service
         self._tool_service = tool_service
+        self._registration_service = registration_service
         self._secret_filter = secret_filter
         self._logger = logger or StructuredLogger(SERVICE_NAME, secret_filter=secret_filter)
 
@@ -155,7 +160,7 @@ class ClinicalExecutionGatewayService(IService):
         for res_id in STRUCTURAL_RESOURCE_IDS:
             self._resources.acquire(res_id)
 
-        # Register Dispatcher Routes (Strictly 6 execution routes in M21)
+        # Register Dispatcher Routes (7 execution routes in M23)
         if self._dispatcher is not None:
             self._dispatcher.register_command_handler(
                 "execution.navigation.execute", self.handle_execute_command, self.name
@@ -171,6 +176,9 @@ class ClinicalExecutionGatewayService(IService):
             )
             self._dispatcher.register_command_handler(
                 "execution.workflow.resume", self.handle_workflow_resume_command, self.name
+            )
+            self._dispatcher.register_command_handler(
+                "execution.registration.execute", self.handle_registration_execute_command, self.name
             )
             self._dispatcher.register_query_handler(
                 "execution.status.get", self.handle_get_status_query, self.name
@@ -1456,6 +1464,298 @@ class ClinicalExecutionGatewayService(IService):
             raw_err = str(e)
             redacted = self._secret_filter.redact(raw_err) if self._secret_filter else raw_err
             return create_error_response(command_envelope, self.name, _format_error_code(type(e).__name__), redacted)
+
+    # -------------------------------------------------------------------------
+    # Registration Execution (Dual-Gate Coordinated Initial Spatial Registration M23)
+    # -------------------------------------------------------------------------
+
+    def execute_registration(
+        self, request: RegistrationExecutionRequest
+    ) -> RegistrationExecutionResult:
+        """Execute initial spatial registration operation under dual-gate authorization (M23)."""
+        if self._state != ServiceState.STARTED:
+            raise ExecutionLifecycleError(f"Cannot execute registration in state {self._state.name}")
+        if self._in_transaction:
+            raise ExecutionLifecycleError("Reentrant call to execute_registration rejected")
+
+        self._in_transaction = True
+        try:
+            session_id = request.session_id
+
+            if request.action != SafetyGateAction.TRAJECTORY_ALIGNMENT:
+                raise ExecutionValidationError(
+                    f"Action mismatch: execute_registration requires TRAJECTORY_ALIGNMENT, got {request.action.value}"
+                )
+
+            # 1. Step 1: Inline M18 Safety Gate Evaluation
+            gate_decision = GateDecision.DENIED_INTERLOCKED
+            gate_reason = GateReasonCode.NONE
+            if self._safety_gate_service is not None:
+                gate_req = GateRequest(
+                    session_id=session_id,
+                    action=SafetyGateAction.TRAJECTORY_ALIGNMENT,
+                    sequence_number=request.sequence_number,
+                    now_utc=request.now_utc,
+                )
+                gate_rec = self._safety_gate_service.evaluate(gate_req)
+                gate_decision = gate_rec.decision
+                gate_reason = gate_rec.reason_code
+            else:
+                gate_decision = GateDecision.DENIED_INTERLOCKED
+                gate_reason = GateReasonCode.NONE
+
+            # Short-circuit on M18 Denial
+            if gate_decision in (GateDecision.DENIED_INTERLOCKED, GateDecision.DENIED_CRITICAL):
+                res = RegistrationExecutionResult(
+                    session_id=session_id,
+                    execution_status=ExecutionStatus.BLOCKED_SAFETY_GATE,
+                    gate_decision=gate_decision,
+                    gate_reason_code=gate_reason,
+                    action=request.action,
+                    sequence_number=request.sequence_number,
+                    operation=request.operation,
+                    executed_at_utc=request.now_utc,
+                    error_message=f"Blocked by M18 safety gate: {gate_reason.value}",
+                )
+                if self._persistence_service is not None:
+                    self._persistence_service.record_audit(
+                        {
+                            "session_id": session_id,
+                            "operation": request.operation,
+                            "event": "registration_blocked_safety_gate",
+                            "decision": gate_decision.value,
+                            "reason": gate_reason.value,
+                            "sequence_number": request.sequence_number,
+                            "epoch_id": self._epoch_id,
+                        },
+                        session_id=session_id,
+                    )
+                return res
+
+            # 2. Step 2: M10 Workflow Authorization Gate
+            wf_status = None
+            if self._workflow_service is not None:
+                tool_name = f"registration.{request.operation.lower()}"
+                wf_auth = self._workflow_service.authorize_tool(
+                    session_id=session_id,
+                    tool_id=tool_name,
+                    safety_classification=request.tool_safety_classification or ToolSafetyClassification.READ_ONLY_INFORMATIVE,
+                )
+                wf_status = wf_auth.status
+                if wf_auth.status != WorkflowToolAuthorizationStatus.PERMITTED:
+                    res = RegistrationExecutionResult(
+                        session_id=session_id,
+                        execution_status=ExecutionStatus.BLOCKED_WORKFLOW,
+                        gate_decision=gate_decision,
+                        gate_reason_code=gate_reason,
+                        action=request.action,
+                        sequence_number=request.sequence_number,
+                        operation=request.operation,
+                        executed_at_utc=request.now_utc,
+                        workflow_status=wf_status,
+                        error_message=f"Blocked by M10 workflow: {wf_auth.status.value}",
+                    )
+                    if self._persistence_service is not None:
+                        self._persistence_service.record_audit(
+                            {
+                                "session_id": session_id,
+                                "operation": request.operation,
+                                "event": "registration_blocked_workflow",
+                                "workflow_status": wf_auth.status.value,
+                                "sequence_number": request.sequence_number,
+                                "epoch_id": self._epoch_id,
+                            },
+                            session_id=session_id,
+                        )
+                    return res
+
+            # 3. Step 3: Registration Service Availability Check
+            if self._registration_service is None:
+                raise ExecutionLifecycleError("RegistrationService is unavailable")
+
+            # 4. Step 4: Capability Minting & Execution
+            cap_reg = _create_execution_capability(
+                service_instance_id=id(self._registration_service),
+                session_id=session_id,
+                action="REGISTRATION_ALIGNMENT",
+                sequence_number=request.sequence_number,
+            )
+            reg_record = None
+            verif_snap = None
+            try:
+                op = request.operation.upper()
+                if op == "SUBMIT":
+                    if not request.plan_id or not request.cloud:
+                        raise ExecutionValidationError("SUBMIT requires plan_id and cloud")
+                    reg_record = self._registration_service.submit_fiducials(
+                        session_id=session_id,
+                        plan_id=request.plan_id,
+                        cloud=request.cloud,
+                        capability=cap_reg,
+                        sequence_number=request.sequence_number,
+                    )
+                elif op == "SOLVE":
+                    if not request.plan_id:
+                        raise ExecutionValidationError("SOLVE requires plan_id")
+                    reg_record = self._registration_service.solve_registration(
+                        session_id=session_id,
+                        plan_id=request.plan_id,
+                        capability=cap_reg,
+                        sequence_number=request.sequence_number,
+                    )
+                elif op == "VERIFY":
+                    if not request.operator_id or request.checkpoint_plan_mm is None or request.checkpoint_measured_mm is None:
+                        raise ExecutionValidationError("VERIFY requires operator_id, checkpoint_plan_mm, checkpoint_measured_mm")
+                    verif_snap = self._registration_service.verify_registration(
+                        session_id=session_id,
+                        operator_id=request.operator_id,
+                        checkpoint_plan_mm=request.checkpoint_plan_mm,
+                        checkpoint_measured_mm=request.checkpoint_measured_mm,
+                        capability=cap_reg,
+                        sequence_number=request.sequence_number,
+                    )
+                    reg_record = self._registration_service.get_registration(session_id)
+                else:
+                    raise ExecutionValidationError(f"Unsupported registration operation: {request.operation}")
+            except Exception as e:
+                raw_err = str(e)
+                redacted = self._secret_filter.redact(raw_err) if self._secret_filter else raw_err
+                res = RegistrationExecutionResult(
+                    session_id=session_id,
+                    execution_status=ExecutionStatus.FAILED_NAVIGATION_GEOMETRY,
+                    gate_decision=gate_decision,
+                    gate_reason_code=gate_reason,
+                    action=request.action,
+                    sequence_number=request.sequence_number,
+                    operation=request.operation,
+                    executed_at_utc=request.now_utc,
+                    workflow_status=wf_status,
+                    error_message=redacted,
+                )
+                if self._persistence_service is not None:
+                    self._persistence_service.record_audit(
+                        {
+                            "session_id": session_id,
+                            "operation": request.operation,
+                            "event": "registration_execution_failed",
+                            "error": redacted,
+                            "sequence_number": request.sequence_number,
+                            "epoch_id": self._epoch_id,
+                        },
+                        session_id=session_id,
+                    )
+                return res
+            finally:
+                cap_reg.invalidate()
+
+            # 5. Success Resolution
+            exec_status = (
+                ExecutionStatus.EXECUTED_WITH_CAUTION
+                if gate_decision == GateDecision.PERMITTED_WITH_CAUTION
+                else ExecutionStatus.EXECUTED_CLEAR
+            )
+            res = RegistrationExecutionResult(
+                session_id=session_id,
+                execution_status=exec_status,
+                gate_decision=gate_decision,
+                gate_reason_code=gate_reason,
+                action=request.action,
+                sequence_number=request.sequence_number,
+                operation=request.operation,
+                executed_at_utc=request.now_utc,
+                workflow_status=wf_status,
+                registration_record=reg_record,
+                verification_snapshot=verif_snap,
+            )
+            if self._persistence_service is not None:
+                self._persistence_service.record_audit(
+                    {
+                        "session_id": session_id,
+                        "operation": request.operation,
+                        "event": "registration_executed",
+                        "status": exec_status.value,
+                        "sequence_number": request.sequence_number,
+                        "epoch_id": self._epoch_id,
+                    },
+                    session_id=session_id,
+                )
+            return res
+        finally:
+            self._in_transaction = False
+
+    def handle_registration_execute_command(self, envelope: MessageEnvelope) -> MessageEnvelope:
+        """Dispatcher command handler for execution.registration.execute."""
+        payload = envelope.payload
+        session_id = payload.get("session_id")
+        seq = payload.get("sequence_number")
+        now_utc = payload.get("now_utc") or datetime.now(timezone.utc).isoformat()
+        operation = payload.get("operation") or payload.get("registration_operation")
+
+        if not session_id or seq is None or not operation:
+            return create_error_response(envelope, self.name, "ERR_INVALID_ARGS", "Missing required execution fields")
+
+        try:
+            cloud = None
+            if "fiducials" in payload and payload["fiducials"] is not None:
+                from holomed.registration.models import FiducialCloud, FiducialPointPair
+                pairs = tuple(
+                    FiducialPointPair(
+                        fiducial_id=f["fiducial_id"],
+                        planned_point_mm=tuple(f["planned_point_mm"]),  # type: ignore
+                        measured_point_mm=tuple(f["measured_point_mm"]),  # type: ignore
+                        label=f.get("label", "landmark"),
+                    )
+                    for f in payload["fiducials"]
+                )
+                cloud = FiducialCloud(pairs=pairs)
+            elif "cloud" in payload and isinstance(payload["cloud"], FiducialCloud):
+                cloud = payload["cloud"]
+
+            chk_plan = tuple(payload["checkpoint_plan_mm"]) if "checkpoint_plan_mm" in payload and payload["checkpoint_plan_mm"] is not None else None
+            chk_meas = tuple(payload["checkpoint_measured_mm"]) if "checkpoint_measured_mm" in payload and payload["checkpoint_measured_mm"] is not None else None
+
+            req = RegistrationExecutionRequest(
+                session_id=str(session_id),
+                sequence_number=int(seq),
+                now_utc=str(now_utc),
+                operation=str(operation).upper(),
+                plan_id=payload.get("plan_id"),
+                cloud=cloud,
+                operator_id=payload.get("operator_id"),
+                checkpoint_plan_mm=chk_plan,  # type: ignore
+                checkpoint_measured_mm=chk_meas,  # type: ignore
+            )
+            res = self.execute_registration(req)
+            res_dict: dict[str, Any] = {
+                "session_id": res.session_id,
+                "execution_status": res.execution_status.value,
+                "gate_decision": res.gate_decision.value,
+                "gate_reason_code": res.gate_reason_code.value,
+                "action": res.action.value,
+                "sequence_number": res.sequence_number,
+                "operation": res.operation,
+                "executed_at_utc": res.executed_at_utc,
+                "workflow_status": res.workflow_status.value if res.workflow_status else None,
+                "error_message": res.error_message,
+            }
+            if res.registration_record is not None:
+                res_dict["registration_record"] = {
+                    "session_id": res.registration_record.session_id,
+                    "plan_id": res.registration_record.plan_id,
+                    "state": res.registration_record.state.value,
+                    "locked": res.registration_record.locked,
+                }
+            if res.verification_snapshot is not None:
+                res_dict["verification_snapshot"] = {
+                    "verification_id": res.verification_snapshot.verification_id,
+                    "passed": res.verification_snapshot.passed,
+                    "drift_error_mm": res.verification_snapshot.measured_drift_error_mm,
+                }
+            return create_response(envelope, self.name, payload=res_dict)
+        except Exception as e:
+            raw_err = str(e)
+            redacted = self._secret_filter.redact(raw_err) if self._secret_filter else raw_err
+            return create_error_response(envelope, self.name, _format_error_code(type(e).__name__), redacted)
 
 
 # M19 Backward Compatibility Alias

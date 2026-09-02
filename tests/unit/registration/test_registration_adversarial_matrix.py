@@ -7,6 +7,8 @@ from dataclasses import replace
 import pytest
 
 from holomed.core.dispatcher import MessageDispatcher
+from holomed.core.exceptions import UnroutableMessageError
+from holomed.execution._capability import _create_execution_capability
 from holomed.planning.models import SurgicalPlanDefinition
 from holomed.planning.service import PlanningService
 from holomed.protocol.builders import create_command, create_query
@@ -32,6 +34,15 @@ from holomed.registration.transforms import (
 )
 from holomed.runtime.context import RuntimeContext
 from holomed.runtime.logging import SecretFilter
+
+
+def _make_reg_cap(srv: RegistrationService, session_id: str, seq: int = 1, action: str = "REGISTRATION_ALIGNMENT"):
+    return _create_execution_capability(
+        service_instance_id=id(srv),
+        session_id=session_id,
+        action=action,
+        sequence_number=seq,
+    )
 
 
 def test_repeated_identical_coordinates_rejected() -> None:
@@ -141,14 +152,16 @@ def test_replacing_fiducials_resets_state_to_draft(
     srv.initialize(runtime_context)
     srv.start()
 
-    srv.submit_fiducials("s1", sample_locked_plan.plan_id, sample_cloud)
-    srv.solve_registration("s1", sample_locked_plan.plan_id)
+    cap = _make_reg_cap(srv, "s1", seq=1)
+    srv.submit_fiducials("s1", sample_locked_plan.plan_id, sample_cloud, capability=cap, sequence_number=1)
+    srv.solve_registration("s1", sample_locked_plan.plan_id, capability=cap, sequence_number=1)
     assert srv.get_registration("s1").state == RegistrationState.SOLVED
 
     # Re-submit fiducials
-    srv.submit_fiducials("s1", sample_locked_plan.plan_id, sample_cloud)
+    srv.submit_fiducials("s1", sample_locked_plan.plan_id, sample_cloud, capability=cap, sequence_number=1)
     assert srv.get_registration("s1").state == RegistrationState.DRAFT
 
+    cap.invalidate()
     srv.stop()
 
 
@@ -165,10 +178,15 @@ def test_capacity_exhaustion_max_active_registrations(
     srv.start()
 
     for i in range(MAX_ACTIVE_REGISTRATIONS):
-        srv.submit_fiducials(f"sess_{i:02d}", sample_locked_plan.plan_id, sample_cloud)
+        sid = f"sess_{i:02d}"
+        cap = _make_reg_cap(srv, sid, seq=1)
+        srv.submit_fiducials(sid, sample_locked_plan.plan_id, sample_cloud, capability=cap, sequence_number=1)
+        cap.invalidate()
 
+    cap_overflow = _make_reg_cap(srv, "sess_overflow", seq=1)
     with pytest.raises(RegistrationCapacityError):
-        srv.submit_fiducials("sess_overflow", sample_locked_plan.plan_id, sample_cloud)
+        srv.submit_fiducials("sess_overflow", sample_locked_plan.plan_id, sample_cloud, capability=cap_overflow, sequence_number=1)
+    cap_overflow.invalidate()
 
     srv.stop()
 
@@ -185,9 +203,11 @@ def test_e2e_complete_registration_and_trajectory_transformation(
     srv.initialize(runtime_context)
     srv.start()
 
+    cap = _make_reg_cap(srv, "sess_e2e", seq=1)
+
     # 1. Submit and solve
-    srv.submit_fiducials("sess_e2e", sample_locked_plan.plan_id, sample_cloud)
-    rec_solved = srv.solve_registration("sess_e2e", sample_locked_plan.plan_id)
+    srv.submit_fiducials("sess_e2e", sample_locked_plan.plan_id, sample_cloud, capability=cap, sequence_number=1)
+    rec_solved = srv.solve_registration("sess_e2e", sample_locked_plan.plan_id, capability=cap, sequence_number=1)
     assert rec_solved.state == RegistrationState.SOLVED
     assert rec_solved.transform is not None
 
@@ -197,6 +217,8 @@ def test_e2e_complete_registration_and_trajectory_transformation(
         operator_id="operator_01",
         checkpoint_plan_mm=(0.0, 0.0, 0.0),
         checkpoint_measured_mm=(10.0, 20.0, 30.0),
+        capability=cap,
+        sequence_number=1,
     )
     assert snap.passed is True
     assert srv.is_registration_verified("sess_e2e") is True
@@ -209,6 +231,7 @@ def test_e2e_complete_registration_and_trajectory_transformation(
     assert pytest.approx(traj_physical.entry_point_mm[1], abs=1e-4) == 30.0
     assert pytest.approx(traj_physical.entry_point_mm[2], abs=1e-4) == 40.0
 
+    cap.invalidate()
     srv.stop()
 
 
@@ -224,12 +247,16 @@ def test_epoch_and_session_binding(
     srv.initialize(runtime_context)
     srv.start()
 
-    rec = srv.submit_fiducials("sess_epoch", sample_locked_plan.plan_id, sample_cloud)
+    cap = _make_reg_cap(srv, "sess_epoch", seq=1)
+    rec = srv.submit_fiducials("sess_epoch", sample_locked_plan.plan_id, sample_cloud, capability=cap, sequence_number=1)
     assert rec.epoch_id == runtime_context.epoch_id
     assert rec.session_id == "sess_epoch"
+    cap.invalidate()
 
+    cap_unk = _make_reg_cap(srv, "unknown_sess", seq=1)
     with pytest.raises(RegistrationValidationError):
-        srv.verify_registration("unknown_sess", "op", (0.0, 0.0, 0.0), (0.0, 0.0, 0.0))
+        srv.verify_registration("unknown_sess", "op", (0.0, 0.0, 0.0), (0.0, 0.0, 0.0), capability=cap_unk, sequence_number=1)
+    cap_unk.invalidate()
 
     srv.stop()
 
@@ -245,12 +272,13 @@ def test_secret_filter_redaction_on_registration_errors(
     message_dispatcher.start()
     srv.start()
 
-    cmd = create_command(
-        "registration.solve",
+    # Query for non-existent session containing a secret token
+    q = create_query(
+        "registration.get",
         "surgeon_console",
-        payload={"session_id": "TOP_SECRET_PATIENT_TOKEN", "plan_id": "plan_01"},
+        payload={"session_id": "TOP_SECRET_PATIENT_TOKEN"},
     )
-    resp = message_dispatcher.dispatch(cmd)
+    resp = message_dispatcher.dispatch(q)
     assert resp.message_type.value == "ERROR"
     assert "TOP_SECRET_PATIENT_TOKEN" not in resp.payload["error_message"]
 
@@ -269,15 +297,17 @@ def test_fail_closed_behavior_when_registration_unverified(
     srv.initialize(runtime_context)
     srv.start()
 
-    srv.submit_fiducials("sess_gate", sample_locked_plan.plan_id, sample_cloud)
+    cap = _make_reg_cap(srv, "sess_gate", seq=1)
+    srv.submit_fiducials("sess_gate", sample_locked_plan.plan_id, sample_cloud, capability=cap, sequence_number=1)
     assert srv.is_registration_verified("sess_gate") is False
 
-    srv.solve_registration("sess_gate", sample_locked_plan.plan_id)
+    srv.solve_registration("sess_gate", sample_locked_plan.plan_id, capability=cap, sequence_number=1)
     assert srv.is_registration_verified("sess_gate") is False
 
-    srv.verify_registration("sess_gate", "op", (0.0, 0.0, 0.0), (10.0, 20.0, 30.0))
+    srv.verify_registration("sess_gate", "op", (0.0, 0.0, 0.0), (10.0, 20.0, 30.0), capability=cap, sequence_number=1)
     assert srv.is_registration_verified("sess_gate") is True
 
+    cap.invalidate()
     srv.stop()
 
 
@@ -295,37 +325,35 @@ def test_negative_coordinates_preservation(sample_locked_plan: SurgicalPlanDefin
     assert pytest.approx(t.translation_vector_mm[2], abs=1e-4) == 100.0
 
 
-def test_verify_command_missing_arguments_returns_error(
+def test_verify_command_unroutable(
     runtime_context: RuntimeContext,
     message_dispatcher: MessageDispatcher,
 ) -> None:
-    """Verify registration.verify returns ERROR response on missing parameters."""
+    """Verify registration.verify is unroutable on dispatcher in M23."""
     srv = RegistrationService(dispatcher=message_dispatcher)
     srv.initialize(runtime_context)
     message_dispatcher.start()
     srv.start()
 
     cmd = create_command("registration.verify", "console", payload={"session_id": "s1"})
-    resp = message_dispatcher.dispatch(cmd)
-    assert resp.message_type.value == "ERROR"
-    assert resp.payload["error_code"] == "ERR_INVALID_ARGS"
+    with pytest.raises(UnroutableMessageError):
+        message_dispatcher.dispatch(cmd)
 
     srv.stop()
 
 
-def test_submit_command_missing_arguments_returns_error(
+def test_submit_command_unroutable(
     runtime_context: RuntimeContext,
     message_dispatcher: MessageDispatcher,
 ) -> None:
-    """Verify registration.submit returns ERROR response on missing parameters."""
+    """Verify registration.submit is unroutable on dispatcher in M23."""
     srv = RegistrationService(dispatcher=message_dispatcher)
     srv.initialize(runtime_context)
     message_dispatcher.start()
     srv.start()
 
     cmd = create_command("registration.submit", "console", payload={"session_id": "s1"})
-    resp = message_dispatcher.dispatch(cmd)
-    assert resp.message_type.value == "ERROR"
-    assert resp.payload["error_code"] == "ERR_INVALID_ARGS"
+    with pytest.raises(UnroutableMessageError):
+        message_dispatcher.dispatch(cmd)
 
     srv.stop()

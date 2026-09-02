@@ -105,9 +105,16 @@ def verified_registration_service(
         FiducialPointPair("f2", (50.0, 0.0, 0.0), (60.0, 20.0, 30.0), "p2"),
         FiducialPointPair("f3", (0.0, 50.0, 0.0), (10.0, 70.0, 30.0), "p3"),
     )
+    from holomed.execution._capability import _create_execution_capability
+    cap_reg = _create_execution_capability(
+        service_instance_id=id(reg_srv),
+        session_id="sess_nav_01",
+        action="REGISTRATION_ALIGNMENT",
+        sequence_number=1,
+    )
     cloud = FiducialCloud(pairs=pairs)
-    reg_srv.submit_fiducials("sess_nav_01", "plan_nav_01", cloud)
-    reg_srv.solve_registration("sess_nav_01", "plan_nav_01")
+    reg_srv.submit_fiducials("sess_nav_01", "plan_nav_01", cloud, capability=cap_reg, sequence_number=1)
+    reg_srv.solve_registration("sess_nav_01", "plan_nav_01", capability=cap_reg, sequence_number=1)
 
     # Verify registration during WHO timeout (checkpoint matches transform)
     reg_srv.verify_registration(
@@ -115,7 +122,10 @@ def verified_registration_service(
         operator_id="surgeon_console",
         checkpoint_plan_mm=(0.0, 0.0, 0.0),
         checkpoint_measured_mm=(10.0, 20.0, 30.0),
+        capability=cap_reg,
+        sequence_number=1,
     )
+    cap_reg.invalidate()
     assert reg_srv.is_registration_verified("sess_nav_01") is True
     return reg_srv
 

@@ -487,14 +487,38 @@ class RecoveryService(IService):
                 if self._registration_service is None:
                     raise RecoveryActivationError("RegistrationService is unavailable")
 
-                self._registration_service.submit_fiducials(session_id, candidate.plan_id, candidate.fiducial_cloud)
-                self._registration_service.solve_registration(session_id, candidate.plan_id)
-                reg_snapshot = self._registration_service.verify_registration(
+                from holomed.execution._capability import _create_execution_capability
+
+                cap_reg = _create_execution_capability(
+                    service_instance_id=id(self._registration_service),
                     session_id=session_id,
-                    operator_id=auth.operator_id,
-                    checkpoint_plan_mm=chk_plan,
-                    checkpoint_measured_mm=chk_meas,
+                    action="REGISTRATION_ALIGNMENT",
+                    sequence_number=sequence_number,
                 )
+                try:
+                    self._registration_service.submit_fiducials(
+                        session_id=session_id,
+                        plan_id=candidate.plan_id,
+                        cloud=candidate.fiducial_cloud,
+                        capability=cap_reg,
+                        sequence_number=sequence_number,
+                    )
+                    self._registration_service.solve_registration(
+                        session_id=session_id,
+                        plan_id=candidate.plan_id,
+                        capability=cap_reg,
+                        sequence_number=sequence_number,
+                    )
+                    reg_snapshot = self._registration_service.verify_registration(
+                        session_id=session_id,
+                        operator_id=auth.operator_id,
+                        checkpoint_plan_mm=chk_plan,
+                        checkpoint_measured_mm=chk_meas,
+                        capability=cap_reg,
+                        sequence_number=sequence_number,
+                    )
+                finally:
+                    cap_reg.invalidate()
 
                 # 2. Re-bind M16 Drift Monitoring (Transitions to READY)
                 if self._drift_service is not None and landmarks is not None:

@@ -27,7 +27,11 @@ from holomed.recovery.models import (
     RecoveryAuthorization,
     RecoveryStatusRecord,
 )
-from holomed.registration.models import FiducialCloud
+from holomed.registration.models import (
+    FiducialCloud,
+    RegistrationStatusRecord,
+    RegistrationVerificationSnapshot,
+)
 from holomed.safety_gate.models import (
     GateDecision,
     GateReasonCode,
@@ -313,6 +317,62 @@ class WorkflowResumptionExecutionResult:
     sequence_number: int
     executed_at_utc: str
     snapshot: Optional[WorkflowStateSnapshot] = None
+    error_message: Optional[str] = None
+    schema_version: str = EXECUTION_SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.session_id, str) or not SESSION_ID_REGEX.match(self.session_id):
+            raise ExecutionValidationError(f"Invalid session_id: {self.session_id!r}")
+        if not isinstance(self.sequence_number, int) or self.sequence_number < 1:
+            raise ExecutionValidationError("sequence_number must be an integer >= 1")
+
+
+@dataclass(frozen=True)
+class RegistrationExecutionRequest:
+    """Explicit request to execute initial spatial registration operation via execution gateway."""
+
+    session_id: str
+    sequence_number: int
+    now_utc: str
+    operation: str  # "SUBMIT", "SOLVE", "VERIFY"
+    plan_id: Optional[str] = None
+    cloud: Optional[FiducialCloud] = None
+    operator_id: Optional[str] = None
+    checkpoint_plan_mm: Optional[Tuple[float, float, float]] = None
+    checkpoint_measured_mm: Optional[Tuple[float, float, float]] = None
+    action: SafetyGateAction = SafetyGateAction.TRAJECTORY_ALIGNMENT
+    tool_safety_classification: Optional[ToolSafetyClassification] = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.session_id, str) or not SESSION_ID_REGEX.match(self.session_id):
+            raise ExecutionValidationError(f"Invalid session_id: {self.session_id!r}")
+        if not isinstance(self.sequence_number, int) or self.sequence_number < 1:
+            raise ExecutionValidationError("sequence_number must be an integer >= 1")
+        if not isinstance(self.now_utc, str) or not self.now_utc.strip():
+            raise ExecutionValidationError("now_utc must be a non-empty ISO-8601 string")
+        if not isinstance(self.operation, str) or self.operation.upper() not in ("SUBMIT", "SOLVE", "VERIFY"):
+            raise ExecutionValidationError(f"Invalid registration operation: {self.operation!r}")
+        if self.action != SafetyGateAction.TRAJECTORY_ALIGNMENT:
+            raise ExecutionValidationError(
+                f"RegistrationExecutionRequest requires TRAJECTORY_ALIGNMENT, got {self.action.value}"
+            )
+
+
+@dataclass(frozen=True)
+class RegistrationExecutionResult:
+    """Canonical result of a coordinated registration execution operation."""
+
+    session_id: str
+    execution_status: ExecutionStatus
+    gate_decision: GateDecision
+    gate_reason_code: GateReasonCode
+    action: SafetyGateAction
+    sequence_number: int
+    operation: str
+    executed_at_utc: str
+    workflow_status: Optional[WorkflowToolAuthorizationStatus] = None
+    registration_record: Optional[RegistrationStatusRecord] = None
+    verification_snapshot: Optional[RegistrationVerificationSnapshot] = None
     error_message: Optional[str] = None
     schema_version: str = EXECUTION_SCHEMA_VERSION
 
