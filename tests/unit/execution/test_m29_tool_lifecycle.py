@@ -444,6 +444,7 @@ def test_m29_real_production_path_invocation_and_teardown(m29_services):
         },
     )
     resp = dispatcher.dispatch(cmd)
+    assert resp is not None
     assert resp.payload.get("execution_status") == ExecutionStatus.EXECUTED_CLEAR.value
     assert resp.payload.get("status") == ToolExecutionStatus.SUCCESS.value
     assert resp.payload.get("tool_id") == "tool.telemetry"
@@ -459,6 +460,7 @@ def test_m29_real_production_path_invocation_and_teardown(m29_services):
         },
     )
     resp_td = dispatcher.dispatch(cmd_td)
+    assert resp_td is not None
     assert resp_td.payload.get("execution_status") == ExecutionStatus.EXECUTED_CLEAR.value
     assert "tools" in resp_td.payload.get("subsystems_purged", [])
     assert session_id not in tool_service.engine._session_sequences
