@@ -349,13 +349,13 @@ class WorkflowService(IService):
             cm = self._confirmations[session_id]
 
             # 1. Critical Interlock Check -> Abort
-            if self._interlock_engine.has_critical_interlock():
+            if self._interlock_engine.has_critical_interlock(session_id):
                 self._emit_event("workflow.phase.blocked", {"session_id": session_id, "reason": "CRITICAL_INTERLOCK"})
                 sm.abort(sequence_number, reason="Critical safety interlock tripped")
                 raise WorkflowSafetyInterlockError("Critical safety interlock tripped; workflow aborted")
 
             # 2. Blocking Interlock Check
-            if self._interlock_engine.has_blocking_interlock() and target_phase not in (
+            if self._interlock_engine.has_blocking_interlock(session_id) and target_phase not in (
                 WorkflowPhase.ABORTED,
                 WorkflowPhase.RECOVERY_REQUIRED,
             ):
@@ -618,7 +618,7 @@ class WorkflowService(IService):
             tool_id=tool_id,
             safety_classification=safety_classification,
             current_phase=sm.current_phase,
-            has_blocking_interlocks=self._interlock_engine.has_blocking_interlock(),
+            has_blocking_interlocks=self._interlock_engine.has_blocking_interlock(session_id),
             epoch_id=self._epoch_id,
             session_id=session_id,
             is_surgical_actuation_intent=is_surgical_actuation,
@@ -631,9 +631,9 @@ class WorkflowService(IService):
             )
         return decision
 
-    def register_checkpoint(self, checkpoint: AnatomicalCheckpoint) -> None:
-        """Register an anatomical checkpoint for spatial verification."""
-        self._checkpoint_validator.register_checkpoint(checkpoint)
+    def register_checkpoint(self, checkpoint: AnatomicalCheckpoint, session_id: Optional[str] = None) -> None:
+        """Register an anatomical checkpoint for spatial verification with optional session ownership."""
+        self._checkpoint_validator.register_checkpoint(checkpoint, session_id=session_id)
 
     def evaluate_checkpoint(
         self,
@@ -672,7 +672,7 @@ class WorkflowService(IService):
         return self._workflows[session_id].snapshot
 
     def evict_session(self, session_id: str, capability: Optional[Any] = None) -> bool:
-        """Evict session-scoped workflow and confirmation manager, releasing capacity (M25)."""
+        """Evict session-scoped workflow, confirmations, interlocks, and checkpoints (M27)."""
         if self._in_transaction:
             raise WorkflowLifecycleError("Reentrant call to evict_session rejected")
         evicted = False
@@ -681,6 +681,10 @@ class WorkflowService(IService):
             evicted = True
         if session_id in self._confirmations:
             del self._confirmations[session_id]
+            evicted = True
+        if self._interlock_engine.evict_session(session_id):
+            evicted = True
+        if self._checkpoint_validator.evict_session(session_id):
             evicted = True
         return evicted
 

@@ -19,18 +19,23 @@ class AnatomicalCheckpointValidator:
 
     def __init__(self) -> None:
         self._checkpoints: dict[str, AnatomicalCheckpoint] = {}
+        self._session_checkpoints: dict[str, set[str]] = {}
 
     @property
     def checkpoint_count(self) -> int:
         return len(self._checkpoints)
 
-    def register_checkpoint(self, checkpoint: AnatomicalCheckpoint) -> None:
-        """Register an anatomical checkpoint."""
-        if len(self._checkpoints) >= MAX_REGISTERED_CHECKPOINTS:
+    def register_checkpoint(self, checkpoint: AnatomicalCheckpoint, session_id: Optional[str] = None) -> None:
+        """Register an anatomical checkpoint with optional session ownership."""
+        if len(self._checkpoints) >= MAX_REGISTERED_CHECKPOINTS and checkpoint.checkpoint_id not in self._checkpoints:
             raise WorkflowCapacityError(
                 f"Registered checkpoint limit ({MAX_REGISTERED_CHECKPOINTS}) exceeded"
             )
         self._checkpoints[checkpoint.checkpoint_id] = checkpoint
+        if session_id is not None:
+            if session_id not in self._session_checkpoints:
+                self._session_checkpoints[session_id] = set()
+            self._session_checkpoints[session_id].add(checkpoint.checkpoint_id)
 
     def evaluate_checkpoint(
         self,
@@ -42,6 +47,11 @@ class AnatomicalCheckpointValidator:
         session_id: str,
     ) -> SafetyInterlock:
         """Evaluate a checkpoint against observation metrics and return a SafetyInterlock."""
+        if session_id:
+            if session_id not in self._session_checkpoints:
+                self._session_checkpoints[session_id] = set()
+            self._session_checkpoints[session_id].add(checkpoint_id)
+
         cp = self._checkpoints.get(checkpoint_id)
         if cp is None:
             return SafetyInterlock(
@@ -105,5 +115,20 @@ class AnatomicalCheckpointValidator:
             session_id=session_id,
         )
 
+    def evict_session(self, session_id: str) -> bool:
+        """Evict session-scoped checkpoints, releasing capacity (M27)."""
+        if not isinstance(session_id, str) or not session_id.strip():
+            return False
+        chk_ids = self._session_checkpoints.pop(session_id, None)
+        if not chk_ids:
+            return False
+        evicted = False
+        for cid in chk_ids:
+            if cid in self._checkpoints:
+                del self._checkpoints[cid]
+                evicted = True
+        return evicted
+
     def clear(self) -> None:
         self._checkpoints.clear()
+        self._session_checkpoints.clear()
