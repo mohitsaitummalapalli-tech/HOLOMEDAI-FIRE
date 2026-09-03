@@ -370,6 +370,38 @@ class GatewayService(IService):
             conn.close()
             self._emit_event("gateway.client.disconnected", {"client_id": client_id, "reason": reason})
 
+    def evict_session(self, session_id: str, capability: Optional[Any] = None) -> bool:
+        """Surgically evict all active client connections bound to session_id (M28).
+
+        Closes transports, cleans up connection descriptors, and reclaims capacity
+        without affecting connections belonging to other active clinical sessions.
+        """
+        if not isinstance(session_id, str) or not session_id.strip():
+            return False
+
+        if self._in_transaction:
+            raise GatewayLifecycleError("Cannot evict session during an active transaction")
+
+        self._in_transaction = True
+        evicted = False
+        try:
+            for cid in list(self._connections.keys()):
+                conn = self._connections.get(cid)
+                if conn and conn.session and conn.session.session_id == session_id:
+                    conn = self._connections.pop(cid)
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+                    evicted = True
+                    self._emit_event(
+                        "gateway.client.disconnected",
+                        {"client_id": cid, "reason": "Session evicted during teardown"},
+                    )
+            return evicted
+        finally:
+            self._in_transaction = False
+
     # -------------------------------------------------------------------------
     # Subscribed Event Handlers
     # -------------------------------------------------------------------------
@@ -377,7 +409,8 @@ class GatewayService(IService):
     def handle_presentation_event(self, envelope: MessageEnvelope) -> None:
         """Egress XR presentation frames strictly to XR_DISPLAY and SURGEON_CONSOLE clients (D282)."""
         allowed_roles = {ClientRole.XR_DISPLAY, ClientRole.SURGEON_CONSOLE}
-        self.broadcast_envelope(envelope, roles=allowed_roles)
+        session_id = envelope.payload.get("session_id") if isinstance(envelope.payload, dict) else None
+        self.broadcast_envelope(envelope, roles=allowed_roles, session_id=session_id)
 
     def handle_workflow_broadcast_event(self, envelope: MessageEnvelope) -> None:
         """Broadcast workflow status, interlock, and confirmation events to session clients."""

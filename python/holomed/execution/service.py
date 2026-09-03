@@ -114,6 +114,7 @@ class ClinicalExecutionGatewayService(IService):
         platform_service: Optional[Any] = None,
         proximity_service: Optional[Any] = None,
         drift_service: Optional[Any] = None,
+        gateway_service: Optional[Any] = None,
         secret_filter: Optional[SecretFilter] = None,
         logger: Optional[StructuredLogger] = None,
     ) -> None:
@@ -129,6 +130,7 @@ class ClinicalExecutionGatewayService(IService):
         self._platform_service = platform_service
         self._proximity_service = proximity_service or (getattr(safety_gate_service, "_proximity_service", None) if safety_gate_service else None)
         self._drift_service = drift_service or (getattr(safety_gate_service, "_drift_service", None) if safety_gate_service else None)
+        self._gateway_service = gateway_service
         self._secret_filter = secret_filter
         self._logger = logger or StructuredLogger(SERVICE_NAME, secret_filter=secret_filter)
 
@@ -2226,6 +2228,15 @@ class ClinicalExecutionGatewayService(IService):
                     subsystems_purged.append("platform")
                 except Exception as exc:
                     failures.append(f"platform: {exc}")
+
+            # Step 11: Gateway Ingress Connections (M28)
+            if self._gateway_service is not None:
+                try:
+                    if hasattr(self._gateway_service, "evict_session"):
+                        self._gateway_service.evict_session(session_id, cap)
+                    subsystems_purged.append("gateway_service")
+                except Exception as exc:
+                    failures.append(f"gateway_service: {exc}")
 
             # Determine execution status and audit event
             if failures:

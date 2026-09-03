@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from holomed.gateway.exceptions import (
     GatewayAuthorizationError,
+    GatewaySessionMismatchError,
     GatewayValidationError,
 )
 from holomed.gateway.models import ClientRole, ClientSession
@@ -35,7 +36,16 @@ class GatewayAuthorizationPolicy:
                 f"Source spoofing detected: envelope declared source={envelope.source!r}, authenticated={session.client_id!r}"
             )
 
-        # 2. Categorical Surgical Actuation Block (D286)
+        # 2. Prevent Session Spoofing / Cross-Session Injection (M28)
+        if isinstance(envelope.payload, dict) and "session_id" in envelope.payload:
+            payload_session_id = envelope.payload.get("session_id")
+            if payload_session_id != session.session_id:
+                raise GatewaySessionMismatchError(
+                    f"Cross-session injection rejected: envelope declared session_id={payload_session_id!r}, "
+                    f"authenticated session_id={session.session_id!r}"
+                )
+
+        # 3. Categorical Surgical Actuation Block (D286)
         msg_name_lower = envelope.message_name.lower()
         for kw in CATEGORICAL_SURGICAL_KEYWORDS:
             if kw in msg_name_lower:
