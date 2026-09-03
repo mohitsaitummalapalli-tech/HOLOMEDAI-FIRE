@@ -2238,6 +2238,15 @@ class ClinicalExecutionGatewayService(IService):
                 except Exception as exc:
                     failures.append(f"gateway_service: {exc}")
 
+            # Step 12: Tool Execution State (M29)
+            if self._tool_service is not None:
+                try:
+                    if hasattr(self._tool_service, "evict_session"):
+                        self._tool_service.evict_session(session_id, cap)
+                    subsystems_purged.append("tools")
+                except Exception as exc:
+                    failures.append(f"tools: {exc}")
+
             # Determine execution status and audit event
             if failures:
                 exec_status = ExecutionStatus.FAILED_NAVIGATION_GEOMETRY

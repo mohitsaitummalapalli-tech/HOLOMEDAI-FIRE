@@ -164,6 +164,18 @@ class ToolExecutionEngine:
             self._result_history.pop(0)
         self._result_history.append(result)
 
+    def evict_session(self, session_id: str) -> bool:
+        """Evict session sequence tracking state, releasing capacity (M29).
+
+        Surgically removes session_id from _session_sequences without altering
+        other active sessions or global result history. Returns True if evicted,
+        False if session_id was not registered.
+        """
+        if session_id in self._session_sequences:
+            del self._session_sequences[session_id]
+            return True
+        return False
+
     def reset(self, epoch_id: int) -> None:
         """Reset execution state for a new epoch."""
         self._epoch_id = epoch_id

@@ -339,6 +339,39 @@ class ToolService(IService):
             )
         self.clear()
 
+    def evict_session(self, session_id: str, capability: Optional[Any] = None) -> bool:
+        """Evict session-scoped tool sequence state under coordinated teardown (M29).
+
+        Validates session_id, enforces transactional reentrancy protection,
+        optionally verifies SESSION_TEARDOWN capability binding, and delegates
+        eviction to ToolExecutionEngine.
+        """
+        if not isinstance(session_id, str) or not session_id.strip():
+            return False
+
+        if self._in_transaction:
+            raise ToolLifecycleError("Reentrant call to evict_session rejected")
+
+        if capability is not None:
+            if not getattr(capability, "is_active", False):
+                raise ToolAuthorizationError("Teardown capability is inactive or expired")
+            if getattr(capability, "action", None) != "SESSION_TEARDOWN":
+                raise ToolAuthorizationError(
+                    f"Capability action mismatch: expected 'SESSION_TEARDOWN', got {getattr(capability, 'action', None)!r}"
+                )
+            if getattr(capability, "session_id", None) != session_id:
+                raise ToolAuthorizationError(
+                    f"Capability session mismatch: expected {session_id!r}, got {getattr(capability, 'session_id', None)!r}"
+                )
+
+        self._in_transaction = True
+        try:
+            if self._engine is not None:
+                return self._engine.evict_session(session_id)
+            return False
+        finally:
+            self._in_transaction = False
+
     def clear(self) -> None:
         """Clear all active sessions, result history, and event sinks."""
         if self._engine is not None:
