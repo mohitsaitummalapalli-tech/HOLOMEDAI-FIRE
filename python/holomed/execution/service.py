@@ -112,6 +112,8 @@ class ClinicalExecutionGatewayService(IService):
         registration_service: Optional[RegistrationService] = None,
         planning_service: Optional[PlanningService] = None,
         platform_service: Optional[Any] = None,
+        proximity_service: Optional[Any] = None,
+        drift_service: Optional[Any] = None,
         secret_filter: Optional[SecretFilter] = None,
         logger: Optional[StructuredLogger] = None,
     ) -> None:
@@ -125,8 +127,11 @@ class ClinicalExecutionGatewayService(IService):
         self._registration_service = registration_service
         self._planning_service = planning_service
         self._platform_service = platform_service
+        self._proximity_service = proximity_service or (getattr(safety_gate_service, "_proximity_service", None) if safety_gate_service else None)
+        self._drift_service = drift_service or (getattr(safety_gate_service, "_drift_service", None) if safety_gate_service else None)
         self._secret_filter = secret_filter
         self._logger = logger or StructuredLogger(SERVICE_NAME, secret_filter=secret_filter)
+
 
 
         self._state: ServiceState = ServiceState.UNINITIALIZED
@@ -2141,7 +2146,25 @@ class ClinicalExecutionGatewayService(IService):
                 except Exception as exc:
                     failures.append(f"navigation: {exc}")
 
-            # Step 2: Recovery
+            # Step 2: Proximity (M26)
+            if self._proximity_service is not None:
+                try:
+                    if hasattr(self._proximity_service, "evict_session"):
+                        self._proximity_service.evict_session(session_id, cap)
+                    subsystems_purged.append("proximity")
+                except Exception as exc:
+                    failures.append(f"proximity: {exc}")
+
+            # Step 3: Drift (M26)
+            if self._drift_service is not None:
+                try:
+                    if hasattr(self._drift_service, "evict_session"):
+                        self._drift_service.evict_session(session_id, cap)
+                    subsystems_purged.append("drift")
+                except Exception as exc:
+                    failures.append(f"drift: {exc}")
+
+            # Step 4: Recovery
             if self._recovery_service is not None:
                 try:
                     if hasattr(self._recovery_service, "evict_session"):
@@ -2150,7 +2173,7 @@ class ClinicalExecutionGatewayService(IService):
                 except Exception as exc:
                     failures.append(f"recovery: {exc}")
 
-            # Step 3: Registration
+            # Step 5: Registration
             if self._registration_service is not None:
                 try:
                     if hasattr(self._registration_service, "evict_session"):
@@ -2159,7 +2182,7 @@ class ClinicalExecutionGatewayService(IService):
                 except Exception as exc:
                     failures.append(f"registration: {exc}")
 
-            # Step 4: Planning
+            # Step 6: Planning
             if self._planning_service is not None:
                 try:
                     if hasattr(self._planning_service, "evict_session"):
@@ -2168,7 +2191,7 @@ class ClinicalExecutionGatewayService(IService):
                 except Exception as exc:
                     failures.append(f"planning: {exc}")
 
-            # Step 5: Safety Gate
+            # Step 7: Safety Gate
             if self._safety_gate_service is not None:
                 try:
                     if hasattr(self._safety_gate_service, "evict_session"):
@@ -2177,7 +2200,7 @@ class ClinicalExecutionGatewayService(IService):
                 except Exception as exc:
                     failures.append(f"safety_gate: {exc}")
 
-            # Step 6: Workflow
+            # Step 8: Workflow
             if self._workflow_service is not None:
                 try:
                     if hasattr(self._workflow_service, "evict_session"):
@@ -2186,7 +2209,7 @@ class ClinicalExecutionGatewayService(IService):
                 except Exception as exc:
                     failures.append(f"workflow: {exc}")
 
-            # Step 7: Gateway cache
+            # Step 9: Gateway cache
             try:
                 self._latest_results.pop(session_id, None)
                 self._persisted_states.pop(session_id, None)
@@ -2194,7 +2217,8 @@ class ClinicalExecutionGatewayService(IService):
             except Exception as exc:
                 failures.append(f"gateway: {exc}")
 
-            # Step 8: Platform Session eviction
+            # Step 10: Platform Session eviction
+
             if self._platform_service is not None:
                 try:
                     if hasattr(self._platform_service, "evict_session"):

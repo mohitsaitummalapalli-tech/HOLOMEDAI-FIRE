@@ -409,7 +409,34 @@ class DriftService(IService):
         l_dict = self._landmarks.get(session_id)
         return tuple(l_dict.values()) if l_dict else ()
 
+    def evict_session(self, session_id: str, capability: Optional[Any] = None) -> bool:
+        """Evict session-scoped landmark definitions, observations, and drift state, releasing capacity (M26)."""
+        if self._in_transaction:
+            raise DriftLifecycleError("Reentrant call to evict_session rejected")
+        evicted = False
+        if session_id in self._session_states:
+            del self._session_states[session_id]
+            evicted = True
+        if session_id in self._landmarks:
+            del self._landmarks[session_id]
+            evicted = True
+        if session_id in self._latest_sequences:
+            del self._latest_sequences[session_id]
+            evicted = True
+        if session_id in self._verified_landmarks:
+            del self._verified_landmarks[session_id]
+            evicted = True
+        if session_id in self._latest_verifications:
+            del self._latest_verifications[session_id]
+            evicted = True
+        dwell_keys = [k for k in self._dwell_buffers if k[0] == session_id]
+        for k in dwell_keys:
+            del self._dwell_buffers[k]
+            evicted = True
+        return evicted
+
     def clear(self) -> None:
+
         """Clear all session states and telemetry buffers."""
         self._landmarks.clear()
         self._session_states.clear()

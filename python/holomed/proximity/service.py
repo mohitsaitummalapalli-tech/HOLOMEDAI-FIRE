@@ -457,7 +457,45 @@ class ProximityService(IService):
         """Retrieve bound exclusion zones for a session."""
         return self._monitored_zones.get(session_id, ())
 
+    def evict_session(self, session_id: str, capability: Optional[Any] = None) -> bool:
+        """Evict session-scoped proximity monitoring state and geometries, releasing capacity (M26)."""
+        if self._in_transaction:
+            raise ProximityLifecycleError("Reentrant call to evict_session rejected")
+        evicted = False
+        if session_id in self._session_states:
+            del self._session_states[session_id]
+            evicted = True
+        if session_id in self._monitored_zones:
+            del self._monitored_zones[session_id]
+            evicted = True
+        if session_id in self._registration_errors:
+            del self._registration_errors[session_id]
+            evicted = True
+        if session_id in self._static_margins:
+            del self._static_margins[session_id]
+            evicted = True
+        geom_keys = [k for k in self._latest_geometries if k[0] == session_id]
+        for k in geom_keys:
+            del self._latest_geometries[k]
+            evicted = True
+        seq_keys = [k for k in self._latest_sequences if k[0] == session_id]
+        for k in seq_keys:
+            del self._latest_sequences[k]
+            evicted = True
+        if session_id in self._latest_evaluations:
+            del self._latest_evaluations[session_id]
+            evicted = True
+        if session_id in self._active_instruments:
+            del self._active_instruments[session_id]
+            evicted = True
+        hist_keys = [k for k in self._clearance_history if k[0] == session_id]
+        for k in hist_keys:
+            del self._clearance_history[k]
+            evicted = True
+        return evicted
+
     def clear(self) -> None:
+
         """Clear all session states and stored telemetry."""
         self._monitored_zones.clear()
         self._registration_errors.clear()
