@@ -328,7 +328,20 @@ class PlatformService(IService):
             raise PlatformResourceIntegrityError("Session manager uninitialized")
         return self._session_manager.stop_session(session_id)
 
+    def evict_session(self, session_id: str) -> bool:
+        """Evict session from underlying SessionManager, releasing capacity (M25)."""
+        if self._session_manager is None:
+            return False
+        return self._session_manager.evict_session(session_id)
+
+    def has_session(self, session_id: str) -> bool:
+        """Check if session exists in underlying SessionManager."""
+        if self._session_manager is None:
+            return False
+        return self._session_manager.has_session(session_id)
+
     def migrate_epoch(self, target_epoch_id: int) -> None:
+
         """Execute atomic-preparation, reverse-order, fail-stop epoch migration (D250)."""
         if self._in_transaction:
             raise PlatformLifecycleError("Cannot migrate epoch during an active transaction")

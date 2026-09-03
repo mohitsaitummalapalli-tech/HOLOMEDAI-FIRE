@@ -424,11 +424,25 @@ class PlanningService(IService):
         plan_id = self._session_plan_bindings.get(session_id)
         return self._plans.get(plan_id) if plan_id else None
 
+    def evict_session(self, session_id: str, capability: Optional[Any] = None) -> bool:
+        """Evict session-scoped plan bindings and verification records, releasing capacity (M25)."""
+        if self._in_transaction:
+            raise PlanningLifecycleError("Reentrant call to evict_session rejected")
+        evicted = False
+        if session_id in self._session_plan_bindings:
+            del self._session_plan_bindings[session_id]
+            evicted = True
+        if session_id in self._verification_records:
+            del self._verification_records[session_id]
+            evicted = True
+        return evicted
+
     def clear(self) -> None:
         """Clear transient plan registry."""
         self._plans.clear()
         self._session_plan_bindings.clear()
         self._verification_records.clear()
+
 
     # -------------------------------------------------------------------------
     # Dispatcher Handlers

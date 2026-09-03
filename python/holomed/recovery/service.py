@@ -662,7 +662,26 @@ class RecoveryService(IService):
         self._authorizations.pop(session_id, None)
         self._checkpoint_pairs.pop(session_id, None)
 
+    def evict_session(self, session_id: str, capability: Optional[Any] = None) -> bool:
+        """Evict session-scoped recovery tracking states and caches, releasing capacity (M25)."""
+        if self._in_transaction:
+            raise RecoveryLifecycleError("Reentrant call to evict_session rejected")
+        evicted = False
+        if session_id in self._session_states:
+            del self._session_states[session_id]
+            evicted = True
+        if session_id in self._revisions:
+            del self._revisions[session_id]
+            evicted = True
+        self._staged_candidates.pop(session_id, None)
+        self._verifications.pop(session_id, None)
+        self._authorizations.pop(session_id, None)
+        self._checkpoint_pairs.pop(session_id, None)
+        self._latest_records.pop(session_id, None)
+        return evicted
+
     def clear(self) -> None:
+
         """Clear all active recovery session tracking state."""
         self._session_states.clear()
         self._revisions.clear()

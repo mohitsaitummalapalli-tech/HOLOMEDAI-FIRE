@@ -441,3 +441,45 @@ class PlanningExecutionResult:
             raise ExecutionValidationError(f"Invalid session_id: {self.session_id!r}")
         if not isinstance(self.sequence_number, int) or self.sequence_number < 1:
             raise ExecutionValidationError("sequence_number must be an integer >= 1")
+
+
+@dataclass(frozen=True)
+class SessionTeardownExecutionRequest:
+    """Explicit request to execute coordinated clinical session teardown (M25)."""
+
+    session_id: str
+    sequence_number: int
+    now_utc: str
+    action: str = "SESSION_TEARDOWN"
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.session_id, str) or not SESSION_ID_REGEX.match(self.session_id):
+            raise ExecutionValidationError(f"Invalid session_id: {self.session_id!r}")
+        if not isinstance(self.sequence_number, int) or self.sequence_number < 0:
+            raise ExecutionValidationError("sequence_number must be an integer >= 0")
+        if not isinstance(self.now_utc, str) or not self.now_utc.strip():
+            raise ExecutionValidationError("now_utc must be a non-empty ISO-8601 string")
+        if self.action != "SESSION_TEARDOWN":
+            raise ExecutionValidationError(
+                f"SessionTeardownExecutionRequest requires action 'SESSION_TEARDOWN', got {self.action!r}"
+            )
+
+
+@dataclass(frozen=True)
+class SessionTeardownExecutionResult:
+    """Canonical result of coordinated clinical session teardown (M25)."""
+
+    session_id: str
+    execution_status: ExecutionStatus
+    sequence_number: int
+    executed_at_utc: str
+    subsystems_purged: tuple[str, ...]
+    failures: tuple[str, ...] = ()
+    error_message: Optional[str] = None
+    schema_version: str = EXECUTION_SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.session_id, str) or not SESSION_ID_REGEX.match(self.session_id):
+            raise ExecutionValidationError(f"Invalid session_id: {self.session_id!r}")
+        if not isinstance(self.sequence_number, int) or self.sequence_number < 0:
+            raise ExecutionValidationError("sequence_number must be an integer >= 0")

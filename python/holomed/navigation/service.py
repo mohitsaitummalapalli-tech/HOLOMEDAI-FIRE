@@ -487,7 +487,36 @@ class NavigationService(IService):
             updated_at_utc=now_utc,
         )
 
+    def evict_session(self, session_id: str, capability: Optional[Any] = None) -> bool:
+        """Evict session-scoped navigation states, poses, sequences, and deviations, releasing capacity (M25)."""
+        if self._in_transaction:
+            raise NavigationLifecycleError("Reentrant call to evict_session rejected")
+        evicted = False
+        if session_id in self._session_states:
+            del self._session_states[session_id]
+            evicted = True
+        if session_id in self._bound_trajectories:
+            del self._bound_trajectories[session_id]
+            evicted = True
+        pose_keys_to_del = [k for k in self._latest_poses if k[0] == session_id]
+        for k in pose_keys_to_del:
+            del self._latest_poses[k]
+            evicted = True
+        seq_keys_to_del = [k for k in self._latest_sequences if k[0] == session_id]
+        for k in seq_keys_to_del:
+            del self._latest_sequences[k]
+            evicted = True
+        if session_id in self._latest_deviations:
+            del self._latest_deviations[session_id]
+            evicted = True
+        if session_id in self._active_instruments:
+            del self._active_instruments[session_id]
+            evicted = True
+        return evicted
+
+
     def clear(self) -> None:
+
         """Clear all session states and stored telemetry."""
         self._bound_trajectories.clear()
         self._latest_poses.clear()

@@ -122,6 +122,13 @@ class SessionManager:
         )
         self._sessions[session_id] = updated
 
+    def evict_session(self, session_id: str) -> bool:
+        """Evict a session context from memory, releasing capacity (M25)."""
+        if session_id in self._sessions:
+            del self._sessions[session_id]
+            return True
+        return False
+
     def reset(self, epoch_id: int) -> None:
         """Reset session state for a new epoch."""
         self._epoch_id = epoch_id

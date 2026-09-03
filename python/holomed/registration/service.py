@@ -515,10 +515,24 @@ class RegistrationService(IService):
         reg = self._registrations.get(session_id)
         return bool(reg and reg.state == RegistrationState.VERIFIED and reg.transform is not None)
 
+    def evict_session(self, session_id: str, capability: Optional[Any] = None) -> bool:
+        """Evict session-scoped registrations and fiducial clouds, releasing capacity (M25)."""
+        if self._in_transaction:
+            raise RegistrationLifecycleError("Reentrant call to evict_session rejected")
+        evicted = False
+        if session_id in self._registrations:
+            del self._registrations[session_id]
+            evicted = True
+        if session_id in self._fiducial_clouds:
+            del self._fiducial_clouds[session_id]
+            evicted = True
+        return evicted
+
     def clear(self) -> None:
         """Clear all active registrations and fiducial clouds."""
         self._registrations.clear()
         self._fiducial_clouds.clear()
+
 
     # -------------------------------------------------------------------------
     # Helper & Verification Methods

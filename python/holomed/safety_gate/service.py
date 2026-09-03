@@ -288,10 +288,24 @@ class SafetyGateService(IService):
         """Query latest cached safety gate decision for a session."""
         return self._latest_decisions.get(session_id)
 
+    def evict_session(self, session_id: str, capability: Optional[Any] = None) -> bool:
+        """Evict session-scoped safety gate decisions and persistence signatures, releasing capacity (M25)."""
+        if self._in_transaction:
+            raise SafetyGateLifecycleError("Reentrant call to evict_session rejected")
+        evicted = False
+        if session_id in self._latest_decisions:
+            del self._latest_decisions[session_id]
+            evicted = True
+        if session_id in self._persisted_states:
+            del self._persisted_states[session_id]
+            evicted = True
+        return evicted
+
     def clear(self) -> None:
         """Clear transient session tracking cache."""
         self._latest_decisions.clear()
         self._persisted_states.clear()
+
 
     # -------------------------------------------------------------------------
     # Helper & Dispatcher Protocol Handlers

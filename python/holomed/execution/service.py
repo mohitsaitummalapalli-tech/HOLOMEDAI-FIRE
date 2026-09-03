@@ -32,6 +32,8 @@ from holomed.execution.models import (
     RecoveryReorientationExecutionResult,
     RegistrationExecutionRequest,
     RegistrationExecutionResult,
+    SessionTeardownExecutionRequest,
+    SessionTeardownExecutionResult,
     ToolExecutionRequest,
     ToolExecutionResult,
     TrajectoryBindingExecutionRequest,
@@ -39,7 +41,12 @@ from holomed.execution.models import (
     WorkflowResumptionExecutionRequest,
     WorkflowResumptionExecutionResult,
 )
-from holomed.execution._capability import _create_execution_capability
+
+from holomed.execution._capability import (
+    _INTERNAL_EXECUTION_KEY,
+    _create_execution_capability,
+)
+
 from holomed.navigation.models import (
     TrackedInstrumentPose,
     TrajectoryDeviationRecord,
@@ -104,6 +111,7 @@ class ClinicalExecutionGatewayService(IService):
         tool_service: Optional[ToolService] = None,
         registration_service: Optional[RegistrationService] = None,
         planning_service: Optional[PlanningService] = None,
+        platform_service: Optional[Any] = None,
         secret_filter: Optional[SecretFilter] = None,
         logger: Optional[StructuredLogger] = None,
     ) -> None:
@@ -116,8 +124,10 @@ class ClinicalExecutionGatewayService(IService):
         self._tool_service = tool_service
         self._registration_service = registration_service
         self._planning_service = planning_service
+        self._platform_service = platform_service
         self._secret_filter = secret_filter
         self._logger = logger or StructuredLogger(SERVICE_NAME, secret_filter=secret_filter)
+
 
         self._state: ServiceState = ServiceState.UNINITIALIZED
         self._context: Optional[RuntimeContext] = None
@@ -189,9 +199,13 @@ class ClinicalExecutionGatewayService(IService):
             self._dispatcher.register_command_handler(
                 "execution.planning.execute", self.handle_planning_execute_command, self.name
             )
+            self._dispatcher.register_command_handler(
+                "execution.session.teardown", self.handle_session_teardown_command, self.name
+            )
             self._dispatcher.register_query_handler(
                 "execution.status.get", self.handle_get_status_query, self.name
             )
+
 
         self._state = ServiceState.INITIALIZED
 
@@ -2093,6 +2107,186 @@ class ClinicalExecutionGatewayService(IService):
             raw_err = str(e)
             redacted = self._secret_filter.redact(raw_err) if self._secret_filter else raw_err
             return create_error_response(envelope, self.name, _format_error_code(type(e).__name__), redacted)
+
+    def execute_session_teardown(
+        self,
+        request: SessionTeardownExecutionRequest,
+    ) -> SessionTeardownExecutionResult:
+        """Execute coordinated synchronous clinical session teardown across all subsystems (M25)."""
+        if self._state != ServiceState.STARTED:
+            raise ExecutionLifecycleError(f"Cannot execute session teardown in state {self._state.name}")
+        if self._in_transaction:
+            raise ExecutionLifecycleError("Reentrant call to execute_session_teardown rejected")
+
+        self._in_transaction = True
+        cap = _create_execution_capability(
+            service_instance_id=id(self),
+            session_id=request.session_id,
+            action="SESSION_TEARDOWN",
+            sequence_number=request.sequence_number,
+        )
+
+
+        session_id = request.session_id
+        subsystems_purged: list[str] = []
+        failures: list[str] = []
+
+        try:
+            # Step 1: Navigation
+            if self._navigation_service is not None:
+                try:
+                    if hasattr(self._navigation_service, "evict_session"):
+                        self._navigation_service.evict_session(session_id, cap)
+                    subsystems_purged.append("navigation")
+                except Exception as exc:
+                    failures.append(f"navigation: {exc}")
+
+            # Step 2: Recovery
+            if self._recovery_service is not None:
+                try:
+                    if hasattr(self._recovery_service, "evict_session"):
+                        self._recovery_service.evict_session(session_id, cap)
+                    subsystems_purged.append("recovery")
+                except Exception as exc:
+                    failures.append(f"recovery: {exc}")
+
+            # Step 3: Registration
+            if self._registration_service is not None:
+                try:
+                    if hasattr(self._registration_service, "evict_session"):
+                        self._registration_service.evict_session(session_id, cap)
+                    subsystems_purged.append("registration")
+                except Exception as exc:
+                    failures.append(f"registration: {exc}")
+
+            # Step 4: Planning
+            if self._planning_service is not None:
+                try:
+                    if hasattr(self._planning_service, "evict_session"):
+                        self._planning_service.evict_session(session_id, cap)
+                    subsystems_purged.append("planning")
+                except Exception as exc:
+                    failures.append(f"planning: {exc}")
+
+            # Step 5: Safety Gate
+            if self._safety_gate_service is not None:
+                try:
+                    if hasattr(self._safety_gate_service, "evict_session"):
+                        self._safety_gate_service.evict_session(session_id, cap)
+                    subsystems_purged.append("safety_gate")
+                except Exception as exc:
+                    failures.append(f"safety_gate: {exc}")
+
+            # Step 6: Workflow
+            if self._workflow_service is not None:
+                try:
+                    if hasattr(self._workflow_service, "evict_session"):
+                        self._workflow_service.evict_session(session_id, cap)
+                    subsystems_purged.append("workflow")
+                except Exception as exc:
+                    failures.append(f"workflow: {exc}")
+
+            # Step 7: Gateway cache
+            try:
+                self._latest_results.pop(session_id, None)
+                self._persisted_states.pop(session_id, None)
+                subsystems_purged.append("gateway")
+            except Exception as exc:
+                failures.append(f"gateway: {exc}")
+
+            # Step 8: Platform Session eviction
+            if self._platform_service is not None:
+                try:
+                    if hasattr(self._platform_service, "evict_session"):
+                        self._platform_service.evict_session(session_id)
+                    subsystems_purged.append("platform")
+                except Exception as exc:
+                    failures.append(f"platform: {exc}")
+
+            # Determine execution status and audit event
+            if failures:
+                exec_status = ExecutionStatus.FAILED_NAVIGATION_GEOMETRY
+                audit_event = "session_teardown_degraded" if subsystems_purged else "session_teardown_failed"
+            else:
+                exec_status = ExecutionStatus.EXECUTED_CLEAR
+                audit_event = "session_teardown_completed"
+
+            # Durable Persistence Audit
+            if self._persistence_service is not None:
+                try:
+                    self._persistence_service.record_audit(
+                        {
+                            "session_id": session_id,
+                            "event": audit_event,
+                            "status": exec_status.value,
+                            "sequence_number": request.sequence_number,
+                            "epoch_id": self._epoch_id,
+                            "subsystems_purged": list(subsystems_purged),
+                            "failures": list(failures),
+                            "executed_at_utc": request.now_utc,
+                        },
+                        session_id=session_id,
+                    )
+                except Exception:
+                    pass
+
+            result = SessionTeardownExecutionResult(
+                session_id=session_id,
+                execution_status=exec_status,
+                sequence_number=request.sequence_number,
+                executed_at_utc=request.now_utc,
+                subsystems_purged=tuple(subsystems_purged),
+                failures=tuple(failures),
+                error_message="; ".join(failures) if failures else None,
+            )
+
+            self._emit_event(
+                "execution.session.torn_down",
+                {
+                    "session_id": session_id,
+                    "execution_status": exec_status.value,
+                    "subsystems_purged": list(subsystems_purged),
+                    "failures": list(failures),
+                },
+            )
+            return result
+        finally:
+            cap.invalidate()
+            self._in_transaction = False
+
+    def handle_session_teardown_command(self, envelope: MessageEnvelope) -> MessageEnvelope:
+        """Handle execution.session.teardown dispatcher command (M25)."""
+        try:
+            payload = envelope.payload
+            session_id = payload.get("session_id")
+            if not isinstance(session_id, str):
+                raise ExecutionValidationError("session_id must be a string")
+            sequence_number = payload.get("sequence_number")
+            if not isinstance(sequence_number, int):
+                raise ExecutionValidationError("sequence_number must be an integer >= 0")
+            now_utc = payload.get("now_utc") or datetime.now(timezone.utc).isoformat()
+
+            req = SessionTeardownExecutionRequest(
+                session_id=session_id,
+                sequence_number=sequence_number,
+                now_utc=now_utc,
+            )
+            res = self.execute_session_teardown(req)
+            res_dict: dict[str, Any] = {
+                "session_id": res.session_id,
+                "execution_status": res.execution_status.value,
+                "sequence_number": res.sequence_number,
+                "executed_at_utc": res.executed_at_utc,
+                "subsystems_purged": list(res.subsystems_purged),
+                "failures": list(res.failures),
+                "error_message": res.error_message,
+            }
+            return create_response(envelope, self.name, payload=res_dict)
+        except Exception as e:
+            raw_err = str(e)
+            redacted = self._secret_filter.redact(raw_err) if self._secret_filter else raw_err
+            return create_error_response(envelope, self.name, _format_error_code(type(e).__name__), redacted)
+
 
 
 # M19 Backward Compatibility Alias

@@ -671,6 +671,19 @@ class WorkflowService(IService):
             raise WorkflowSessionError(f"Session {session_id!r} not found")
         return self._workflows[session_id].snapshot
 
+    def evict_session(self, session_id: str, capability: Optional[Any] = None) -> bool:
+        """Evict session-scoped workflow and confirmation manager, releasing capacity (M25)."""
+        if self._in_transaction:
+            raise WorkflowLifecycleError("Reentrant call to evict_session rejected")
+        evicted = False
+        if session_id in self._workflows:
+            del self._workflows[session_id]
+            evicted = True
+        if session_id in self._confirmations:
+            del self._confirmations[session_id]
+            evicted = True
+        return evicted
+
     def clear(self) -> None:
         """Clear transient in-memory state."""
         self._workflows.clear()
@@ -678,6 +691,7 @@ class WorkflowService(IService):
         self._interlock_engine.clear()
         self._checkpoint_validator.clear()
         self._event_sink.clear()
+
 
     # -------------------------------------------------------------------------
     # Dispatcher Handlers
