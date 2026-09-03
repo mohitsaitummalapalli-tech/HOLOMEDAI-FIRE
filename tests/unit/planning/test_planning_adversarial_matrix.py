@@ -7,6 +7,8 @@ from dataclasses import replace
 import pytest
 
 from holomed.core.dispatcher import MessageDispatcher
+from holomed.core.exceptions import UnroutableMessageError
+from holomed.execution._capability import _create_execution_capability
 from holomed.planning.exceptions import (
     PlanningCapacityError,
     PlanningLifecycleError,
@@ -216,12 +218,14 @@ def test_service_plan_capacity_limit(
 
     for i in range(MAX_ACTIVE_PLANS):
         p = replace(sample_plan, plan_id=f"plan_{i:02d}")
-        srv.submit_plan(p, f"session_{i:02d}")
+        cap = _create_execution_capability(id(srv), f"session_{i:02d}", "PLANNING_COORDINATION", 1)
+        srv.submit_plan(p, f"session_{i:02d}", capability=cap)
 
     # 17th plan -> PlanningCapacityError
     p_overflow = replace(sample_plan, plan_id="plan_overflow")
+    cap_overflow = _create_execution_capability(id(srv), "session_overflow", "PLANNING_COORDINATION", 1)
     with pytest.raises(PlanningCapacityError):
-        srv.submit_plan(p_overflow, "session_overflow")
+        srv.submit_plan(p_overflow, "session_overflow", capability=cap_overflow)
 
     srv.stop()
 
@@ -231,16 +235,19 @@ def test_plan_locking_idempotency(
     secret_filter: SecretFilter,
     sample_plan: SurgicalPlanDefinition,
 ) -> None:
-    """Verify locking an already locked plan is idempotent."""
+    """Verify locking an already locked plan is idempotent under capability."""
     srv = PlanningService(secret_filter=secret_filter)
     srv.initialize(runtime_context)
     srv.start()
 
-    srv.submit_plan(sample_plan, "s1")
-    l1 = srv.lock_plan(sample_plan.plan_id)
+    cap_sub = _create_execution_capability(id(srv), "s1", "PLANNING_COORDINATION", 1)
+    srv.submit_plan(sample_plan, "s1", capability=cap_sub)
+    cap_lock1 = _create_execution_capability(id(srv), "s1", "PLANNING_COORDINATION", 2)
+    l1 = srv.lock_plan(sample_plan.plan_id, capability=cap_lock1)
     assert l1.is_locked is True
 
-    l2 = srv.lock_plan(sample_plan.plan_id)
+    cap_lock2 = _create_execution_capability(id(srv), "s1", "PLANNING_COORDINATION", 3)
+    l2 = srv.lock_plan(sample_plan.plan_id, capability=cap_lock2)
     assert l2.is_locked is True
 
     srv.stop()
@@ -256,7 +263,8 @@ def test_plan_retrieval_helpers(
     srv.initialize(runtime_context)
     srv.start()
 
-    srv.submit_plan(sample_plan, "session_42")
+    cap_sub = _create_execution_capability(id(srv), "session_42", "PLANNING_COORDINATION", 1)
+    srv.submit_plan(sample_plan, "session_42", capability=cap_sub)
 
     # Found by plan_id
     p = srv.get_plan(sample_plan.plan_id)
@@ -311,10 +319,13 @@ def test_e2e_plan_creation_locking_checkpoint_registration_and_workflow(
     plan_srv.start()
 
     # 1. Submit and lock plan
-    plan_srv.submit_plan(sample_plan, "sess_e2e")
-    plan_srv.lock_plan(sample_plan.plan_id)
+    cap_sub = _create_execution_capability(id(plan_srv), "sess_e2e", "PLANNING_COORDINATION", 1)
+    plan_srv.submit_plan(sample_plan, "sess_e2e", capability=cap_sub)
+    cap_lock = _create_execution_capability(id(plan_srv), "sess_e2e", "PLANNING_COORDINATION", 2)
+    plan_srv.lock_plan(sample_plan.plan_id, capability=cap_lock)
 
     # 2. Verify plan
+    cap_ver = _create_execution_capability(id(plan_srv), "sess_e2e", "PLANNING_COORDINATION", 3)
     record = plan_srv.verify_plan(
         plan_id=sample_plan.plan_id,
         session_id="sess_e2e",
@@ -322,6 +333,7 @@ def test_e2e_plan_creation_locking_checkpoint_registration_and_workflow(
         patient_hash=sample_plan.case_context.patient_hash,
         procedure_code="THA_POSTERIOR_APPROACH",
         laterality=SurgicalLaterality.RIGHT,
+        capability=cap_ver,
     )
     assert record.verified is True
 
@@ -406,17 +418,16 @@ def test_dispatcher_invalid_args_return_error(
     message_dispatcher: MessageDispatcher,
     secret_filter: SecretFilter,
 ) -> None:
-    """Verify missing arguments in command return protocol ERROR response."""
+    """Verify raw planning.submit command is unroutable on dispatcher in M24."""
     plan_srv = PlanningService(dispatcher=message_dispatcher, secret_filter=secret_filter)
     plan_srv.initialize(runtime_context)
     message_dispatcher.start()
     plan_srv.start()
 
-    # submit without plan payload
+    # submit is unroutable -> UnroutableMessageError
     cmd = create_command("planning.submit", "test", payload={})
-    resp = message_dispatcher.dispatch(cmd)
-    assert resp.message_type.value == "ERROR"
-    assert resp.payload["error_code"] == "ERR_INVALID_ARGS"
+    with pytest.raises(UnroutableMessageError):
+        message_dispatcher.dispatch(cmd)
 
     plan_srv.stop()
 
@@ -424,7 +435,7 @@ def test_dispatcher_invalid_args_return_error(
 def test_plan_verification_with_case_sensitive_patient_hash_normalized(
     sample_plan: SurgicalPlanDefinition,
 ) -> None:
-    """Verify verification engine normalizes patient hash casing during comparison."""
+    """Verify verification engine normalizes patient hash casing during comparison under capability."""
     locked_plan = replace(sample_plan, is_locked=True)
     srv = PlanningService()
     srv._epoch_id = 1
@@ -432,6 +443,7 @@ def test_plan_verification_with_case_sensitive_patient_hash_normalized(
     srv._plans[locked_plan.plan_id] = locked_plan
 
     # Report hash in uppercase
+    cap = _create_execution_capability(id(srv), "s1", "PLANNING_COORDINATION", 1)
     rec = srv.verify_plan(
         plan_id=locked_plan.plan_id,
         session_id="s1",
@@ -439,5 +451,6 @@ def test_plan_verification_with_case_sensitive_patient_hash_normalized(
         patient_hash=locked_plan.case_context.patient_hash.upper(),
         procedure_code="THA_POSTERIOR_APPROACH",
         laterality=SurgicalLaterality.RIGHT,
+        capability=cap,
     )
     assert rec.verified is True

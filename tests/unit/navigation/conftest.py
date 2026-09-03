@@ -7,6 +7,7 @@ import pytest
 
 from holomed.configuration.models import AppConfig
 from holomed.core.dispatcher import MessageDispatcher
+from holomed.execution._capability import _create_execution_capability
 from holomed.planning.models import (
     PatientCaseContext,
     SurgicalLaterality,
@@ -92,8 +93,10 @@ def verified_registration_service(
         exclusion_zones=(),
         is_locked=False,
     )
-    plan_srv.submit_plan(plan, "sess_nav_01")
-    plan_srv.lock_plan("plan_nav_01")
+    cap_sub = _create_execution_capability(id(plan_srv), "sess_nav_01", "PLANNING_COORDINATION", 1)
+    plan_srv.submit_plan(plan, "sess_nav_01", capability=cap_sub)
+    cap_lock = _create_execution_capability(id(plan_srv), "sess_nav_01", "PLANNING_COORDINATION", 2)
+    plan_srv.lock_plan("plan_nav_01", capability=cap_lock)
 
     # 2. Setup Registration Service (translation +10 X, +20 Y, +30 Z)
     reg_srv = RegistrationService(planning_service=plan_srv, secret_filter=secret_filter)
@@ -105,7 +108,6 @@ def verified_registration_service(
         FiducialPointPair("f2", (50.0, 0.0, 0.0), (60.0, 20.0, 30.0), "p2"),
         FiducialPointPair("f3", (0.0, 50.0, 0.0), (10.0, 70.0, 30.0), "p3"),
     )
-    from holomed.execution._capability import _create_execution_capability
     cap_reg = _create_execution_capability(
         service_instance_id=id(reg_srv),
         session_id="sess_nav_01",

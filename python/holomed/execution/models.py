@@ -20,7 +20,10 @@ from holomed.navigation.models import (
     TrajectoryDeviationRecord,
 )
 from holomed.planning.models import (
+    PlanVerificationRecord,
     SafetyExclusionZone,
+    SurgicalLaterality,
+    SurgicalPlanDefinition,
     TrajectoryPlan,
 )
 from holomed.recovery.models import (
@@ -373,6 +376,63 @@ class RegistrationExecutionResult:
     workflow_status: Optional[WorkflowToolAuthorizationStatus] = None
     registration_record: Optional[RegistrationStatusRecord] = None
     verification_snapshot: Optional[RegistrationVerificationSnapshot] = None
+    error_message: Optional[str] = None
+    schema_version: str = EXECUTION_SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.session_id, str) or not SESSION_ID_REGEX.match(self.session_id):
+            raise ExecutionValidationError(f"Invalid session_id: {self.session_id!r}")
+        if not isinstance(self.sequence_number, int) or self.sequence_number < 1:
+            raise ExecutionValidationError("sequence_number must be an integer >= 1")
+
+
+@dataclass(frozen=True)
+class PlanningExecutionRequest:
+    """Explicit request to execute preoperative planning operation via execution gateway (M24)."""
+
+    session_id: str
+    sequence_number: int
+    now_utc: str
+    operation: str  # "SUBMIT", "LOCK", "VERIFY"
+    plan: Optional[SurgicalPlanDefinition] = None
+    plan_id: Optional[str] = None
+    operator_id: Optional[str] = None
+    patient_hash: Optional[str] = None
+    procedure_code: Optional[str] = None
+    laterality: Optional[SurgicalLaterality] = None
+    action: SafetyGateAction = SafetyGateAction.TRAJECTORY_ALIGNMENT
+    tool_safety_classification: Optional[ToolSafetyClassification] = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.session_id, str) or not SESSION_ID_REGEX.match(self.session_id):
+            raise ExecutionValidationError(f"Invalid session_id: {self.session_id!r}")
+        if not isinstance(self.sequence_number, int) or self.sequence_number < 1:
+            raise ExecutionValidationError("sequence_number must be an integer >= 1")
+        if not isinstance(self.now_utc, str) or not self.now_utc.strip():
+            raise ExecutionValidationError("now_utc must be a non-empty ISO-8601 string")
+        if not isinstance(self.operation, str) or self.operation.upper() not in ("SUBMIT", "LOCK", "VERIFY"):
+            raise ExecutionValidationError(f"Invalid planning operation: {self.operation!r}")
+        if self.action != SafetyGateAction.TRAJECTORY_ALIGNMENT:
+            raise ExecutionValidationError(
+                f"PlanningExecutionRequest requires TRAJECTORY_ALIGNMENT, got {self.action.value}"
+            )
+
+
+@dataclass(frozen=True)
+class PlanningExecutionResult:
+    """Canonical result of a coordinated preoperative planning execution operation (M24)."""
+
+    session_id: str
+    execution_status: ExecutionStatus
+    gate_decision: GateDecision
+    gate_reason_code: GateReasonCode
+    action: SafetyGateAction
+    sequence_number: int
+    operation: str
+    executed_at_utc: str
+    workflow_status: Optional[WorkflowToolAuthorizationStatus] = None
+    plan: Optional[SurgicalPlanDefinition] = None
+    verification_record: Optional[PlanVerificationRecord] = None
     error_message: Optional[str] = None
     schema_version: str = EXECUTION_SCHEMA_VERSION
 

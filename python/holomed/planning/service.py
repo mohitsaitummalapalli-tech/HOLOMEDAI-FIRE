@@ -11,6 +11,7 @@ from holomed.core.models import DispatcherState
 from holomed.devices.models import DeviceShutdownFailureRecord
 from holomed.planning.checkpoints import derive_checkpoints_from_plan
 from holomed.planning.exceptions import (
+    PlanningAuthorizationError,
     PlanningCapacityError,
     PlanningError,
     PlanningLifecycleError,
@@ -123,12 +124,9 @@ class PlanningService(IService):
         for res_id in STRUCTURAL_RESOURCE_IDS:
             self._resources.acquire(res_id)
 
-        # Register Dispatcher Routes strictly during INITIALIZED
+        # Register Dispatcher Routes strictly during INITIALIZED (M24: planning.get ONLY)
         if self._dispatcher is not None:
             self._dispatcher.register_query_handler("planning.get", self.handle_get_query, self.name)
-            self._dispatcher.register_command_handler("planning.submit", self.handle_submit_command, self.name)
-            self._dispatcher.register_command_handler("planning.lock", self.handle_lock_command, self.name)
-            self._dispatcher.register_command_handler("planning.verify", self.handle_verify_command, self.name)
 
         self._state = ServiceState.INITIALIZED
 
@@ -212,10 +210,37 @@ class PlanningService(IService):
     # Plan Lifecycle and Management API
     # -------------------------------------------------------------------------
 
-    def submit_plan(self, plan: SurgicalPlanDefinition, session_id: str) -> SurgicalPlanDefinition:
-        """Ingest or update a preoperative surgical plan (D294, D304)."""
+    def submit_plan(
+        self,
+        plan: SurgicalPlanDefinition,
+        session_id: str,
+        capability: Optional[Any] = None,
+        sequence_number: Optional[int] = None,
+    ) -> SurgicalPlanDefinition:
+        """Ingest or update a preoperative surgical plan under authoritative capability (D294, D304, M24)."""
         if self._state != ServiceState.STARTED:
             raise PlanningLifecycleError(f"Cannot submit plan in state {self._state.name}")
+
+        # Capability Validation (M24)
+        if capability is None or not getattr(capability, "is_active", False):
+            raise PlanningAuthorizationError("Planning execution requires an active capability")
+        if getattr(capability, "action", None) != "PLANNING_COORDINATION":
+            raise PlanningAuthorizationError(
+                f"Capability action mismatch: expected 'PLANNING_COORDINATION', got {getattr(capability, 'action', None)!r}"
+            )
+        if getattr(capability, "session_id", None) != session_id:
+            raise PlanningAuthorizationError(
+                f"Capability session mismatch: expected {session_id!r}, got {getattr(capability, 'session_id', None)!r}"
+            )
+        if sequence_number is not None and getattr(capability, "sequence_number", None) != sequence_number:
+            raise PlanningAuthorizationError(
+                f"Capability sequence mismatch: expected {sequence_number}, got {getattr(capability, 'sequence_number', None)}"
+            )
+        if getattr(capability, "service_instance_id", None) != id(self):
+            raise PlanningAuthorizationError(
+                f"Capability service binding mismatch: expected {id(self)}, got {getattr(capability, 'service_instance_id', None)}"
+            )
+
         if self._in_transaction:
             raise PlanningLifecycleError("Reentrant call to submit_plan rejected")
 
@@ -244,10 +269,40 @@ class PlanningService(IService):
         finally:
             self._in_transaction = False
 
-    def lock_plan(self, plan_id: str) -> SurgicalPlanDefinition:
-        """Permanently lock surgical plan and derive M10 checkpoints (D296, D299)."""
+    def lock_plan(
+        self,
+        plan_id: str,
+        capability: Optional[Any] = None,
+        sequence_number: Optional[int] = None,
+    ) -> SurgicalPlanDefinition:
+        """Permanently lock surgical plan and derive M10 checkpoints under authoritative capability (D296, D299, M24)."""
         if self._state != ServiceState.STARTED:
             raise PlanningLifecycleError(f"Cannot lock plan in state {self._state.name}")
+
+        # Capability Validation (M24)
+        if capability is None or not getattr(capability, "is_active", False):
+            raise PlanningAuthorizationError("Planning execution requires an active capability")
+        if getattr(capability, "action", None) != "PLANNING_COORDINATION":
+            raise PlanningAuthorizationError(
+                f"Capability action mismatch: expected 'PLANNING_COORDINATION', got {getattr(capability, 'action', None)!r}"
+            )
+        cap_session = getattr(capability, "session_id", None)
+        if not isinstance(cap_session, str) or not cap_session.strip():
+            raise PlanningAuthorizationError("Capability session is invalid")
+        plan_session = next((s for s, p in self._session_plan_bindings.items() if p == plan_id), None)
+        if plan_session is not None and cap_session != plan_session:
+            raise PlanningAuthorizationError(
+                f"Capability session mismatch: plan bound to {plan_session!r}, got {cap_session!r}"
+            )
+        if sequence_number is not None and getattr(capability, "sequence_number", None) != sequence_number:
+            raise PlanningAuthorizationError(
+                f"Capability sequence mismatch: expected {sequence_number}, got {getattr(capability, 'sequence_number', None)}"
+            )
+        if getattr(capability, "service_instance_id", None) != id(self):
+            raise PlanningAuthorizationError(
+                f"Capability service binding mismatch: expected {id(self)}, got {getattr(capability, 'service_instance_id', None)}"
+            )
+
         if self._in_transaction:
             raise PlanningLifecycleError("Reentrant call to lock_plan rejected")
 
@@ -298,35 +353,65 @@ class PlanningService(IService):
         patient_hash: str,
         procedure_code: str,
         laterality: SurgicalLaterality,
+        capability: Optional[Any] = None,
+        sequence_number: Optional[int] = None,
     ) -> PlanVerificationRecord:
-        """Perform formal safety checklist verification against active session (D295, D305)."""
+        """Perform formal safety checklist verification against active session under authoritative capability (D295, D305, M24)."""
         if self._state != ServiceState.STARTED:
             raise PlanningLifecycleError(f"Cannot verify plan in state {self._state.name}")
-        if plan_id not in self._plans:
-            raise PlanningValidationError(f"Plan {plan_id!r} not found")
 
-        plan = self._plans[plan_id]
-        record = PlanVerificationEngine.verify_plan(
-            plan=plan,
-            session_id=session_id,
-            epoch_id=self._epoch_id,
-            verifier_operator_id=operator_id,
-            reported_patient_hash=patient_hash,
-            reported_procedure_code=procedure_code,
-            reported_laterality=laterality,
-        )
-        self._verification_records[plan_id] = record
+        # Capability Validation (M24)
+        if capability is None or not getattr(capability, "is_active", False):
+            raise PlanningAuthorizationError("Planning execution requires an active capability")
+        if getattr(capability, "action", None) != "PLANNING_COORDINATION":
+            raise PlanningAuthorizationError(
+                f"Capability action mismatch: expected 'PLANNING_COORDINATION', got {getattr(capability, 'action', None)!r}"
+            )
+        if getattr(capability, "session_id", None) != session_id:
+            raise PlanningAuthorizationError(
+                f"Capability session mismatch: expected {session_id!r}, got {getattr(capability, 'session_id', None)!r}"
+            )
+        if sequence_number is not None and getattr(capability, "sequence_number", None) != sequence_number:
+            raise PlanningAuthorizationError(
+                f"Capability sequence mismatch: expected {sequence_number}, got {getattr(capability, 'sequence_number', None)}"
+            )
+        if getattr(capability, "service_instance_id", None) != id(self):
+            raise PlanningAuthorizationError(
+                f"Capability service binding mismatch: expected {id(self)}, got {getattr(capability, 'service_instance_id', None)}"
+            )
 
-        self._emit_event(
-            "planning.plan.verified",
-            {
-                "plan_id": plan_id,
-                "session_id": session_id,
-                "verification_id": record.verification_id,
-                "verified": record.verified,
-            },
-        )
-        return record
+        if self._in_transaction:
+            raise PlanningLifecycleError("Reentrant call to verify_plan rejected")
+
+        self._in_transaction = True
+        try:
+            if plan_id not in self._plans:
+                raise PlanningValidationError(f"Plan {plan_id!r} not found")
+
+            plan = self._plans[plan_id]
+            record = PlanVerificationEngine.verify_plan(
+                plan=plan,
+                session_id=session_id,
+                epoch_id=self._epoch_id,
+                verifier_operator_id=operator_id,
+                reported_patient_hash=patient_hash,
+                reported_procedure_code=procedure_code,
+                reported_laterality=laterality,
+            )
+            self._verification_records[plan_id] = record
+
+            self._emit_event(
+                "planning.plan.verified",
+                {
+                    "plan_id": plan_id,
+                    "session_id": session_id,
+                    "verification_id": record.verification_id,
+                    "verified": record.verified,
+                },
+            )
+            return record
+        finally:
+            self._in_transaction = False
 
     def get_plan(self, plan_id: str) -> SurgicalPlanDefinition:
         """Retrieve plan by plan_id."""

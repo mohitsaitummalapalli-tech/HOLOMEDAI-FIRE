@@ -6,6 +6,8 @@ from __future__ import annotations
 import pytest
 
 from holomed.core.dispatcher import MessageDispatcher
+from holomed.core.exceptions import UnroutableMessageError
+from holomed.execution._capability import _create_execution_capability
 from holomed.planning.exceptions import (
     PlanningLifecycleError,
     PlanningLockError,
@@ -53,23 +55,26 @@ def test_planning_service_submit_and_lock_immutability(
     secret_filter: SecretFilter,
     sample_plan: SurgicalPlanDefinition,
 ) -> None:
-    """Verify plan locking makes plan permanently immutable (D299, D304)."""
+    """Verify plan locking makes plan permanently immutable (D299, D304, M24)."""
     srv = PlanningService(secret_filter=secret_filter)
     srv.initialize(runtime_context)
     srv.start()
 
-    # 1. Submit draft plan
-    submitted = srv.submit_plan(sample_plan, "sess_01")
+    # 1. Submit draft plan under authoritative capability
+    cap_sub = _create_execution_capability(id(srv), "sess_01", "PLANNING_COORDINATION", 1)
+    submitted = srv.submit_plan(sample_plan, "sess_01", capability=cap_sub)
     assert submitted.plan_id == sample_plan.plan_id
     assert srv.active_plans_count == 1
 
-    # 2. Lock plan
-    locked = srv.lock_plan(sample_plan.plan_id)
+    # 2. Lock plan under authoritative capability
+    cap_lock = _create_execution_capability(id(srv), "sess_01", "PLANNING_COORDINATION", 2)
+    locked = srv.lock_plan(sample_plan.plan_id, capability=cap_lock)
     assert locked.is_locked is True
 
     # 3. Attempt to re-submit locked plan -> PlanningLockError
+    cap_resub = _create_execution_capability(id(srv), "sess_01", "PLANNING_COORDINATION", 3)
     with pytest.raises(PlanningLockError):
-        srv.submit_plan(sample_plan, "sess_01")
+        srv.submit_plan(sample_plan, "sess_01", capability=cap_resub)
 
     srv.stop()
 
@@ -80,7 +85,7 @@ def test_planning_service_integration_with_workflow_checkpoints(
     secret_filter: SecretFilter,
     sample_plan: SurgicalPlanDefinition,
 ) -> None:
-    """Verify locking a plan registers derived checkpoints into WorkflowService (D296)."""
+    """Verify locking a plan registers derived checkpoints into WorkflowService (D296, M24)."""
     wf_srv = WorkflowService(dispatcher=message_dispatcher, secret_filter=secret_filter)
     wf_srv.initialize(runtime_context)
     wf_srv.start()
@@ -93,8 +98,10 @@ def test_planning_service_integration_with_workflow_checkpoints(
     plan_srv.initialize(runtime_context)
     plan_srv.start()
 
-    plan_srv.submit_plan(sample_plan, "sess_wf_01")
-    plan_srv.lock_plan(sample_plan.plan_id)
+    cap_sub = _create_execution_capability(id(plan_srv), "sess_wf_01", "PLANNING_COORDINATION", 1)
+    plan_srv.submit_plan(sample_plan, "sess_wf_01", capability=cap_sub)
+    cap_lock = _create_execution_capability(id(plan_srv), "sess_wf_01", "PLANNING_COORDINATION", 2)
+    plan_srv.lock_plan(sample_plan.plan_id, capability=cap_lock)
 
     # Check that derived checkpoints are registered in WorkflowService
     # Evaluating derived trajectory checkpoint: "chk_traj_traj_cup_reaming"
@@ -117,13 +124,13 @@ def test_planning_service_dispatcher_routes(
     secret_filter: SecretFilter,
     sample_plan: SurgicalPlanDefinition,
 ) -> None:
-    """Verify planning.submit, planning.get, planning.lock, planning.verify via dispatcher."""
+    """Verify planning.submit, planning.lock, planning.verify are unroutable, and planning.get is functional (M24)."""
     plan_srv = PlanningService(dispatcher=message_dispatcher, secret_filter=secret_filter)
     plan_srv.initialize(runtime_context)
     message_dispatcher.start()
     plan_srv.start()
 
-    # 1. planning.submit
+    # 1. planning.submit is unroutable -> UnroutableMessageError
     submit_payload = {
         "session_id": "sess_disp_01",
         "plan": {
@@ -153,24 +160,15 @@ def test_planning_service_dispatcher_routes(
         },
     }
     cmd_sub = create_command("planning.submit", "surgeon_console", payload=submit_payload)
-    resp_sub = message_dispatcher.dispatch(cmd_sub)
-    assert resp_sub.message_type.value == "RESPONSE"
-    assert resp_sub.payload["plan_id"] == "plan_disp_01"
+    with pytest.raises(UnroutableMessageError):
+        message_dispatcher.dispatch(cmd_sub)
 
-    # 2. planning.get
-    q_get = create_query("planning.get", "xr_client", payload={"plan_id": "plan_disp_01"})
-    resp_get = message_dispatcher.dispatch(q_get)
-    assert resp_get.message_type.value == "RESPONSE"
-    assert resp_get.payload["case_id"] == "case_d01"
-    assert resp_get.payload["is_locked"] is False
-
-    # 3. planning.lock
+    # 2. planning.lock is unroutable -> UnroutableMessageError
     cmd_lock = create_command("planning.lock", "surgeon_console", payload={"plan_id": "plan_disp_01"})
-    resp_lock = message_dispatcher.dispatch(cmd_lock)
-    assert resp_lock.message_type.value == "RESPONSE"
-    assert resp_lock.payload["is_locked"] is True
+    with pytest.raises(UnroutableMessageError):
+        message_dispatcher.dispatch(cmd_lock)
 
-    # 4. planning.verify
+    # 3. planning.verify is unroutable -> UnroutableMessageError
     verify_payload = {
         "plan_id": "plan_disp_01",
         "session_id": "sess_disp_01",
@@ -180,9 +178,18 @@ def test_planning_service_dispatcher_routes(
         "laterality": "LEFT",
     }
     cmd_ver = create_command("planning.verify", "surgeon_console", payload=verify_payload)
-    resp_ver = message_dispatcher.dispatch(cmd_ver)
-    assert resp_ver.message_type.value == "RESPONSE"
-    assert resp_ver.payload["verified"] is True
+    with pytest.raises(UnroutableMessageError):
+        message_dispatcher.dispatch(cmd_ver)
+
+    # 4. planning.get remains functional as a read-only query
+    cap_sub = _create_execution_capability(id(plan_srv), "sess_disp_01", "PLANNING_COORDINATION", 1)
+    plan_srv.submit_plan(sample_plan, "sess_disp_01", capability=cap_sub)
+
+    q_get = create_query("planning.get", "xr_client", payload={"plan_id": sample_plan.plan_id})
+    resp_get = message_dispatcher.dispatch(q_get)
+    assert resp_get.message_type.value == "RESPONSE"
+    assert resp_get.payload["case_id"] == sample_plan.case_context.case_id
+    assert resp_get.payload["is_locked"] is False
 
     plan_srv.stop()
 
@@ -192,17 +199,19 @@ def test_reentrancy_guard_in_planning_service(
     secret_filter: SecretFilter,
     sample_plan: SurgicalPlanDefinition,
 ) -> None:
-    """Verify transaction guard prevents reentrant calls."""
+    """Verify transaction guard prevents reentrant calls under valid capability."""
     srv = PlanningService(secret_filter=secret_filter)
     srv.initialize(runtime_context)
     srv.start()
 
     srv._in_transaction = True
+    cap_sub = _create_execution_capability(id(srv), "s1", "PLANNING_COORDINATION", 1)
     with pytest.raises(PlanningLifecycleError):
-        srv.submit_plan(sample_plan, "s1")
+        srv.submit_plan(sample_plan, "s1", capability=cap_sub)
 
+    cap_lock = _create_execution_capability(id(srv), "s1", "PLANNING_COORDINATION", 2)
     with pytest.raises(PlanningLifecycleError):
-        srv.lock_plan("p1")
+        srv.lock_plan("p1", capability=cap_lock)
 
     with pytest.raises(PlanningLifecycleError):
         srv.stop()

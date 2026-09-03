@@ -96,8 +96,10 @@ def sample_locked_plan(planning_service: PlanningService) -> SurgicalPlanDefinit
         exclusion_zones=(),
         is_locked=True,
     )
-    planning_service.submit_plan(plan, "sess_m23")
-    planning_service.lock_plan("plan_m23")
+    cap_sub = _create_execution_capability(id(planning_service), "sess_m23", "PLANNING_COORDINATION", 1)
+    planning_service.submit_plan(plan, "sess_m23", capability=cap_sub)
+    cap_lock = _create_execution_capability(id(planning_service), "sess_m23", "PLANNING_COORDINATION", 2)
+    planning_service.lock_plan("plan_m23", capability=cap_lock)
     return plan
 
 

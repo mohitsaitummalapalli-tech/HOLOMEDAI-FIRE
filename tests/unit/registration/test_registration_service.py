@@ -201,7 +201,8 @@ def test_registration_service_requires_locked_plan(
         exclusion_zones=(),
         is_locked=False,
     )
-    planning_service.submit_plan(unlocked_plan, "sess_u")
+    cap_sub = _create_execution_capability(id(planning_service), "sess_u", "PLANNING_COORDINATION", 1)
+    planning_service.submit_plan(unlocked_plan, "sess_u", capability=cap_sub)
 
     cap = _make_reg_cap(srv, "sess_reg_unlocked", seq=1)
     with pytest.raises(RegistrationPlanMismatchError):

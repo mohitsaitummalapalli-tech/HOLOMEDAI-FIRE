@@ -26,6 +26,8 @@ from holomed.execution.models import (
     NavigationExecutionRequest,
     NavigationExecutionResult,
     NavigationExecutionStatusRecord,
+    PlanningExecutionRequest,
+    PlanningExecutionResult,
     RecoveryReorientationExecutionRequest,
     RecoveryReorientationExecutionResult,
     RegistrationExecutionRequest,
@@ -44,6 +46,8 @@ from holomed.navigation.models import (
 )
 from holomed.navigation.service import NavigationService
 from holomed.persistence.service import PersistenceService
+from holomed.planning.models import SurgicalLaterality, SurgicalPlanDefinition
+from holomed.planning.service import PlanningService
 from holomed.protocol.builders import (
     create_error_response,
     create_event,
@@ -99,6 +103,7 @@ class ClinicalExecutionGatewayService(IService):
         recovery_service: Optional[RecoveryService] = None,
         tool_service: Optional[ToolService] = None,
         registration_service: Optional[RegistrationService] = None,
+        planning_service: Optional[PlanningService] = None,
         secret_filter: Optional[SecretFilter] = None,
         logger: Optional[StructuredLogger] = None,
     ) -> None:
@@ -110,6 +115,7 @@ class ClinicalExecutionGatewayService(IService):
         self._recovery_service = recovery_service
         self._tool_service = tool_service
         self._registration_service = registration_service
+        self._planning_service = planning_service
         self._secret_filter = secret_filter
         self._logger = logger or StructuredLogger(SERVICE_NAME, secret_filter=secret_filter)
 
@@ -179,6 +185,9 @@ class ClinicalExecutionGatewayService(IService):
             )
             self._dispatcher.register_command_handler(
                 "execution.registration.execute", self.handle_registration_execute_command, self.name
+            )
+            self._dispatcher.register_command_handler(
+                "execution.planning.execute", self.handle_planning_execute_command, self.name
             )
             self._dispatcher.register_query_handler(
                 "execution.status.get", self.handle_get_status_query, self.name
@@ -1750,6 +1759,334 @@ class ClinicalExecutionGatewayService(IService):
                     "verification_id": res.verification_snapshot.verification_id,
                     "passed": res.verification_snapshot.passed,
                     "drift_error_mm": res.verification_snapshot.measured_drift_error_mm,
+                }
+            return create_response(envelope, self.name, payload=res_dict)
+        except Exception as e:
+            raw_err = str(e)
+            redacted = self._secret_filter.redact(raw_err) if self._secret_filter else raw_err
+            return create_error_response(envelope, self.name, _format_error_code(type(e).__name__), redacted)
+
+    # -------------------------------------------------------------------------
+    # Preoperative Planning Execution API (M24)
+    # -------------------------------------------------------------------------
+
+    def execute_planning(
+        self, request: PlanningExecutionRequest
+    ) -> PlanningExecutionResult:
+        """Execute preoperative planning operation under dual-gate authorization (M24)."""
+        if self._state != ServiceState.STARTED:
+            raise ExecutionLifecycleError(f"Cannot execute planning in state {self._state.name}")
+        if self._in_transaction:
+            raise ExecutionLifecycleError("Reentrant call to execute_planning rejected")
+
+        self._in_transaction = True
+        try:
+            session_id = request.session_id
+
+            if request.action != SafetyGateAction.TRAJECTORY_ALIGNMENT:
+                raise ExecutionValidationError(
+                    f"Action mismatch: execute_planning requires TRAJECTORY_ALIGNMENT, got {request.action.value}"
+                )
+
+            # 1. Step 1: Inline M18 Safety Gate Evaluation
+            gate_decision = GateDecision.DENIED_INTERLOCKED
+            gate_reason = GateReasonCode.NONE
+            if self._safety_gate_service is not None:
+                gate_req = GateRequest(
+                    session_id=session_id,
+                    action=SafetyGateAction.TRAJECTORY_ALIGNMENT,
+                    sequence_number=request.sequence_number,
+                    now_utc=request.now_utc,
+                )
+                gate_rec = self._safety_gate_service.evaluate(gate_req)
+                gate_decision = gate_rec.decision
+                gate_reason = gate_rec.reason_code
+            else:
+                gate_decision = GateDecision.DENIED_INTERLOCKED
+                gate_reason = GateReasonCode.NONE
+
+            # Short-circuit on M18 Denial
+            if gate_decision in (GateDecision.DENIED_INTERLOCKED, GateDecision.DENIED_CRITICAL):
+                res = PlanningExecutionResult(
+                    session_id=session_id,
+                    execution_status=ExecutionStatus.BLOCKED_SAFETY_GATE,
+                    gate_decision=gate_decision,
+                    gate_reason_code=gate_reason,
+                    action=request.action,
+                    sequence_number=request.sequence_number,
+                    operation=request.operation,
+                    executed_at_utc=request.now_utc,
+                    error_message=f"Blocked by M18 safety gate: {gate_reason.value}",
+                )
+                if self._persistence_service is not None:
+                    self._persistence_service.record_audit(
+                        {
+                            "session_id": session_id,
+                            "operation": request.operation,
+                            "event": "planning_blocked_safety_gate",
+                            "decision": gate_decision.value,
+                            "reason": gate_reason.value,
+                            "sequence_number": request.sequence_number,
+                            "epoch_id": self._epoch_id,
+                        },
+                        session_id=session_id,
+                    )
+                return res
+
+            # 2. Step 2: M10 Workflow Authorization Gate
+            wf_status = None
+            if self._workflow_service is not None:
+                tool_name = f"planning.{request.operation.lower()}"
+                wf_auth = self._workflow_service.authorize_tool(
+                    session_id=session_id,
+                    tool_id=tool_name,
+                    safety_classification=request.tool_safety_classification or ToolSafetyClassification.TELEMETRY_RECORDING,
+                )
+                wf_status = wf_auth.status
+                if wf_auth.status != WorkflowToolAuthorizationStatus.PERMITTED:
+                    res = PlanningExecutionResult(
+                        session_id=session_id,
+                        execution_status=ExecutionStatus.BLOCKED_WORKFLOW,
+                        gate_decision=gate_decision,
+                        gate_reason_code=gate_reason,
+                        action=request.action,
+                        sequence_number=request.sequence_number,
+                        operation=request.operation,
+                        executed_at_utc=request.now_utc,
+                        workflow_status=wf_status,
+                        error_message=f"Blocked by M10 workflow: {wf_auth.status.value}",
+                    )
+                    if self._persistence_service is not None:
+                        self._persistence_service.record_audit(
+                            {
+                                "session_id": session_id,
+                                "operation": request.operation,
+                                "event": "planning_blocked_workflow",
+                                "workflow_status": wf_auth.status.value,
+                                "sequence_number": request.sequence_number,
+                                "epoch_id": self._epoch_id,
+                            },
+                            session_id=session_id,
+                        )
+                    return res
+
+            # 3. Step 3: Planning Service Availability Check
+            if self._planning_service is None:
+                raise ExecutionLifecycleError("PlanningService is unavailable")
+
+            # 4. Step 4: Capability Minting & Execution
+            cap_plan = _create_execution_capability(
+                service_instance_id=id(self._planning_service),
+                session_id=session_id,
+                action="PLANNING_COORDINATION",
+                sequence_number=request.sequence_number,
+            )
+            plan_res = None
+            verif_rec = None
+            try:
+                op = request.operation.upper()
+                if op == "SUBMIT":
+                    if request.plan is None:
+                        raise ExecutionValidationError("SUBMIT requires plan")
+                    plan_res = self._planning_service.submit_plan(
+                        plan=request.plan,
+                        session_id=session_id,
+                        capability=cap_plan,
+                        sequence_number=request.sequence_number,
+                    )
+                elif op == "LOCK":
+                    if not request.plan_id:
+                        raise ExecutionValidationError("LOCK requires plan_id")
+                    plan_res = self._planning_service.lock_plan(
+                        plan_id=request.plan_id,
+                        capability=cap_plan,
+                        sequence_number=request.sequence_number,
+                    )
+                elif op == "VERIFY":
+                    if not request.plan_id or not request.operator_id or not request.patient_hash or not request.procedure_code or request.laterality is None:
+                        raise ExecutionValidationError("VERIFY requires plan_id, operator_id, patient_hash, procedure_code, laterality")
+                    verif_rec = self._planning_service.verify_plan(
+                        plan_id=request.plan_id,
+                        session_id=session_id,
+                        operator_id=request.operator_id,
+                        patient_hash=request.patient_hash,
+                        procedure_code=request.procedure_code,
+                        laterality=request.laterality,
+                        capability=cap_plan,
+                        sequence_number=request.sequence_number,
+                    )
+                    plan_res = self._planning_service.get_plan(request.plan_id)
+                else:
+                    raise ExecutionValidationError(f"Unsupported planning operation: {request.operation}")
+            except Exception as e:
+                raw_err = str(e)
+                redacted = self._secret_filter.redact(raw_err) if self._secret_filter else raw_err
+                res = PlanningExecutionResult(
+                    session_id=session_id,
+                    execution_status=ExecutionStatus.FAILED_NAVIGATION_GEOMETRY,
+                    gate_decision=gate_decision,
+                    gate_reason_code=gate_reason,
+                    action=request.action,
+                    sequence_number=request.sequence_number,
+                    operation=request.operation,
+                    executed_at_utc=request.now_utc,
+                    workflow_status=wf_status,
+                    error_message=redacted,
+                )
+                if self._persistence_service is not None:
+                    self._persistence_service.record_audit(
+                        {
+                            "session_id": session_id,
+                            "operation": request.operation,
+                            "event": "planning_execution_failed",
+                            "error": redacted,
+                            "sequence_number": request.sequence_number,
+                            "epoch_id": self._epoch_id,
+                        },
+                        session_id=session_id,
+                    )
+                return res
+            finally:
+                cap_plan.invalidate()
+
+            # 5. Success Resolution
+            exec_status = (
+                ExecutionStatus.EXECUTED_WITH_CAUTION
+                if gate_decision == GateDecision.PERMITTED_WITH_CAUTION
+                else ExecutionStatus.EXECUTED_CLEAR
+            )
+            res = PlanningExecutionResult(
+                session_id=session_id,
+                execution_status=exec_status,
+                gate_decision=gate_decision,
+                gate_reason_code=gate_reason,
+                action=request.action,
+                sequence_number=request.sequence_number,
+                operation=request.operation,
+                executed_at_utc=request.now_utc,
+                workflow_status=wf_status,
+                plan=plan_res,
+                verification_record=verif_rec,
+            )
+            if self._persistence_service is not None:
+                self._persistence_service.record_audit(
+                    {
+                        "session_id": session_id,
+                        "operation": request.operation,
+                        "event": "planning_executed",
+                        "status": exec_status.value,
+                        "sequence_number": request.sequence_number,
+                        "epoch_id": self._epoch_id,
+                    },
+                    session_id=session_id,
+                )
+            return res
+        finally:
+            self._in_transaction = False
+
+    def handle_planning_execute_command(self, envelope: MessageEnvelope) -> MessageEnvelope:
+        """Dispatcher command handler for execution.planning.execute."""
+        payload = envelope.payload
+        session_id = payload.get("session_id")
+        seq = payload.get("sequence_number")
+        now_utc = payload.get("now_utc") or datetime.now(timezone.utc).isoformat()
+        operation = payload.get("operation") or payload.get("planning_operation")
+
+        if not session_id or seq is None or not operation:
+            return create_error_response(envelope, self.name, "ERR_INVALID_ARGS", "Missing required execution fields")
+
+        try:
+            plan = None
+            if "plan" in payload and payload["plan"] is not None:
+                p_data = payload["plan"]
+                if isinstance(p_data, SurgicalPlanDefinition):
+                    plan = p_data
+                elif isinstance(p_data, dict):
+                    from holomed.planning.models import (
+                        PatientCaseContext,
+                        SafetyExclusionZone,
+                        SurgicalLaterality,
+                        SurgicalPlanDefinition,
+                        TrajectoryPlan,
+                    )
+                    ctx_dict = p_data.get("case_context", {})
+                    ctx = PatientCaseContext(
+                        case_id=ctx_dict.get("case_id", ""),
+                        patient_hash=ctx_dict.get("patient_hash", ""),
+                        procedure_code=ctx_dict.get("procedure_code", ""),
+                        laterality=SurgicalLaterality(ctx_dict.get("laterality", "MIDLINE")),
+                        scheduled_date_utc=ctx_dict.get("scheduled_date_utc", ""),
+                    )
+                    trajs = tuple(
+                        TrajectoryPlan(
+                            trajectory_id=t["trajectory_id"],
+                            entry_point_plan_mm=tuple(t["entry_point_plan_mm"]),
+                            target_point_plan_mm=tuple(t["target_point_plan_mm"]),
+                            clearance_tolerance_mm=float(t.get("clearance_tolerance_mm", 2.0)),
+                            critical_structure_name=t.get("critical_structure_name", ""),
+                        )
+                        for t in p_data.get("trajectories", ())
+                    )
+                    zones = tuple(
+                        SafetyExclusionZone(
+                            zone_id=z["zone_id"],
+                            centroid_plan_mm=tuple(z["centroid_plan_mm"]),
+                            radius_mm=float(z["radius_mm"]),
+                            critical_structure_name=z.get("critical_structure_name", ""),
+                            severity_level=z.get("severity_level", "INTERLOCK"),
+                        )
+                        for z in p_data.get("exclusion_zones", ())
+                    )
+                    plan = SurgicalPlanDefinition(
+                        plan_id=p_data.get("plan_id", ""),
+                        version=p_data.get("version", "1.0"),
+                        case_context=ctx,
+                        trajectories=trajs,
+                        exclusion_zones=zones,
+                    )
+
+            lat = None
+            if "laterality" in payload and payload["laterality"] is not None:
+                lat = payload["laterality"] if isinstance(payload["laterality"], SurgicalLaterality) else SurgicalLaterality(payload["laterality"])
+
+            req = PlanningExecutionRequest(
+                session_id=str(session_id),
+                sequence_number=int(seq),
+                now_utc=str(now_utc),
+                operation=str(operation).upper(),
+                plan=plan,
+                plan_id=payload.get("plan_id"),
+                operator_id=payload.get("operator_id"),
+                patient_hash=payload.get("patient_hash"),
+                procedure_code=payload.get("procedure_code"),
+                laterality=lat,
+            )
+            res = self.execute_planning(req)
+            res_dict: dict[str, Any] = {
+                "session_id": res.session_id,
+                "execution_status": res.execution_status.value,
+                "gate_decision": res.gate_decision.value,
+                "gate_reason_code": res.gate_reason_code.value,
+                "action": res.action.value,
+                "sequence_number": res.sequence_number,
+                "operation": res.operation,
+                "executed_at_utc": res.executed_at_utc,
+                "workflow_status": res.workflow_status.value if res.workflow_status else None,
+                "error_message": res.error_message,
+            }
+            if res.plan is not None:
+                res_dict["plan"] = {
+                    "plan_id": res.plan.plan_id,
+                    "version": res.plan.version,
+                    "is_locked": res.plan.is_locked,
+                    "trajectories_count": len(res.plan.trajectories),
+                    "exclusion_zones_count": len(res.plan.exclusion_zones),
+                }
+            if res.verification_record is not None:
+                res_dict["verification_record"] = {
+                    "verification_id": res.verification_record.verification_id,
+                    "verified": res.verification_record.verified,
+                    "failure_reasons": list(res.verification_record.failure_reasons),
                 }
             return create_response(envelope, self.name, payload=res_dict)
         except Exception as e:

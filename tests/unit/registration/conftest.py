@@ -7,6 +7,7 @@ import pytest
 
 from holomed.configuration.models import AppConfig
 from holomed.core.dispatcher import MessageDispatcher
+from holomed.execution._capability import _create_execution_capability
 from holomed.planning.models import (
     PatientCaseContext,
     SurgicalLaterality,
@@ -127,6 +128,8 @@ def planning_service(
         exclusion_zones=sample_locked_plan.exclusion_zones,
         is_locked=False,
     )
-    plan_srv.submit_plan(unlocked, "sess_plan_01")
-    plan_srv.lock_plan(sample_locked_plan.plan_id)
+    cap_sub = _create_execution_capability(id(plan_srv), "sess_plan_01", "PLANNING_COORDINATION", 1)
+    plan_srv.submit_plan(unlocked, "sess_plan_01", capability=cap_sub)
+    cap_lock = _create_execution_capability(id(plan_srv), "sess_plan_01", "PLANNING_COORDINATION", 2)
+    plan_srv.lock_plan(sample_locked_plan.plan_id, capability=cap_lock)
     return plan_srv
