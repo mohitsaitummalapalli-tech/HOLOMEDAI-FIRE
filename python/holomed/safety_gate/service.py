@@ -33,6 +33,8 @@ from holomed.safety_gate.constants import (
     MAX_ACTIVE_GATE_SESSIONS,
     SERVICE_NAME,
     STRUCTURAL_RESOURCE_IDS,
+    TOPIC_SAFETY_EVALUATED,
+    TOPIC_SAFETY_STATUS_GET,
 )
 from holomed.safety_gate.evaluator import SafetyGateEvaluator
 from holomed.safety_gate.exceptions import (
@@ -130,10 +132,9 @@ class SafetyGateService(IService):
         for res_id in STRUCTURAL_RESOURCE_IDS:
             self._resources.acquire(res_id)
 
-        # Register Dispatcher Routes
+        # Register Dispatcher Routes (M30: Query only, raw evaluate command removed)
         if self._dispatcher is not None:
-            self._dispatcher.register_command_handler("safety_gate.evaluate", self.handle_evaluate_command, self.name)
-            self._dispatcher.register_query_handler("safety_gate.status.get", self.handle_get_status_query, self.name)
+            self._dispatcher.register_query_handler(TOPIC_SAFETY_STATUS_GET, self.handle_get_status_query, self.name)
 
         self._state = ServiceState.INITIALIZED
 
@@ -268,7 +269,7 @@ class SafetyGateService(IService):
                     self._persistence_service.record_audit(audit_payload, session_id=session_id)
 
                 self._emit_event(
-                    "safety_gate.evaluated",
+                    TOPIC_SAFETY_EVALUATED,
                     {
                         "session_id": session_id,
                         "decision": decision_record.decision.value,
@@ -363,7 +364,7 @@ class SafetyGateService(IService):
             return create_error_response(command_envelope, self.name, _format_error_code(type(e).__name__), redacted)
 
     def handle_get_status_query(self, query_envelope: MessageEnvelope) -> MessageEnvelope:
-        """Handle safety_gate.status.get query."""
+        """Handle safety.status.get query (read-only snapshot)."""
         payload = query_envelope.payload
         session_id = payload.get("session_id")
 

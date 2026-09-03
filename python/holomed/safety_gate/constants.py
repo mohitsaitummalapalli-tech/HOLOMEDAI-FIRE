@@ -8,7 +8,9 @@ import re
 # Protocol & Schema Version
 SAFETY_GATE_SCHEMA_VERSION: str = "1.0"
 SERVICE_NAME: str = "safety_gate_service"
-
+# Canonical Protocol & Dispatcher Topics (M30)
+TOPIC_SAFETY_STATUS_GET: str = "safety.status.get"
+TOPIC_SAFETY_EVALUATED: str = "safety.evaluated"
 # Canonical Structural Resource Identifiers (Exactly 4)
 STRUCTURAL_RESOURCE_IDS: tuple[str, ...] = (
     "gate.registry",

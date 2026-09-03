@@ -189,12 +189,18 @@ class TestSafetyGateDispatcherRoutes:
         resp = svc.handle_evaluate_command(cmd)
         assert resp.payload["decision"] == "PERMITTED_CLEAR"
 
-        # Query route
+        # Query route (M30 canonical topic)
         qry = create_query(
-            message_name="safety_gate.status.get",
+            message_name="safety.status.get",
             source="test",
             target="safety_gate_service",
             payload={"session_id": "session-01"},
         )
         q_resp = svc.handle_get_status_query(qry)
         assert q_resp.payload["decision"] == "PERMITTED_CLEAR"
+
+        # Verify command handler was NOT registered on dispatcher (M30: raw evaluate command deregistered)
+        mock_dispatcher.register_command_handler.assert_not_called()
+        mock_dispatcher.register_query_handler.assert_called_once_with(
+            "safety.status.get", svc.handle_get_status_query, svc.name
+        )
