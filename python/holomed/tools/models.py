@@ -106,6 +106,7 @@ class ToolResult:
     confidence: float
     uncertainty_metric: float
     epoch_id: int
+    session_id: str = "default_session"
     is_simulated: bool = True
     diagnostic_message: Optional[str] = None
 
@@ -116,6 +117,8 @@ class ToolResult:
             raise ToolValidationError("tool_id must be non-empty")
         if not isinstance(self.status, ToolExecutionStatus):
             raise ToolValidationError(f"Invalid status: {self.status}")
+        if not isinstance(self.session_id, str) or not self.session_id.strip():
+            raise ToolValidationError("session_id must be non-empty string")
 
         for val, name in (
             (self.execution_time_ms, "execution_time_ms"),

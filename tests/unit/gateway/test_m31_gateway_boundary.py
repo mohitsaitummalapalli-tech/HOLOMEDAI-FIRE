@@ -455,3 +455,41 @@ def test_alternate_selector_cannot_bypass_session_boundary(
     assert conn_b.state == ConnectionState.ACTIVE
 
     gw_srv.stop()
+
+
+def test_m32_unroutable_route_handling(
+    runtime_context: RuntimeContext,
+    message_dispatcher: MessageDispatcher,
+    secret_filter: SecretFilter,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """M32 Invariant: Gateway maps UnroutableMessageError to ERR_UNROUTABLE_ROUTE without crashing connection."""
+    gw_srv = GatewayService(dispatcher=message_dispatcher, secret_filter=secret_filter)
+    gw_srv.initialize(runtime_context)
+    message_dispatcher.start()
+    gw_srv.start()
+
+    _, cl_a, conn_a = _connect_and_handshake(gw_srv, "client_a", ClientRole.SURGEON_CONSOLE, "SESSION_A")
+
+    # Temporarily allow a phantom route that has no handler on dispatcher
+    from holomed.gateway import authorization
+    monkeypatch.setattr(authorization, "CLIENT_ISSUABLE_ROUTES", authorization.CLIENT_ISSUABLE_ROUTES | {"phantom.test.route"})
+
+    cmd = create_command("phantom.test.route", "client_a", payload={"session_id": "SESSION_A"})
+    resp = _send_client_message(gw_srv, conn_a, cl_a, cmd)
+
+    # 1. Produces controlled ERR_UNROUTABLE_ROUTE error response
+    assert resp.message_type == MessageType.ERROR
+    assert resp.payload["error_code"] == "ERR_UNROUTABLE_ROUTE"
+    assert "not registered on dispatcher" in resp.payload["error_message"]
+
+    # 2. Connection remains ACTIVE and healthy
+    assert conn_a.state == ConnectionState.ACTIVE
+
+    # 3. Subsequent valid route succeeds cleanly over same connection
+    q_stat = create_query("gateway.status", "client_a", payload={"session_id": "SESSION_A"})
+    resp_stat = _send_client_message(gw_srv, conn_a, cl_a, q_stat)
+    assert resp_stat.message_type == MessageType.RESPONSE
+    assert resp_stat.payload["service_name"] == "gateway_service"
+
+    gw_srv.stop()

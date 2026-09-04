@@ -81,6 +81,7 @@ class ToolExecutionEngine:
                 confidence=0.0,
                 uncertainty_metric=1.0,
                 epoch_id=self._epoch_id,
+                session_id=context.session_id,
                 is_simulated=True,
                 diagnostic_message=f"Invocation depth {context.depth} or step count {step_count} exceeded bounds",
             )
@@ -97,6 +98,7 @@ class ToolExecutionEngine:
                 confidence=0.0,
                 uncertainty_metric=1.0,
                 epoch_id=self._epoch_id,
+                session_id=context.session_id,
                 is_simulated=True,
                 diagnostic_message=f"Recursive cycle detected involving tool {context.tool_id!r}",
             )
@@ -133,6 +135,7 @@ class ToolExecutionEngine:
                 confidence=handler_result.confidence,
                 uncertainty_metric=handler_result.uncertainty_metric,
                 epoch_id=self._epoch_id,
+                session_id=context.session_id,
                 is_simulated=handler_result.is_simulated,
                 diagnostic_message=handler_result.diagnostic_message,
             )
@@ -152,6 +155,7 @@ class ToolExecutionEngine:
                 confidence=0.0,
                 uncertainty_metric=1.0,
                 epoch_id=self._epoch_id,
+                session_id=context.session_id,
                 is_simulated=True,
                 diagnostic_message=f"Handler raised {type(e).__name__}",
             )
@@ -164,17 +168,38 @@ class ToolExecutionEngine:
             self._result_history.pop(0)
         self._result_history.append(result)
 
-    def evict_session(self, session_id: str) -> bool:
-        """Evict session sequence tracking state, releasing capacity (M29).
+    def get_result(self, invocation_id: str, caller_session_id: str) -> Optional[ToolResult]:
+        """Retrieve tool result by invocation_id enforcing caller-session authorization (M32)."""
+        if not invocation_id or not isinstance(invocation_id, str) or not invocation_id.strip():
+            return None
+        if not caller_session_id or not isinstance(caller_session_id, str) or not caller_session_id.strip():
+            return None
+        for res in reversed(self._result_history):
+            if res.invocation_id == invocation_id:
+                if res.session_id != caller_session_id:
+                    return None
+                return res
+        return None
 
-        Surgically removes session_id from _session_sequences without altering
-        other active sessions or global result history. Returns True if evicted,
-        False if session_id was not registered.
+    def evict_session(self, session_id: str) -> bool:
+        """Evict session sequence tracking state and all owned results (M29, M32).
+
+        Surgically removes session_id from _session_sequences and purges all
+        results owned by session_id from _result_history. Returns True if any
+        state was evicted, False if session_id was not registered.
         """
+        evicted = False
         if session_id in self._session_sequences:
             del self._session_sequences[session_id]
-            return True
-        return False
+            evicted = True
+
+        # M32: Purge resident results owned by this session
+        initial_count = len(self._result_history)
+        self._result_history = [r for r in self._result_history if r.session_id != session_id]
+        if len(self._result_history) < initial_count:
+            evicted = True
+
+        return evicted
 
     def reset(self, epoch_id: int) -> None:
         """Reset execution state for a new epoch."""

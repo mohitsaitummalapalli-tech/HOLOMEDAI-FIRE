@@ -141,3 +141,85 @@ def test_dispatcher_routes(
     assert resp_rep.payload["replay_status"] == "VERIFIED"
 
     srv.stop()
+
+
+def test_m32_persistence_path_security(
+    temp_storage_root: Path,
+    runtime_context: RuntimeContext,
+    message_dispatcher: MessageDispatcher,
+    secret_filter: SecretFilter,
+) -> None:
+    """M32: Verify session identifier validation prevents path traversal and malformed access."""
+    srv = PersistenceService(
+        dispatcher=message_dispatcher,
+        storage_root=temp_storage_root,
+        secret_filter=secret_filter,
+    )
+    srv.initialize(runtime_context)
+    message_dispatcher.start()
+    srv.start()
+
+    # 1. Valid session ID succeeds
+    srv.start_session("valid_session_123")
+    summary = CycleSummary(
+        cycle_id="c_valid_01",
+        epoch_id=1,
+        session_id="valid_session_123",
+        sequence_number=0,
+        status=CycleStatus.COMPLETED,
+        execution_time_ms=2.0,
+        phases_completed=("PERCEPTION", "REASONING"),
+        fused_entity_count=1,
+        tool_invocations_count=0,
+        xr_node_count=0,
+        confidence=1.0,
+        uncertainty_metric=0.0,
+    )
+    srv.record_cycle("valid_session_123", sequence_number=0, summary=summary)
+
+    q_valid = create_query(
+        "persistence.cycle.get",
+        "client",
+        payload={"session_id": "valid_session_123", "sequence_number": 0},
+    )
+    resp_valid = message_dispatcher.dispatch(q_valid)
+    assert resp_valid.message_type.value == "RESPONSE"
+    assert resp_valid.payload["cycle_id"] == "c_valid_01"
+
+    files_before = set(temp_storage_root.rglob("*"))
+
+    # 2. Traversal attempt fails
+    q_traversal = create_query(
+        "persistence.cycle.get",
+        "client",
+        payload={"session_id": "../traversal_sess", "sequence_number": 0},
+    )
+    resp_traversal = message_dispatcher.dispatch(q_traversal)
+    assert resp_traversal.message_type.value == "ERROR"
+    assert resp_traversal.payload["error_code"] == "ERR_PERSISTENCE_SECURITY_ERROR"
+
+    # 3. Absolute path fails
+    q_abs = create_query(
+        "persistence.cycle.get",
+        "client",
+        payload={"session_id": "/etc/passwd", "sequence_number": 0},
+    )
+    resp_abs = message_dispatcher.dispatch(q_abs)
+    assert resp_abs.message_type.value == "ERROR"
+    assert resp_abs.payload["error_code"] == "ERR_PERSISTENCE_SECURITY_ERROR"
+
+    # 4. Malformed session path fails
+    q_malformed = create_query(
+        "persistence.cycle.get",
+        "client",
+        payload={"session_id": "sess$invalid;rm", "sequence_number": 0},
+    )
+    resp_malformed = message_dispatcher.dispatch(q_malformed)
+    assert resp_malformed.message_type.value == "ERROR"
+    assert resp_malformed.payload["error_code"] == "ERR_PERSISTENCE_SECURITY_ERROR"
+
+    # 5. Storage remains untouched on validation failure
+    files_after = set(temp_storage_root.rglob("*"))
+    assert files_before == files_after
+
+    srv.stop()

@@ -126,3 +126,12 @@ def test_route_allowlist_permits_approved_routes() -> None:
         else:
             msg = create_command(r, "surgeon_01", payload={"session_id": "s1"})
         GatewayAuthorizationPolicy.authorize_message(session, msg)
+
+
+def test_m32_workflow_interlock_trip_removed_from_allowlist() -> None:
+    """Verify M32: workflow.interlock.trip is removed from allowlist and rejected at ingress."""
+    session = ClientSession("surgeon_01", ClientRole.SURGEON_CONSOLE, "s1", 1, "now", "addr")
+    cmd = create_command("workflow.interlock.trip", "surgeon_01", payload={"session_id": "s1"})
+    with pytest.raises(GatewayAuthorizationError) as exc_info:
+        GatewayAuthorizationPolicy.authorize_message(session, cmd)
+    assert "not permitted through gateway ingress" in str(exc_info.value)

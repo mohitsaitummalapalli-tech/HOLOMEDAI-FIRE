@@ -23,7 +23,7 @@ from holomed.persistence.exceptions import (
     PersistenceShutdownError,
     PersistenceValidationError,
 )
-from holomed.persistence.journal import JournalReader, JournalWriter
+from holomed.persistence.journal import JournalReader, JournalWriter, validate_session_path
 from holomed.persistence.models import (
     MAX_RECORDED_PERSISTENCE_EVENTS,
     PERSISTENCE_SCHEMA_VERSION,
@@ -471,10 +471,12 @@ class PersistenceService(IService):
             return create_error_response(
                 query_envelope,
                 self.name,
-                error_code="INVALID_SESSION_ID",
+                error_code="ERR_INVALID_SESSION_ID",
                 error_message="Missing session_id",
             )
         try:
+            if self._storage_root is not None:
+                validate_session_path(self._storage_root, str(session_id))
             rec = self.get_session(str(session_id))
             payload = {
                 "session_id": rec.session_id,
@@ -487,28 +489,40 @@ class PersistenceService(IService):
                 "schema_version": rec.schema_version,
             }
             return create_response(query_envelope, self.name, payload=payload)
-        except Exception as e:
+        except PersistenceSecurityError as e:
             raw_err = str(e)
             redacted_err = self._secret_filter.redact(raw_err) if self._secret_filter else raw_err
             return create_error_response(
                 query_envelope,
                 self.name,
-                error_code=type(e).__name__,
+                error_code="ERR_PERSISTENCE_SECURITY_ERROR",
+                error_message=redacted_err,
+            )
+        except Exception as e:
+            raw_err = str(e)
+            redacted_err = self._secret_filter.redact(raw_err) if self._secret_filter else raw_err
+            err_code = f"ERR_{type(e).__name__.upper()}"
+            if len(err_code) > 64:
+                err_code = err_code[:64]
+            return create_error_response(
+                query_envelope,
+                self.name,
+                error_code=err_code,
                 error_message=redacted_err,
             )
 
     def handle_cycle_get_query(self, query_envelope: MessageEnvelope) -> MessageEnvelope:
         session_id = query_envelope.payload.get("session_id")
         sequence = query_envelope.payload.get("sequence_number")
-        if not session_id or sequence is None:
+        if not session_id or sequence is None or self._storage_root is None:
             return create_error_response(
                 query_envelope,
                 self.name,
-                error_code="INVALID_ARGUMENTS",
-                error_message="Missing session_id or sequence_number",
+                error_code="ERR_INVALID_ARGUMENTS",
+                error_message="Missing session_id or sequence_number, or storage uninitialized",
             )
         try:
-            journal_path = self._storage_root / f"{session_id}.jsonl"
+            journal_path = validate_session_path(self._storage_root, session_id)
             entries, _ = JournalReader.read_and_recover_journal(journal_path)
             target_entry = next(
                 (e for e in entries if e.sequence_number == int(sequence) and e.entry_type in (
@@ -521,17 +535,29 @@ class PersistenceService(IService):
                 return create_error_response(
                     query_envelope,
                     self.name,
-                    error_code="CYCLE_NOT_FOUND",
+                    error_code="ERR_CYCLE_NOT_FOUND",
                     error_message=f"Sequence {sequence} not found for session {session_id}",
                 )
             return create_response(query_envelope, self.name, payload=dict(target_entry.payload))
-        except Exception as e:
+        except PersistenceSecurityError as e:
             raw_err = str(e)
             redacted_err = self._secret_filter.redact(raw_err) if self._secret_filter else raw_err
             return create_error_response(
                 query_envelope,
                 self.name,
-                error_code=type(e).__name__,
+                error_code="ERR_PERSISTENCE_SECURITY_ERROR",
+                error_message=redacted_err,
+            )
+        except Exception as e:
+            raw_err = str(e)
+            redacted_err = self._secret_filter.redact(raw_err) if self._secret_filter else raw_err
+            err_code = f"ERR_{type(e).__name__.upper()}"
+            if len(err_code) > 64:
+                err_code = err_code[:64]
+            return create_error_response(
+                query_envelope,
+                self.name,
+                error_code=err_code,
                 error_message=redacted_err,
             )
 

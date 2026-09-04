@@ -473,3 +473,82 @@ def test_execution_workflow_resume_command(
     assert req_arg.cleared_interlock_ids == ("DRIFT_01",)
 
     gateway.stop()
+
+
+def test_m32_execution_recovery_reset_calls_canonical_api(
+    test_runtime_context: RuntimeContext,
+    secret_filter: SecretFilter,
+) -> None:
+    """M32 Invariant: execution.recovery.execute with RESET calls RecoveryService.reset_session cleanly."""
+    from unittest.mock import MagicMock
+    from holomed.recovery.service import RecoveryService
+    from holomed.recovery.models import RecoveryStatusRecord, RecoveryState
+
+    from holomed.safety_gate.models import GateDecision, GateReasonCode, GateSeverity, GateStatusRecord
+    from holomed.safety_gate.service import SafetyGateService
+    from holomed.workflow.models import WorkflowToolAuthorizationDecision, WorkflowToolAuthorizationStatus, WorkflowPhase
+    from holomed.workflow.service import WorkflowService
+    from holomed.tools.models import ToolSafetyClassification
+
+    dispatcher = MessageDispatcher()
+    dispatcher.initialize(test_runtime_context)
+
+    mock_gate = MagicMock(spec=SafetyGateService)
+    mock_gate.evaluate.return_value = GateStatusRecord(
+        session_id="session-01",
+        decision=GateDecision.PERMITTED_CLEAR,
+        severity=GateSeverity.NONE,
+        reason_code=GateReasonCode.NONE,
+        action=SafetyGateAction.RECOVERY_REORIENTATION,
+        sequence_number=1,
+        subsystem_snapshots=(),
+        evaluated_at_utc=datetime.now(timezone.utc).isoformat(),
+    )
+
+    mock_wf = MagicMock(spec=WorkflowService)
+    mock_wf.authorize_tool.return_value = WorkflowToolAuthorizationDecision(
+        tool_id="recovery_session-01",
+        m07_safety_classification=ToolSafetyClassification.READ_ONLY_INFORMATIVE,
+        status=WorkflowToolAuthorizationStatus.PERMITTED,
+        workflow_phase=WorkflowPhase.NAVIGATION,
+        reason="OK",
+        epoch_id=1,
+        session_id="session-01",
+    )
+
+    mock_rec = MagicMock(spec=RecoveryService)
+    mock_status = MagicMock(spec=RecoveryStatusRecord)
+    mock_status.state = RecoveryState.IDLE
+    mock_status.last_error = None
+    mock_status.active_candidate_id = None
+    mock_rec.get_recovery_status.return_value = mock_status
+
+    gateway = ClinicalExecutionGatewayService(
+        dispatcher=dispatcher,
+        safety_gate_service=mock_gate,
+        workflow_service=mock_wf,
+        recovery_service=mock_rec,
+        secret_filter=secret_filter,
+    )
+    gateway.initialize(test_runtime_context)
+    dispatcher.start()
+    gateway.start()
+
+    cmd = create_command(
+        "execution.recovery.execute",
+        "surgeon_console",
+        payload={
+            "session_id": "session-01",
+            "recovery_operation": "RESET",
+            "sequence_number": 1,
+        },
+    )
+    resp = dispatcher.dispatch(cmd)
+    assert resp is not None
+    assert resp.message_type.value == "RESPONSE"
+    assert resp.payload["session_id"] == "session-01"
+
+    # Confirms canonical method reset_session was called without AttributeError
+    mock_rec.reset_session.assert_called_once_with("session-01")
+
+    gateway.stop()

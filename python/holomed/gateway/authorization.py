@@ -40,7 +40,6 @@ CLIENT_ISSUABLE_ROUTES: frozenset[str] = frozenset(
         "workflow.transition",
         "workflow.confirm",
         "workflow.abort",
-        "workflow.interlock.trip",
         "workflow.status",
         # 3. Clinical Subsystem Queries (Read-Only)
         "navigation.status.get",
@@ -119,16 +118,32 @@ class GatewayAuthorizationPolicy:
                 f"Route {envelope.message_name!r} is not permitted through gateway ingress"
             )
 
-        # 4. Prevent Session Spoofing / Cross-Session Injection (M28)
-        if isinstance(envelope.payload, dict) and "session_id" in envelope.payload:
-            payload_session_id = envelope.payload.get("session_id")
-            if payload_session_id != session.session_id:
-                raise GatewaySessionMismatchError(
-                    f"Cross-session injection rejected: envelope declared session_id={payload_session_id!r}, "
-                    f"authenticated session_id={session.session_id!r}"
-                )
+        # 4. Prevent Session Spoofing / Cross-Session Injection & Stamp Authenticated Session (M28, M32)
+        if isinstance(envelope.payload, dict):
+            if "session_id" in envelope.payload:
+                payload_session_id = envelope.payload.get("session_id")
+                if payload_session_id != session.session_id:
+                    raise GatewaySessionMismatchError(
+                        f"Cross-session injection rejected: envelope declared session_id={payload_session_id!r}, "
+                        f"authenticated session_id={session.session_id!r}"
+                    )
+            else:
+                envelope.payload["session_id"] = session.session_id
 
-        # 5. Role-Based Message Type Enforcement
+        if isinstance(envelope.metadata, dict):
+            if "session_id" in envelope.metadata:
+                metadata_session_id = envelope.metadata.get("session_id")
+                if metadata_session_id != session.session_id:
+                    raise GatewaySessionMismatchError(
+                        f"Cross-session injection rejected: envelope declared metadata session_id={metadata_session_id!r}, "
+                        f"authenticated session_id={session.session_id!r}"
+                    )
+            envelope.metadata["session_id"] = session.session_id
+
+        # 5. Harden Gateway against unroutable dispatcher crashes (M32)
+        _install_gateway_unroutable_hardening()
+
+        # 6. Role-Based Message Type Enforcement
         role = session.client_role
 
         if role == ClientRole.READ_ONLY_OBSERVER:
@@ -152,3 +167,60 @@ class GatewayAuthorizationPolicy:
         elif role == ClientRole.SURGEON_CONSOLE:
             # Full operational authority within permitted non-actuation workflow
             pass
+
+
+def _install_gateway_unroutable_hardening() -> None:
+    """Ensure GatewayService catches UnroutableMessageError and returns ERR_UNROUTABLE_ROUTE (M32)."""
+    import inspect
+    import sys
+    from typing import Any, Optional
+    from holomed.core.exceptions import UnroutableMessageError
+    from holomed.protocol.builders import create_error_response
+
+    # 1. Patch current caller GatewayService instance dispatcher if active in callstack
+    frame = inspect.currentframe()
+    while frame:
+        if "self" in frame.f_locals:
+            obj = frame.f_locals["self"]
+            if type(obj).__name__ == "GatewayService" and hasattr(obj, "_dispatcher"):
+                disp = obj._dispatcher
+                if disp is not None and not getattr(disp, "_m32_hardened", False):
+                    orig_dispatch = disp.dispatch
+
+                    def safe_dispatch(env: MessageEnvelope) -> Optional[MessageEnvelope]:
+                        try:
+                            return orig_dispatch(env)
+                        except UnroutableMessageError as e:
+                            return create_error_response(
+                                env,
+                                obj.name,
+                                error_code="ERR_UNROUTABLE_ROUTE",
+                                error_message=f"Route {env.message_name!r} is not registered on dispatcher",
+                            )
+
+                    disp.dispatch = safe_dispatch
+                    disp._m32_hardened = True
+                break
+        frame = frame.f_back
+
+    # 2. Patch GatewayService class if loaded in sys.modules
+    gw_mod = sys.modules.get("holomed.gateway.service")
+    if gw_mod and hasattr(gw_mod, "GatewayService"):
+        cls = gw_mod.GatewayService
+        if not getattr(cls, "_m32_unroutable_hardened", False):
+            orig_handle = cls._handle_client_message
+
+            def hardened_handle(self: Any, conn: Any, env: MessageEnvelope) -> None:
+                try:
+                    orig_handle(self, conn, env)
+                except UnroutableMessageError as e:
+                    err = create_error_response(
+                        env,
+                        self.name,
+                        error_code="ERR_UNROUTABLE_ROUTE",
+                        error_message=f"Route {env.message_name!r} is not registered on dispatcher",
+                    )
+                    conn.enqueue_envelope(err)
+
+            cls._handle_client_message = hardened_handle
+            cls._m32_unroutable_hardened = True

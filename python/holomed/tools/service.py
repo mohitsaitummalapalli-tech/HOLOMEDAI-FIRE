@@ -476,30 +476,61 @@ class ToolService(IService):
             )
 
     def handle_result_query(self, query_envelope: MessageEnvelope) -> MessageEnvelope:
-        """Handle tools.result query."""
-        inv_id = query_envelope.payload.get("invocation_id")
-        if not inv_id or self._engine is None:
+        """Handle tools.result query with strict session-ownership enforcement (M32)."""
+        inv_id = query_envelope.payload.get("invocation_id") if isinstance(query_envelope.payload, dict) else None
+        if not inv_id or not isinstance(inv_id, str) or not inv_id.strip() or self._engine is None:
             return create_error_response(
                 query_envelope,
                 self.name,
-                error_code="INVALID_RESULT_QUERY",
-                error_message="Missing invocation_id",
+                error_code="ERR_RESULT_NOT_FOUND",
+                error_message="Missing or invalid invocation_id",
             )
 
-        for res in self._engine.result_history:
-            if res.invocation_id == inv_id:
-                payload = serialize_tool_payload(
-                    {
-                        "invocation_id": res.invocation_id,
-                        "tool_id": res.tool_id,
-                        "status": res.status.value,
-                        "result_payload": dict(res.result_payload),
-                        "execution_time_ms": res.execution_time_ms,
-                        "confidence": res.confidence,
-                        "uncertainty_metric": res.uncertainty_metric,
-                    }
-                )
-                return create_response(query_envelope, self.name, payload=dict(payload))
+        # Resolve authoritative caller session context
+        caller_session_id = None
+        if isinstance(query_envelope.metadata, dict):
+            caller_session_id = query_envelope.metadata.get("session_id") or query_envelope.metadata.get("authenticated_session_id")
+
+        payload_session_id = None
+        if isinstance(query_envelope.payload, dict):
+            payload_session_id = query_envelope.payload.get("session_id")
+
+        # Caller-supplied payload session_id cannot conflict with authenticated session context
+        if caller_session_id and payload_session_id and caller_session_id != payload_session_id:
+            return create_error_response(
+                query_envelope,
+                self.name,
+                error_code="ERR_RESULT_NOT_FOUND",
+                error_message=f"No result found for invocation {inv_id!r}",
+            )
+
+        effective_session_id = caller_session_id or (
+            payload_session_id if isinstance(payload_session_id, str) and payload_session_id.strip() else None
+        )
+
+        if not effective_session_id:
+            return create_error_response(
+                query_envelope,
+                self.name,
+                error_code="ERR_RESULT_NOT_FOUND",
+                error_message=f"No result found for invocation {inv_id!r}",
+            )
+
+        res = self._engine.get_result(inv_id, caller_session_id=effective_session_id)
+        if res is not None:
+            payload = serialize_tool_payload(
+                {
+                    "invocation_id": res.invocation_id,
+                    "tool_id": res.tool_id,
+                    "status": res.status.value,
+                    "result_payload": dict(res.result_payload),
+                    "execution_time_ms": res.execution_time_ms,
+                    "confidence": res.confidence,
+                    "uncertainty_metric": res.uncertainty_metric,
+                    "session_id": res.session_id,
+                }
+            )
+            return create_response(query_envelope, self.name, payload=dict(payload))
 
         return create_error_response(
             query_envelope,

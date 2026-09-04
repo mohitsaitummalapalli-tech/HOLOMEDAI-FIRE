@@ -863,7 +863,7 @@ class ClinicalExecutionGatewayService(IService):
                         capability=cap,
                     )
                 elif op == "RESET":
-                    self._recovery_service.reset_recovery(session_id)
+                    self._recovery_service.reset_session(session_id)
                 elif op == "STATUS":
                     rec_status = self._recovery_service.get_recovery_status(session_id)
                 else:
