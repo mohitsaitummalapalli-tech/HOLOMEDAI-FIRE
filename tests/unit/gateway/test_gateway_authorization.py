@@ -79,3 +79,50 @@ def test_surgeon_console_permitted() -> None:
     session = ClientSession("surgeon_01", ClientRole.SURGEON_CONSOLE, "s1", 1, "now", "addr")
     cmd = create_command("workflow.confirm", "surgeon_01", payload={})
     GatewayAuthorizationPolicy.authorize_message(session, cmd)
+
+
+def test_route_allowlist_blocks_unpermitted_routes() -> None:
+    """Verify M31 default-deny: internal, reset, and unknown routes are blocked at gateway ingress."""
+    session = ClientSession("surgeon_01", ClientRole.SURGEON_CONSOLE, "s1", 1, "now", "addr")
+    forbidden_routes = [
+        "platform.reset",
+        "platform.cycle",
+        "tools.reset",
+        "vision.pipeline.reset",
+        "xr.reset",
+        "ultron.reset",
+        "anatomy.reset",
+        "audio.pipeline.reset",
+        "gesture.pipeline.reset",
+        "persistence.replay",
+        "drift.evaluate",
+        "proximity.evaluate",
+        "unknown.bogus.route",
+    ]
+    for r in forbidden_routes:
+        cmd = create_command(r, "surgeon_01", payload={})
+        with pytest.raises(GatewayAuthorizationError) as exc_info:
+            GatewayAuthorizationPolicy.authorize_message(session, cmd)
+        assert "not permitted through gateway ingress" in str(exc_info.value)
+
+
+def test_route_allowlist_permits_approved_routes() -> None:
+    """Verify M31 allowlist allows representative approved client-issuable routes."""
+    session = ClientSession("surgeon_01", ClientRole.SURGEON_CONSOLE, "s1", 1, "now", "addr")
+    permitted_routes = [
+        "execution.navigation.execute",
+        "execution.planning.execute",
+        "execution.tool.invoke",
+        "workflow.start",
+        "workflow.status",
+        "navigation.status.get",
+        "gateway.status",
+        "gateway.clients",
+        "gateway.disconnect",
+    ]
+    for r in permitted_routes:
+        if r.endswith(".get") or r in ("gateway.status", "gateway.clients", "workflow.status"):
+            msg = create_query(r, "surgeon_01", payload={"session_id": "s1"})
+        else:
+            msg = create_command(r, "surgeon_01", payload={"session_id": "s1"})
+        GatewayAuthorizationPolicy.authorize_message(session, msg)

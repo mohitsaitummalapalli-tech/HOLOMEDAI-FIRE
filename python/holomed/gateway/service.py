@@ -445,6 +445,18 @@ class GatewayService(IService):
         return create_response(query_envelope, self.name, payload=payload)
 
     def handle_clients_query(self, query_envelope: MessageEnvelope) -> MessageEnvelope:
+        # Resolve caller session context (M31: isolate visibility to caller's session)
+        caller_id = query_envelope.source
+        caller_conn = self._connections.get(caller_id)
+        if caller_conn is not None and caller_conn.session is not None:
+            caller_session_id = caller_conn.session.session_id
+        else:
+            caller_session_id = (
+                query_envelope.payload.get("session_id")
+                if isinstance(query_envelope.payload, dict)
+                else None
+            )
+
         clients = [
             {
                 "client_id": conn.client_id,
@@ -453,15 +465,65 @@ class GatewayService(IService):
                 "queue_depth": conn.queue_depth,
             }
             for cid, conn in sorted(self._connections.items())
+            if conn.session is not None
+            and (caller_session_id is None or conn.session.session_id == caller_session_id)
         ]
         return create_response(query_envelope, self.name, payload={"clients": clients})
 
     def handle_disconnect_command(self, command_envelope: MessageEnvelope) -> MessageEnvelope:
-        client_id = command_envelope.payload.get("client_id")
-        reason = command_envelope.payload.get("reason", "Operator disconnect command")
-        if not client_id:
+        payload = command_envelope.payload if isinstance(command_envelope.payload, dict) else {}
+        client_id = payload.get("client_id")
+        reason = payload.get("reason", "Operator disconnect command")
+        if not client_id or not isinstance(client_id, str) or not client_id.strip():
             return create_error_response(command_envelope, self.name, "ERR_INVALID_ARGS", "Missing client_id")
 
+        target_conn = self._connections.get(str(client_id))
+        if target_conn is None:
+            return create_error_response(
+                command_envelope, self.name, "ERR_CLIENT_NOT_FOUND", f"Target client {client_id!r} not found"
+            )
+
+        if target_conn.session is None:
+            return create_error_response(
+                command_envelope, self.name, "ERR_INVALID_ARGS", f"Target client {client_id!r} lacks active session"
+            )
+
+        # Resolve caller context
+        caller_id = command_envelope.source
+        caller_conn = self._connections.get(caller_id)
+        if caller_conn is not None and caller_conn.session is not None:
+            caller_session_id = caller_conn.session.session_id
+            caller_role = caller_conn.session.client_role
+        else:
+            caller_session_id = payload.get("session_id")
+            caller_role = None
+
+        target_session_id = target_conn.session.session_id
+
+        # M31 Invariant A.1: Cross-session disconnect rejected
+        if caller_session_id is not None and target_session_id != caller_session_id:
+            return create_error_response(
+                command_envelope,
+                self.name,
+                "ERR_SESSION_MISMATCH",
+                f"Cross-session disconnect rejected: target {client_id!r} belongs to session {target_session_id!r}, "
+                f"caller belongs to session {caller_session_id!r}",
+            )
+
+        # M31 Invariant A.2: Role hierarchy (ASSISTANT_PANEL cannot disconnect SURGEON_CONSOLE)
+        if (
+            caller_role == ClientRole.ASSISTANT_PANEL
+            and target_conn.session.client_role == ClientRole.SURGEON_CONSOLE
+            and caller_id != client_id
+        ):
+            return create_error_response(
+                command_envelope,
+                self.name,
+                "ERR_AUTHORIZATION_FAILED",
+                "ASSISTANT_PANEL cannot disconnect SURGEON_CONSOLE",
+            )
+
+        # All authorization passed; execute disconnect
         self.disconnect_client(str(client_id), str(reason))
         return create_response(command_envelope, self.name, payload={"disconnected_client_id": client_id})
 

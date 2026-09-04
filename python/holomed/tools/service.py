@@ -158,11 +158,7 @@ class ToolService(IService):
                 self.handle_result_query,
                 self.name,
             )
-            self._dispatcher.register_command_handler(
-                "tools.reset",
-                self.handle_reset_command,
-                self.name,
-            )
+            # M31: tools.reset dispatcher route removed to prevent unmediated sequence state wiping.
 
         self._state = ServiceState.INITIALIZED
 
@@ -508,24 +504,9 @@ class ToolService(IService):
         return create_error_response(
             query_envelope,
             self.name,
-            error_code="RESULT_NOT_FOUND",
+            error_code="ERR_RESULT_NOT_FOUND",
             error_message=f"No result found for invocation {inv_id!r}",
         )
-
-    def handle_reset_command(self, command_envelope: MessageEnvelope) -> MessageEnvelope:
-        """Handle tools.reset command."""
-        req_epoch = command_envelope.payload.get("epoch_id")
-        if req_epoch != self._epoch_id:
-            return create_error_response(
-                command_envelope,
-                self.name,
-                error_code="EPOCH_MISMATCH",
-                error_message=f"Command epoch {req_epoch} does not match service epoch {self._epoch_id}",
-            )
-
-        self.clear()
-        payload = serialize_tool_payload({"reset_completed": True, "epoch_id": self._epoch_id})
-        return create_response(command_envelope, self.name, payload=dict(payload))
 
     def _emit_event(self, topic: str, payload: Mapping[str, Any]) -> None:
         """Emit protocol event over dispatcher and record in event sink."""
