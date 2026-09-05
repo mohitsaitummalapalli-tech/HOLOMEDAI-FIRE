@@ -15,7 +15,12 @@ import uuid
 from holomed.core.dispatcher import MessageDispatcher
 from holomed.core.models import DispatcherState
 from holomed.devices.models import DeviceShutdownFailureRecord
-from holomed.planning.models import SafetyExclusionZone
+from holomed.planning.models import (
+    SafetyExclusionZone,
+    SurgicalPlanDefinition,
+    validate_exclusion_zone_integrity,
+)
+from holomed.planning.service import PlanningService
 from holomed.proximity.constants import (
     DEFAULT_PATIENT_TRACKER_FRAME,
     MAX_ACTIVE_PROXIMITY_SESSIONS,
@@ -85,11 +90,13 @@ class ProximityService(IService):
         registration_service: Optional[RegistrationService] = None,
         secret_filter: Optional[SecretFilter] = None,
         logger: Optional[StructuredLogger] = None,
+        planning_service: Optional[PlanningService] = None,
     ) -> None:
         self._dispatcher = dispatcher
         self._registration_service = registration_service
         self._secret_filter = secret_filter
         self._logger = logger or StructuredLogger(SERVICE_NAME, secret_filter=secret_filter)
+        self._planning_service = planning_service
 
         self._state: ServiceState = ServiceState.UNINITIALIZED
         self._context: Optional[RuntimeContext] = None
@@ -243,18 +250,31 @@ class ProximityService(IService):
     def bind_zones(
         self,
         session_id: str,
-        zones: Tuple[SafetyExclusionZone, ...],
-        registration_error_mm: float,
+        zones: Optional[Tuple[SafetyExclusionZone, ...]] = None,
+        registration_error_mm: Optional[float] = None,
         static_margin_mm: float = 0.0,
+        *,
+        capability: Optional[Any] = None,
+        sequence_number: Optional[int] = None,
     ) -> None:
         """Bind safety exclusion zones to a session for proximity monitoring.
 
-        Requires a verified M13 registration for the session.
+        Requires a verified M13 registration for the session and authoritative plan ownership.
         """
         if self._state != ServiceState.STARTED:
             raise ProximityLifecycleError(f"Cannot bind zones in state {self._state.name}")
         if self._in_transaction:
             raise ProximityLifecycleError("Reentrant call to bind_zones rejected")
+
+        # Capability Validation (if provided)
+        if capability is not None:
+            if not getattr(capability, "is_active", False):
+                raise ProximityValidationError("Proximity binding requires an active capability")
+            cap_sess = getattr(capability, "session_id", None)
+            if cap_sess != session_id:
+                raise ProximityValidationError(f"Capability session mismatch: expected {session_id!r}, got {cap_sess!r}")
+            if sequence_number is not None and getattr(capability, "sequence_number", None) != sequence_number:
+                raise ProximityValidationError(f"Capability sequence mismatch: expected {sequence_number}, got {getattr(capability, 'sequence_number', None)}")
 
         self._in_transaction = True
         try:
@@ -262,24 +282,6 @@ class ProximityService(IService):
             if session_id not in self._session_states and len(self._session_states) >= MAX_ACTIVE_PROXIMITY_SESSIONS:
                 raise ProximityCapacityError(
                     f"Max active proximity sessions ({MAX_ACTIVE_PROXIMITY_SESSIONS}) exceeded"
-                )
-
-            # Zone capacity check
-            if len(zones) > MAX_MONITORED_ZONES:
-                raise ProximityCapacityError(
-                    f"Max monitored zones ({MAX_MONITORED_ZONES}) exceeded: got {len(zones)}"
-                )
-
-            # Validate registration_error_mm
-            if not isinstance(registration_error_mm, (int, float)) or not math.isfinite(registration_error_mm):
-                raise ProximityValidationError(
-                    f"registration_error_mm must be finite float, got {registration_error_mm!r}"
-                )
-            if registration_error_mm < 0.0:
-                raise ProximityValidationError("registration_error_mm must be non-negative")
-            if registration_error_mm > MAX_REGISTRATION_ERROR_MM:
-                raise ProximityValidationError(
-                    f"registration_error_mm ({registration_error_mm:.2f}) exceeds maximum ({MAX_REGISTRATION_ERROR_MM})"
                 )
 
             # Validate static_margin_mm
@@ -299,14 +301,99 @@ class ProximityService(IService):
                 raise ProximityRegistrationError(
                     f"Session {session_id!r} does not have a verified M13 registration; proximity monitoring cannot bind"
                 )
+            reg_record = self._registration_service.get_registration(session_id)
+            if reg_record is None or reg_record.state != RegistrationState.VERIFIED:
+                raise ProximityRegistrationError(
+                    f"Session {session_id!r} does not have a verified M13 registration; proximity monitoring cannot bind"
+                )
+
+            # Validate caller-supplied registration_error_mm syntax/bounds if provided
+            if registration_error_mm is not None:
+                if not isinstance(registration_error_mm, (int, float)) or not math.isfinite(registration_error_mm):
+                    raise ProximityValidationError(
+                        f"registration_error_mm must be finite float, got {registration_error_mm!r}"
+                    )
+                if registration_error_mm < 0.0:
+                    raise ProximityValidationError("registration_error_mm must be non-negative")
+                if registration_error_mm > MAX_REGISTRATION_ERROR_MM:
+                    raise ProximityValidationError(
+                        f"registration_error_mm ({registration_error_mm:.2f}) exceeds maximum ({MAX_REGISTRATION_ERROR_MM})"
+                    )
+
+            # Derive authoritative registration error from RegistrationService quality report
+            authoritative_tre: Optional[float] = None
+            if reg_record.quality_report is not None:
+                if reg_record.quality_report.target_registration_error_estimate_mm is not None:
+                    authoritative_tre = float(reg_record.quality_report.target_registration_error_estimate_mm)
+                elif reg_record.quality_report.fre_rms_mm is not None:
+                    authoritative_tre = float(reg_record.quality_report.fre_rms_mm)
+
+            # Plan derivation and exclusion zone validation
+            if self._planning_service is not None:
+                session_plan = self._planning_service.get_plan_for_session(session_id)
+                if session_plan is None:
+                    raise ProximityValidationError(f"No surgical plan bound to session {session_id!r}")
+                if not session_plan.is_locked:
+                    raise ProximityValidationError(f"Authoritative plan {session_plan.plan_id!r} bound to session {session_id!r} is not locked")
+                if reg_record.plan_id != session_plan.plan_id:
+                    raise ProximityRegistrationError(
+                        f"Registration plan {reg_record.plan_id!r} does not match authoritative plan {session_plan.plan_id!r} for session {session_id!r}"
+                    )
+
+                # Authoritative registration TRE tampering check
+                if authoritative_tre is not None and registration_error_mm is not None:
+                    if abs(registration_error_mm - authoritative_tre) > 1e-6:
+                        raise ProximityRegistrationError(
+                            f"Caller registration_error_mm ({registration_error_mm:.6f}) does not match authoritative registration error ({authoritative_tre:.6f})"
+                        )
+                final_reg_error = authoritative_tre if authoritative_tre is not None else (registration_error_mm if registration_error_mm is not None else 0.0)
+
+                # Validate exclusion zones against locked session plan
+                planned_zones = session_plan.exclusion_zones
+                if len(planned_zones) > 0:
+                    if zones is not None and len(zones) == 0:
+                        raise ProximityValidationError(
+                            f"Empty zones rejected: plan {session_plan.plan_id!r} defines {len(planned_zones)} exclusion zone(s)"
+                        )
+                    if zones is not None:
+                        if len(zones) != len(planned_zones):
+                            raise ProximityValidationError(
+                                f"Exclusion zone count mismatch: caller provided {len(zones)}, plan defines {len(planned_zones)}"
+                            )
+                        auth_map = {z.zone_id: z for z in planned_zones}
+                        for cand in zones:
+                            if cand.zone_id not in auth_map:
+                                raise ProximityValidationError(
+                                    f"Foreign zone {cand.zone_id!r} not in authoritative plan {session_plan.plan_id!r}"
+                                )
+                            validate_exclusion_zone_integrity(cand, auth_map[cand.zone_id])
+                    authoritative_zones = planned_zones
+                else:
+                    if zones is not None and len(zones) > 0:
+                        raise ProximityValidationError(
+                            f"Foreign exclusion zones rejected: plan {session_plan.plan_id!r} defines no exclusion zones"
+                        )
+                    authoritative_zones = ()
+            else:
+                # Standalone fallback when planning_service is not configured
+                if zones is None:
+                    raise ProximityValidationError("zones must be provided when PlanningService is not configured")
+                authoritative_zones = zones
+                final_reg_error = registration_error_mm if registration_error_mm is not None else (authoritative_tre if authoritative_tre is not None else 0.0)
+
+            # Zone capacity check
+            if len(authoritative_zones) > MAX_MONITORED_ZONES:
+                raise ProximityCapacityError(
+                    f"Max monitored zones ({MAX_MONITORED_ZONES}) exceeded: got {len(authoritative_zones)}"
+                )
 
             # Validate unique zone IDs
-            zone_ids = [z.zone_id for z in zones]
+            zone_ids = [z.zone_id for z in authoritative_zones]
             if len(zone_ids) != len(set(zone_ids)):
                 raise ProximityValidationError("Duplicate zone_id found in exclusion zones")
 
-            self._monitored_zones[session_id] = zones
-            self._registration_errors[session_id] = registration_error_mm
+            self._monitored_zones[session_id] = tuple(authoritative_zones)
+            self._registration_errors[session_id] = final_reg_error
             self._static_margins[session_id] = static_margin_mm
             self._session_states[session_id] = ProximityState.CLEAR
 
@@ -314,8 +401,8 @@ class ProximityService(IService):
                 "proximity.zones.bound",
                 {
                     "session_id": session_id,
-                    "zone_count": len(zones),
-                    "registration_error_mm": registration_error_mm,
+                    "zone_count": len(authoritative_zones),
+                    "registration_error_mm": final_reg_error,
                     "static_margin_mm": static_margin_mm,
                     "epoch_id": self._epoch_id,
                 },
@@ -385,6 +472,30 @@ class ProximityService(IService):
                         f"Registration for session {session_id!r} is not verified; proximity interlocked"
                     )
 
+            # Verify authoritative locked plan state (TOCTOU freshness)
+            if self._planning_service is not None:
+                session_plan = self._planning_service.get_plan_for_session(session_id)
+                if session_plan is None or not session_plan.is_locked:
+                    self._session_states[session_id] = ProximityState.INTERLOCKED
+                    raise ProximityInterlockError(
+                        f"Authoritative plan for session {session_id!r} is missing or unlocked; proximity interlocked"
+                    )
+                if self._registration_service is not None:
+                    reg = self._registration_service.get_registration(session_id)
+                    if reg is not None and reg.plan_id != session_plan.plan_id:
+                        self._session_states[session_id] = ProximityState.INTERLOCKED
+                        raise ProximityRegistrationError(
+                            f"Registration plan {reg.plan_id!r} does not match authoritative plan {session_plan.plan_id!r}; proximity interlocked"
+                        )
+                    if reg is not None and reg.quality_report is not None:
+                        curr_tre = (
+                            reg.quality_report.target_registration_error_estimate_mm
+                            if reg.quality_report.target_registration_error_estimate_mm is not None
+                            else reg.quality_report.fre_rms_mm
+                        )
+                        if curr_tre is not None:
+                            self._registration_errors[session_id] = float(curr_tre)
+
             # Resolve instrument
             target_inst = instrument_id or self._active_instruments.get(session_id)
             if not target_inst or (session_id, target_inst) not in self._latest_geometries:
@@ -436,7 +547,18 @@ class ProximityService(IService):
     def get_proximity_status(self, session_id: str) -> ProximityStatusRecord:
         """Query the active proximity monitoring status for a session."""
         now_utc = datetime.now(timezone.utc).isoformat()
-        state = self._session_states.get(session_id, ProximityState.CLEAR)
+        if session_id in self._session_states:
+            state = self._session_states[session_id]
+        else:
+            # Session not bound in proximity service
+            if self._planning_service is not None:
+                session_plan = self._planning_service.get_plan_for_session(session_id)
+                if session_plan is not None and len(session_plan.exclusion_zones) > 0:
+                    state = ProximityState.INTERLOCKED  # Fail-closed for unbound planned zones
+                else:
+                    state = ProximityState.CLEAR
+            else:
+                state = ProximityState.CLEAR
         zones = self._monitored_zones.get(session_id, ())
         last_eval = self._latest_evaluations.get(session_id)
         active_inst = self._active_instruments.get(session_id)

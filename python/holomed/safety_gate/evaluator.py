@@ -70,7 +70,7 @@ class SafetyGateEvaluator:
                             subsystem_name="proximity_service",
                             state=m15_state,
                             epoch_id=m15_epoch,
-                            is_nominal=m15_state == "SAFE",
+                            is_nominal=m15_state in ("SAFE", "CLEAR"),
                             details={"monitored_zones": getattr(prox_status, "monitored_zone_count", 0)},
                         )
                     )
@@ -250,12 +250,25 @@ class SafetyGateEvaluator:
                 evaluated_at_utc=request.now_utc,
             )
 
-        # Precedence 1: M15 Critical Exclusion Zone Breach
+        # Precedence 1: M15 Critical Exclusion Zone Breach or Interlock
         if m15_state in ("CRITICAL_BREACH", "INTERLOCKED"):
             return GateStatusRecord(
                 session_id=session_id,
                 decision=GateDecision.DENIED_CRITICAL,
                 severity=GateSeverity.CRITICAL,
+                reason_code=GateReasonCode.CRITICAL_EXCLUSION_ZONE_BREACH,
+                action=action,
+                sequence_number=request.sequence_number,
+                subsystem_snapshots=tuple(snapshots),
+                evaluated_at_utc=request.now_utc,
+            )
+
+        # Precedence 1.1: M15 Non-Nominal Proximity (Breached or Unbound)
+        if m15_state in ("BREACHED", "UNBOUND", "UNKNOWN"):
+            return GateStatusRecord(
+                session_id=session_id,
+                decision=GateDecision.DENIED_INTERLOCKED,
+                severity=GateSeverity.BLOCKING,
                 reason_code=GateReasonCode.CRITICAL_EXCLUSION_ZONE_BREACH,
                 action=action,
                 sequence_number=request.sequence_number,

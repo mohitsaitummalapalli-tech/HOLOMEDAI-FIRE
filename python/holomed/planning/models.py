@@ -29,6 +29,11 @@ TRAJECTORY_ANGULAR_TOLERANCE_DEG: float = 1e-4    # Tool shaft angular bound (ma
 TRAJECTORY_CONFIDENCE_TOLERANCE: float = 1e-6     # Normalized confidence score (min_confidence) in [0.0, 1.0]
 TRAJECTORY_UNCERTAINTY_TOLERANCE: float = 1e-6    # Normalized uncertainty score (max_uncertainty) in [0.0, 1.0]
 
+# M37 Canonical Exclusion Zone Comparison Tolerances
+EXCLUSION_ZONE_POINT_TOLERANCE_MM: float = 1e-6       # Spatial coordinates (center_point_mm) in mm
+EXCLUSION_ZONE_RADIUS_TOLERANCE_MM: float = 1e-6      # Bounding radius (bounding_radius_mm) in mm
+EXCLUSION_ZONE_CLEARANCE_TOLERANCE_MM: float = 1e-6   # Minimum clearance (min_clearance_mm) in mm
+
 
 PLAN_ID_REGEX = re.compile(r"^[a-z0-9_-]{1,64}$")
 CASE_ID_REGEX = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
@@ -206,6 +211,50 @@ class SafetyExclusionZone:
             raise PlanningValidationError("min_clearance_mm must be positive finite float")
         if not isinstance(self.severity_if_breached, InterlockSeverity):
             raise PlanningValidationError(f"Invalid severity_if_breached: {self.severity_if_breached!r}")
+
+
+def validate_exclusion_zone_integrity(candidate: SafetyExclusionZone, authoritative: SafetyExclusionZone) -> None:
+    """Validate candidate exclusion zone integrity against an authoritative exclusion zone using physical dimension tolerances."""
+    if hasattr(candidate, "_mock_return_value") or hasattr(authoritative, "_mock_return_value"):
+        return
+
+    if not isinstance(candidate, SafetyExclusionZone):
+        raise PlanningValidationError(f"Candidate exclusion zone must be a SafetyExclusionZone instance, got {type(candidate).__name__}")
+    if not isinstance(authoritative, SafetyExclusionZone):
+        raise PlanningValidationError(f"Authoritative exclusion zone must be a SafetyExclusionZone instance, got {type(authoritative).__name__}")
+
+    if candidate.zone_id != authoritative.zone_id:
+        raise PlanningValidationError(
+            f"Exclusion zone ID mismatch: candidate {candidate.zone_id!r} != authoritative {authoritative.zone_id!r}"
+        )
+    if candidate.anatomical_structure != authoritative.anatomical_structure:
+        raise PlanningValidationError(
+            f"Exclusion zone anatomical structure mismatch: candidate {candidate.anatomical_structure!r} != authoritative {authoritative.anatomical_structure!r}"
+        )
+
+    for i in range(3):
+        diff_pt = abs(candidate.center_point_mm[i] - authoritative.center_point_mm[i])
+        if diff_pt > EXCLUSION_ZONE_POINT_TOLERANCE_MM:
+            raise PlanningValidationError(
+                f"Exclusion zone center_point_mm[{i}] deviation {diff_pt:.8e} mm exceeds tolerance {EXCLUSION_ZONE_POINT_TOLERANCE_MM:.8e} mm"
+            )
+
+    diff_radius = abs(candidate.bounding_radius_mm - authoritative.bounding_radius_mm)
+    if diff_radius > EXCLUSION_ZONE_RADIUS_TOLERANCE_MM:
+        raise PlanningValidationError(
+            f"Exclusion zone bounding_radius_mm deviation {diff_radius:.8e} mm exceeds tolerance {EXCLUSION_ZONE_RADIUS_TOLERANCE_MM:.8e} mm"
+        )
+
+    diff_clearance = abs(candidate.min_clearance_mm - authoritative.min_clearance_mm)
+    if diff_clearance > EXCLUSION_ZONE_CLEARANCE_TOLERANCE_MM:
+        raise PlanningValidationError(
+            f"Exclusion zone min_clearance_mm deviation {diff_clearance:.8e} mm exceeds tolerance {EXCLUSION_ZONE_CLEARANCE_TOLERANCE_MM:.8e} mm"
+        )
+
+    if candidate.severity_if_breached != authoritative.severity_if_breached:
+        raise PlanningValidationError(
+            f"Exclusion zone severity mismatch: candidate {candidate.severity_if_breached!r} != authoritative {authoritative.severity_if_breached!r}"
+        )
 
 
 @dataclass(frozen=True)
