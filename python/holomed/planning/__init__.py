@@ -32,12 +32,18 @@ from holomed.planning.models import (
     MIN_TRAJECTORY_LENGTH_MM,
     PATIENT_HASH_REGEX,
     PLAN_ID_REGEX,
+    TRAJECTORY_ANGULAR_TOLERANCE_DEG,
+    TRAJECTORY_CONFIDENCE_TOLERANCE,
+    TRAJECTORY_LATERAL_TOLERANCE_MM,
+    TRAJECTORY_POINT_TOLERANCE_MM,
+    TRAJECTORY_UNCERTAINTY_TOLERANCE,
     PatientCaseContext,
     PlanVerificationRecord,
     SafetyExclusionZone,
     SurgicalLaterality,
     SurgicalPlanDefinition,
     TrajectoryPlan,
+    validate_trajectory_integrity,
 )
 from holomed.planning.service import PlanningService
 from holomed.planning.verification import PlanVerificationEngine
@@ -73,10 +79,16 @@ __all__ = [
     "PLAN_ID_REGEX",
     "CASE_ID_REGEX",
     "PATIENT_HASH_REGEX",
+    "TRAJECTORY_POINT_TOLERANCE_MM",
+    "TRAJECTORY_LATERAL_TOLERANCE_MM",
+    "TRAJECTORY_ANGULAR_TOLERANCE_DEG",
+    "TRAJECTORY_CONFIDENCE_TOLERANCE",
+    "TRAJECTORY_UNCERTAINTY_TOLERANCE",
     # Geometry
     "euclidean_distance_3d",
     "compute_trajectory_unit_vector",
     "point_to_line_segment_distance",
+    "validate_trajectory_integrity",
     # Components
     "derive_checkpoints_from_plan",
     "PlanVerificationEngine",

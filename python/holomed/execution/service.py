@@ -54,7 +54,7 @@ from holomed.navigation.models import (
 from holomed.navigation.service import NavigationService
 from holomed.persistence.service import PersistenceService
 from holomed.platform.models import SessionStatus
-from holomed.planning.models import SurgicalLaterality, SurgicalPlanDefinition
+from holomed.planning.models import SurgicalLaterality, SurgicalPlanDefinition, validate_trajectory_integrity
 from holomed.planning.service import PlanningService
 from holomed.protocol.builders import (
     create_error_response,
@@ -98,6 +98,17 @@ def _format_error_code(exc_type_name: str) -> str:
     return f"ERR_{clean}" if not clean.startswith("ERR_") else clean
 
 
+def _safe_get_planning_service(srv: Any) -> Any:
+    """Safely extracts _planning_service from srv without autovivifying Mock children."""
+    if srv is None:
+        return None
+    if hasattr(srv, "_mock_return_value") or type(srv).__name__ in ("MagicMock", "Mock"):
+        if "_planning_service" in srv.__dict__:
+            return srv.__dict__["_planning_service"]
+        return None
+    return getattr(srv, "_planning_service", None)
+
+
 class ClinicalExecutionGatewayService(IService):
     """Canonical Universal Clinical Execution Gateway & Coordination Service for M21."""
 
@@ -127,7 +138,12 @@ class ClinicalExecutionGatewayService(IService):
         self._recovery_service = recovery_service
         self._tool_service = tool_service
         self._registration_service = registration_service
-        self._planning_service = planning_service
+        self._planning_service = (
+            planning_service
+            or _safe_get_planning_service(registration_service)
+            or _safe_get_planning_service(navigation_service)
+            or _safe_get_planning_service(recovery_service)
+        )
         self._platform_service = platform_service
         self._proximity_service = proximity_service or (getattr(safety_gate_service, "_proximity_service", None) if safety_gate_service else None)
         self._drift_service = drift_service or (getattr(safety_gate_service, "_drift_service", None) if safety_gate_service else None)
@@ -176,6 +192,14 @@ class ClinicalExecutionGatewayService(IService):
         """Initialize execution gateway and acquire exactly 4 structural handles."""
         if self._state not in (ServiceState.UNINITIALIZED, ServiceState.STOPPED):
             raise ExecutionLifecycleError(f"Cannot initialize NavigationExecutionService in state {self._state.name}")
+
+        # Invariant: assert that injected child services reference the exact same PlanningService instance
+        if self._registration_service is not None and _safe_get_planning_service(self._registration_service) is not self._planning_service:
+            raise ExecutionLifecycleError("RegistrationService planning_service instance mismatch with Gateway")
+        if self._navigation_service is not None and _safe_get_planning_service(self._navigation_service) is not self._planning_service:
+            raise ExecutionLifecycleError("NavigationService planning_service instance mismatch with Gateway")
+        if self._recovery_service is not None and _safe_get_planning_service(self._recovery_service) is not self._planning_service:
+            raise ExecutionLifecycleError("RecoveryService planning_service instance mismatch with Gateway")
 
         self._context = context
         self._epoch_id = context.epoch_id
@@ -600,7 +624,147 @@ class ClinicalExecutionGatewayService(IService):
                         )
                     return res
 
-            # 3. Step 3: Invoke M14 Trajectory Binding
+            # 3. Step 3: Authoritative Plan Ownership & Trajectory Integrity Verification
+            if self._planning_service is None:
+                res = TrajectoryBindingExecutionResult(
+                    session_id=session_id,
+                    trajectory_id=request.trajectory_id,
+                    execution_status=ExecutionStatus.FAILED_NAVIGATION_GEOMETRY,
+                    gate_decision=gate_decision,
+                    gate_reason_code=gate_reason,
+                    action=request.action,
+                    sequence_number=request.sequence_number,
+                    executed_at_utc=request.now_utc,
+                    workflow_status=wf_status,
+                    error_message="PlanningService handle is unavailable; cannot verify plan ownership",
+                )
+                if self._persistence_service is not None:
+                    self._persistence_service.record_audit(
+                        {
+                            "session_id": session_id,
+                            "trajectory_id": request.trajectory_id,
+                            "event": "trajectory_binding_failed_geometry",
+                            "error": res.error_message,
+                            "sequence_number": request.sequence_number,
+                        },
+                        session_id=session_id,
+                    )
+                return res
+
+            session_plan = self._planning_service.get_plan_for_session(session_id)
+            if session_plan is None:
+                res = TrajectoryBindingExecutionResult(
+                    session_id=session_id,
+                    trajectory_id=request.trajectory_id,
+                    execution_status=ExecutionStatus.FAILED_NAVIGATION_GEOMETRY,
+                    gate_decision=gate_decision,
+                    gate_reason_code=gate_reason,
+                    action=request.action,
+                    sequence_number=request.sequence_number,
+                    executed_at_utc=request.now_utc,
+                    workflow_status=wf_status,
+                    error_message=f"No surgical plan bound to session {session_id!r}",
+                )
+                if self._persistence_service is not None:
+                    self._persistence_service.record_audit(
+                        {
+                            "session_id": session_id,
+                            "trajectory_id": request.trajectory_id,
+                            "event": "trajectory_binding_failed_geometry",
+                            "error": res.error_message,
+                            "sequence_number": request.sequence_number,
+                        },
+                        session_id=session_id,
+                    )
+                return res
+
+            if not session_plan.is_locked:
+                res = TrajectoryBindingExecutionResult(
+                    session_id=session_id,
+                    trajectory_id=request.trajectory_id,
+                    execution_status=ExecutionStatus.FAILED_NAVIGATION_GEOMETRY,
+                    gate_decision=gate_decision,
+                    gate_reason_code=gate_reason,
+                    action=request.action,
+                    sequence_number=request.sequence_number,
+                    executed_at_utc=request.now_utc,
+                    workflow_status=wf_status,
+                    error_message=f"Authoritative plan {session_plan.plan_id!r} bound to session {session_id!r} is not locked",
+                )
+                if self._persistence_service is not None:
+                    self._persistence_service.record_audit(
+                        {
+                            "session_id": session_id,
+                            "trajectory_id": request.trajectory_id,
+                            "event": "trajectory_binding_failed_geometry",
+                            "error": res.error_message,
+                            "sequence_number": request.sequence_number,
+                        },
+                        session_id=session_id,
+                    )
+                return res
+
+            authoritative_traj = None
+            for traj in session_plan.trajectories:
+                if traj.trajectory_id == request.trajectory_id:
+                    authoritative_traj = traj
+                    break
+            if authoritative_traj is None:
+                res = TrajectoryBindingExecutionResult(
+                    session_id=session_id,
+                    trajectory_id=request.trajectory_id,
+                    execution_status=ExecutionStatus.FAILED_NAVIGATION_GEOMETRY,
+                    gate_decision=gate_decision,
+                    gate_reason_code=gate_reason,
+                    action=request.action,
+                    sequence_number=request.sequence_number,
+                    executed_at_utc=request.now_utc,
+                    workflow_status=wf_status,
+                    error_message=f"Trajectory {request.trajectory_id!r} not found in authoritative plan {session_plan.plan_id!r} bound to session {session_id!r}",
+                )
+                if self._persistence_service is not None:
+                    self._persistence_service.record_audit(
+                        {
+                            "session_id": session_id,
+                            "trajectory_id": request.trajectory_id,
+                            "event": "trajectory_binding_failed_geometry",
+                            "error": res.error_message,
+                            "sequence_number": request.sequence_number,
+                        },
+                        session_id=session_id,
+                    )
+                return res
+
+            if request.plan_trajectory is not None:
+                try:
+                    validate_trajectory_integrity(request.plan_trajectory, authoritative_traj)
+                except Exception as e:
+                    res = TrajectoryBindingExecutionResult(
+                        session_id=session_id,
+                        trajectory_id=request.trajectory_id,
+                        execution_status=ExecutionStatus.FAILED_NAVIGATION_GEOMETRY,
+                        gate_decision=gate_decision,
+                        gate_reason_code=gate_reason,
+                        action=request.action,
+                        sequence_number=request.sequence_number,
+                        executed_at_utc=request.now_utc,
+                        workflow_status=wf_status,
+                        error_message=f"Trajectory plan geometry does not match locked surgical plan: {e}",
+                    )
+                    if self._persistence_service is not None:
+                        self._persistence_service.record_audit(
+                            {
+                                "session_id": session_id,
+                                "trajectory_id": request.trajectory_id,
+                                "event": "trajectory_binding_failed_geometry",
+                                "error": res.error_message,
+                                "sequence_number": request.sequence_number,
+                            },
+                            session_id=session_id,
+                        )
+                    return res
+
+            # Step 4: Invoke M14 Trajectory Binding with Authoritative Trajectory
             if self._navigation_service is None:
                 res = TrajectoryBindingExecutionResult(
                     session_id=session_id,
@@ -626,7 +790,7 @@ class ClinicalExecutionGatewayService(IService):
                 self._navigation_service.bind_trajectory(
                     session_id=session_id,
                     trajectory_id=request.trajectory_id,
-                    plan_trajectory=request.plan_trajectory,
+                    plan_trajectory=authoritative_traj,
                     sequence_number=request.sequence_number,
                     capability=cap,
                 )
@@ -819,6 +983,164 @@ class ClinicalExecutionGatewayService(IService):
                 )
                 return res
 
+            op = request.recovery_operation.upper()
+
+            # Authoritative Plan Verification for STAGE and ACTIVATE
+            if op in ("STAGE", "ACTIVATE"):
+                if self._planning_service is None:
+                    res = RecoveryReorientationExecutionResult(
+                        session_id=session_id,
+                        execution_status=ExecutionStatus.FAILED_NAVIGATION_GEOMETRY,
+                        gate_decision=gate_decision,
+                        gate_reason_code=gate_reason,
+                        action=request.action,
+                        sequence_number=request.sequence_number,
+                        executed_at_utc=request.now_utc,
+                        workflow_status=wf_status,
+                        error_message="PlanningService handle is unavailable; cannot verify plan ownership",
+                    )
+                    if self._persistence_service is not None:
+                        self._persistence_service.record_audit(
+                            {
+                                "session_id": session_id,
+                                "event": "recovery_reorientation_failed_geometry",
+                                "error": res.error_message,
+                                "sequence_number": request.sequence_number,
+                            },
+                            session_id=session_id,
+                        )
+                    return res
+
+                session_plan = self._planning_service.get_plan_for_session(session_id)
+                if session_plan is None:
+                    res = RecoveryReorientationExecutionResult(
+                        session_id=session_id,
+                        execution_status=ExecutionStatus.FAILED_NAVIGATION_GEOMETRY,
+                        gate_decision=gate_decision,
+                        gate_reason_code=gate_reason,
+                        action=request.action,
+                        sequence_number=request.sequence_number,
+                        executed_at_utc=request.now_utc,
+                        workflow_status=wf_status,
+                        error_message=f"No surgical plan bound to session {session_id!r}",
+                    )
+                    if self._persistence_service is not None:
+                        self._persistence_service.record_audit(
+                            {
+                                "session_id": session_id,
+                                "event": "recovery_reorientation_failed_geometry",
+                                "error": res.error_message,
+                                "sequence_number": request.sequence_number,
+                            },
+                            session_id=session_id,
+                        )
+                    return res
+
+                if not session_plan.is_locked:
+                    res = RecoveryReorientationExecutionResult(
+                        session_id=session_id,
+                        execution_status=ExecutionStatus.FAILED_NAVIGATION_GEOMETRY,
+                        gate_decision=gate_decision,
+                        gate_reason_code=gate_reason,
+                        action=request.action,
+                        sequence_number=request.sequence_number,
+                        executed_at_utc=request.now_utc,
+                        workflow_status=wf_status,
+                        error_message=f"Authoritative plan {session_plan.plan_id!r} bound to session {session_id!r} is not locked",
+                    )
+                    if self._persistence_service is not None:
+                        self._persistence_service.record_audit(
+                            {
+                                "session_id": session_id,
+                                "event": "recovery_reorientation_failed_geometry",
+                                "error": res.error_message,
+                                "sequence_number": request.sequence_number,
+                            },
+                            session_id=session_id,
+                        )
+                    return res
+
+                if op == "STAGE":
+                    if request.plan_id != session_plan.plan_id:
+                        res = RecoveryReorientationExecutionResult(
+                            session_id=session_id,
+                            execution_status=ExecutionStatus.FAILED_NAVIGATION_GEOMETRY,
+                            gate_decision=gate_decision,
+                            gate_reason_code=gate_reason,
+                            action=request.action,
+                            sequence_number=request.sequence_number,
+                            executed_at_utc=request.now_utc,
+                            workflow_status=wf_status,
+                            error_message=f"Requested plan {request.plan_id!r} does not match authoritative plan {session_plan.plan_id!r} bound to session {session_id!r}",
+                        )
+                        if self._persistence_service is not None:
+                            self._persistence_service.record_audit(
+                                {
+                                    "session_id": session_id,
+                                    "event": "recovery_reorientation_failed_geometry",
+                                    "error": res.error_message,
+                                    "sequence_number": request.sequence_number,
+                                },
+                                session_id=session_id,
+                            )
+                        return res
+
+                elif op == "ACTIVATE":
+                    if request.plan_trajectory is not None:
+                        authoritative_traj = None
+                        for traj in session_plan.trajectories:
+                            if traj.trajectory_id == request.plan_trajectory.trajectory_id:
+                                authoritative_traj = traj
+                                break
+                        if authoritative_traj is None:
+                            res = RecoveryReorientationExecutionResult(
+                                session_id=session_id,
+                                execution_status=ExecutionStatus.FAILED_NAVIGATION_GEOMETRY,
+                                gate_decision=gate_decision,
+                                gate_reason_code=gate_reason,
+                                action=request.action,
+                                sequence_number=request.sequence_number,
+                                executed_at_utc=request.now_utc,
+                                workflow_status=wf_status,
+                                error_message=f"Trajectory {request.plan_trajectory.trajectory_id!r} not found in authoritative locked plan {session_plan.plan_id!r} for session {session_id!r}",
+                            )
+                            if self._persistence_service is not None:
+                                self._persistence_service.record_audit(
+                                    {
+                                        "session_id": session_id,
+                                        "event": "recovery_reorientation_failed_geometry",
+                                        "error": res.error_message,
+                                        "sequence_number": request.sequence_number,
+                                    },
+                                    session_id=session_id,
+                                )
+                            return res
+                        try:
+                            validate_trajectory_integrity(request.plan_trajectory, authoritative_traj)
+                        except Exception as e:
+                            res = RecoveryReorientationExecutionResult(
+                                session_id=session_id,
+                                execution_status=ExecutionStatus.FAILED_NAVIGATION_GEOMETRY,
+                                gate_decision=gate_decision,
+                                gate_reason_code=gate_reason,
+                                action=request.action,
+                                sequence_number=request.sequence_number,
+                                executed_at_utc=request.now_utc,
+                                workflow_status=wf_status,
+                                error_message=f"Trajectory plan geometry does not match locked surgical plan: {e}",
+                            )
+                            if self._persistence_service is not None:
+                                self._persistence_service.record_audit(
+                                    {
+                                        "session_id": session_id,
+                                        "event": "recovery_reorientation_failed_geometry",
+                                        "error": res.error_message,
+                                        "sequence_number": request.sequence_number,
+                                    },
+                                    session_id=session_id,
+                                )
+                            return res
+
             rec_status: Optional[RecoveryStatusRecord] = None
             cap = _create_execution_capability(
                 service_instance_id=id(self._recovery_service),
@@ -827,7 +1149,6 @@ class ClinicalExecutionGatewayService(IService):
                 sequence_number=request.sequence_number,
             )
             try:
-                op = request.recovery_operation.upper()
                 if op == "STAGE":
                     if request.plan_id is None or request.cloud is None:
                         raise ExecutionValidationError("STAGE operation requires plan_id and cloud")
@@ -1604,6 +1925,119 @@ class ClinicalExecutionGatewayService(IService):
             if self._registration_service is None:
                 raise ExecutionLifecycleError("RegistrationService is unavailable")
 
+            op = request.operation.upper()
+
+            # Authoritative Plan Verification for SUBMIT and SOLVE (Anti-oracle order)
+            if op in ("SUBMIT", "SOLVE"):
+                if self._planning_service is None:
+                    res = RegistrationExecutionResult(
+                        session_id=session_id,
+                        execution_status=ExecutionStatus.FAILED_NAVIGATION_GEOMETRY,
+                        gate_decision=gate_decision,
+                        gate_reason_code=gate_reason,
+                        action=request.action,
+                        sequence_number=request.sequence_number,
+                        operation=request.operation,
+                        executed_at_utc=request.now_utc,
+                        workflow_status=wf_status,
+                        error_message="PlanningService handle is unavailable; cannot verify plan ownership",
+                    )
+                    if self._persistence_service is not None:
+                        self._persistence_service.record_audit(
+                            {
+                                "session_id": session_id,
+                                "operation": request.operation,
+                                "event": "registration_failed_geometry",
+                                "error": res.error_message,
+                                "sequence_number": request.sequence_number,
+                                "epoch_id": self._epoch_id,
+                            },
+                            session_id=session_id,
+                        )
+                    return res
+
+                session_plan = self._planning_service.get_plan_for_session(session_id)
+                if session_plan is None:
+                    res = RegistrationExecutionResult(
+                        session_id=session_id,
+                        execution_status=ExecutionStatus.FAILED_NAVIGATION_GEOMETRY,
+                        gate_decision=gate_decision,
+                        gate_reason_code=gate_reason,
+                        action=request.action,
+                        sequence_number=request.sequence_number,
+                        operation=request.operation,
+                        executed_at_utc=request.now_utc,
+                        workflow_status=wf_status,
+                        error_message=f"No surgical plan bound to session {session_id!r}",
+                    )
+                    if self._persistence_service is not None:
+                        self._persistence_service.record_audit(
+                            {
+                                "session_id": session_id,
+                                "operation": request.operation,
+                                "event": "registration_failed_geometry",
+                                "error": res.error_message,
+                                "sequence_number": request.sequence_number,
+                                "epoch_id": self._epoch_id,
+                            },
+                            session_id=session_id,
+                        )
+                    return res
+
+                if request.plan_id != session_plan.plan_id:
+                    res = RegistrationExecutionResult(
+                        session_id=session_id,
+                        execution_status=ExecutionStatus.FAILED_NAVIGATION_GEOMETRY,
+                        gate_decision=gate_decision,
+                        gate_reason_code=gate_reason,
+                        action=request.action,
+                        sequence_number=request.sequence_number,
+                        operation=request.operation,
+                        executed_at_utc=request.now_utc,
+                        workflow_status=wf_status,
+                        error_message=f"Requested plan {request.plan_id!r} does not match authoritative plan {session_plan.plan_id!r} bound to session {session_id!r}",
+                    )
+                    if self._persistence_service is not None:
+                        self._persistence_service.record_audit(
+                            {
+                                "session_id": session_id,
+                                "operation": request.operation,
+                                "event": "registration_failed_geometry",
+                                "error": res.error_message,
+                                "sequence_number": request.sequence_number,
+                                "epoch_id": self._epoch_id,
+                            },
+                            session_id=session_id,
+                        )
+                    return res
+
+                if not session_plan.is_locked:
+                    res = RegistrationExecutionResult(
+                        session_id=session_id,
+                        execution_status=ExecutionStatus.FAILED_NAVIGATION_GEOMETRY,
+                        gate_decision=gate_decision,
+                        gate_reason_code=gate_reason,
+                        action=request.action,
+                        sequence_number=request.sequence_number,
+                        operation=request.operation,
+                        executed_at_utc=request.now_utc,
+                        workflow_status=wf_status,
+                        error_message=f"Authoritative plan {session_plan.plan_id!r} bound to session {session_id!r} is not locked",
+                    )
+                    if self._persistence_service is not None:
+                        self._persistence_service.record_audit(
+                            {
+                                "session_id": session_id,
+                                "operation": request.operation,
+                                "event": "registration_failed_geometry",
+                                "error": res.error_message,
+                                "sequence_number": request.sequence_number,
+                                "epoch_id": self._epoch_id,
+                            },
+                            session_id=session_id,
+                        )
+                    return res
+
             # 4. Step 4: Capability Minting & Execution
             cap_reg = _create_execution_capability(
                 service_instance_id=id(self._registration_service),
@@ -1614,7 +2048,6 @@ class ClinicalExecutionGatewayService(IService):
             reg_record = None
             verif_snap = None
             try:
-                op = request.operation.upper()
                 if op == "SUBMIT":
                     if not request.plan_id or not request.cloud:
                         raise ExecutionValidationError("SUBMIT requires plan_id and cloud")

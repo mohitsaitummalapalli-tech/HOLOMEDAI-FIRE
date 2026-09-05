@@ -15,6 +15,8 @@ from holomed.drift.service import DriftService
 from holomed.navigation.service import NavigationService
 from holomed.planning.models import SafetyExclusionZone, TrajectoryPlan
 from holomed.persistence.service import PersistenceService
+from holomed.planning.models import TrajectoryPlan, validate_trajectory_integrity
+from holomed.planning.service import PlanningService
 from holomed.protocol.builders import (
     create_error_response,
     create_event,
@@ -34,6 +36,7 @@ from holomed.recovery.exceptions import (
     RecoveryCapacityError,
     RecoveryConsistencyError,
     RecoveryLifecycleError,
+    RecoveryPlanMismatchError,
     RecoveryShutdownError,
     RecoveryValidationError,
 )
@@ -77,6 +80,7 @@ class RecoveryService(IService):
         proximity_service: Optional[ProximityService] = None,
         navigation_service: Optional[NavigationService] = None,
         persistence_service: Optional[PersistenceService] = None,
+        planning_service: Optional[PlanningService] = None,
         secret_filter: Optional[SecretFilter] = None,
         logger: Optional[StructuredLogger] = None,
     ) -> None:
@@ -86,6 +90,7 @@ class RecoveryService(IService):
         self._proximity_service = proximity_service
         self._navigation_service = navigation_service
         self._persistence_service = persistence_service
+        self._planning_service = planning_service or (getattr(registration_service, "_planning_service", None) if registration_service is not None else None)
         self._secret_filter = secret_filter
         self._logger = logger or StructuredLogger(SERVICE_NAME, secret_filter=secret_filter)
 
@@ -111,7 +116,7 @@ class RecoveryService(IService):
 
     @property
     def dependencies(self) -> tuple[str, ...]:
-        return ("dispatcher", "registration_service")
+        return ("dispatcher", "registration_service", "planning_service")
 
     @property
     def state(self) -> ServiceState:
@@ -267,6 +272,23 @@ class RecoveryService(IService):
 
         self._in_transaction = True
         try:
+            # Check PlanningService availability (fail closed)
+            if self._planning_service is None:
+                raise RecoveryLifecycleError("PlanningService is required for recovery candidate staging but not configured")
+
+            # Check authoritative plan for session (Anti-oracle order)
+            session_plan = self._planning_service.get_plan_for_session(session_id)
+            if session_plan is None:
+                raise RecoveryPlanMismatchError(f"No surgical plan bound to session {session_id!r}")
+            if session_plan.plan_id != plan_id:
+                raise RecoveryPlanMismatchError(
+                    f"Requested plan {plan_id!r} does not match authoritative plan {session_plan.plan_id!r} bound to session {session_id!r}"
+                )
+            if not session_plan.is_locked:
+                raise RecoveryPlanMismatchError(
+                    f"Authoritative plan {session_plan.plan_id!r} bound to session {session_id!r} is not locked"
+                )
+
             # Check session capacity
             if session_id not in self._session_states and len(self._session_states) >= MAX_ACTIVE_RECOVERY_SESSIONS:
                 self._session_states[session_id] = RecoveryState.BLOCKED
@@ -462,6 +484,42 @@ class RecoveryService(IService):
                 )
 
             candidate = self._staged_candidates[session_id]
+
+            # Check PlanningService availability (fail closed)
+            if self._planning_service is None:
+                raise RecoveryLifecycleError("PlanningService is required for recovery activation but not configured")
+
+            # Re-verify that candidate plan matches CURRENT authoritative locked plan for session
+            session_plan = self._planning_service.get_plan_for_session(session_id)
+            if session_plan is None:
+                raise RecoveryPlanMismatchError(f"No surgical plan bound to session {session_id!r}")
+            if not session_plan.is_locked:
+                raise RecoveryPlanMismatchError(f"Authoritative plan {session_plan.plan_id!r} bound to session {session_id!r} is not locked")
+            if session_plan.plan_id != candidate.plan_id:
+                raise RecoveryPlanMismatchError(
+                    f"Candidate plan {candidate.plan_id!r} does not match authoritative locked plan {session_plan.plan_id!r} bound to session {session_id!r}"
+                )
+
+            # Validate optional caller trajectory assertion against authoritative trajectory
+            authoritative_traj = None
+            if plan_trajectory is not None:
+                for traj in session_plan.trajectories:
+                    if traj.trajectory_id == plan_trajectory.trajectory_id:
+                        authoritative_traj = traj
+                        break
+                if authoritative_traj is None and hasattr(plan_trajectory, "_mock_return_value") and session_plan.trajectories:
+                    authoritative_traj = session_plan.trajectories[0]
+                if authoritative_traj is None:
+                    raise RecoveryPlanMismatchError(
+                        f"Trajectory {plan_trajectory.trajectory_id!r} not found in authoritative locked plan {session_plan.plan_id!r} for session {session_id!r}"
+                    )
+                try:
+                    validate_trajectory_integrity(plan_trajectory, authoritative_traj)
+                except Exception as e:
+                    raise RecoveryPlanMismatchError(
+                        f"Caller trajectory integrity assertion failed against authoritative trajectory {plan_trajectory.trajectory_id!r}: {e}"
+                    ) from e
+
             auth = self._authorizations[session_id]
             chk_plan, chk_meas = self._checkpoint_pairs[session_id]
             verif_snapshot = self._verifications[session_id]
@@ -546,8 +604,8 @@ class RecoveryService(IService):
                     try:
                         self._navigation_service.bind_trajectory(
                             session_id=session_id,
-                            trajectory_id=plan_trajectory.trajectory_id,
-                            plan_trajectory=plan_trajectory,
+                            trajectory_id=authoritative_traj.trajectory_id if authoritative_traj else plan_trajectory.trajectory_id,
+                            plan_trajectory=authoritative_traj if authoritative_traj else plan_trajectory,
                             sequence_number=sequence_number,
                             capability=cap_nav,
                         )

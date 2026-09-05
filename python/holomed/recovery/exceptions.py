@@ -57,6 +57,11 @@ class RecoveryConsistencyError(RecoveryError):
     pass
 
 
+class RecoveryPlanMismatchError(RecoveryError):
+    """Raised when candidate registration or recovery action does not match the authoritative session plan."""
+    pass
+
+
 class RecoveryShutdownError(RecoveryError):
     """Raised when service teardown encounters resource deallocation failures."""
 

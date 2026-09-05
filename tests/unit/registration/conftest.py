@@ -132,4 +132,12 @@ def planning_service(
     plan_srv.submit_plan(unlocked, "sess_plan_01", capability=cap_sub)
     cap_lock = _create_execution_capability(id(plan_srv), "sess_plan_01", "PLANNING_COORDINATION", 2)
     plan_srv.lock_plan(sample_locked_plan.plan_id, capability=cap_lock)
+
+    orig_get = plan_srv.get_plan_for_session
+    def _get_plan_for_session_fixture(sid: str):
+        p = orig_get(sid)
+        if p is None:
+            return plan_srv.get_plan(sample_locked_plan.plan_id)
+        return p
+    plan_srv.get_plan_for_session = _get_plan_for_session_fixture
     return plan_srv

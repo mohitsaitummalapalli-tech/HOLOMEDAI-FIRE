@@ -250,8 +250,8 @@ class RegistrationService(IService):
 
         self._in_transaction = True
         try:
-            # Check locked plan dependency (D315)
-            self._verify_locked_plan(plan_id)
+            # Check locked plan dependency (D315) - Anti-oracle order
+            self._verify_locked_plan(plan_id, session_id)
 
             if session_id not in self._registrations and len(self._registrations) >= MAX_ACTIVE_REGISTRATIONS:
                 raise RegistrationCapacityError(f"Maximum active registrations limit ({MAX_ACTIVE_REGISTRATIONS}) reached")
@@ -318,7 +318,8 @@ class RegistrationService(IService):
 
         self._in_transaction = True
         try:
-            self._verify_locked_plan(plan_id)
+            # Check locked plan dependency (D315) - Anti-oracle order
+            self._verify_locked_plan(plan_id, session_id)
 
             if session_id not in self._fiducial_clouds:
                 raise RegistrationValidationError(f"No fiducials submitted for session {session_id!r}")
@@ -538,14 +539,24 @@ class RegistrationService(IService):
     # Helper & Verification Methods
     # -------------------------------------------------------------------------
 
-    def _verify_locked_plan(self, plan_id: str) -> None:
-        """Verify that referenced plan exists and is locked."""
-        if self._planning_service is not None:
-            plan = self._planning_service.get_plan(plan_id)
-            if not plan.is_locked:
-                raise RegistrationPlanMismatchError(
-                    f"Registration requires plan {plan_id!r} to be locked (D315)"
-                )
+    def _verify_locked_plan(self, plan_id: str, session_id: str) -> None:
+        """Verify that authoritative plan for session matches plan_id and is locked."""
+        if self._planning_service is None:
+            raise RegistrationLifecycleError("PlanningService is required for registration plan verification but is not configured")
+
+        session_plan = self._planning_service.get_plan_for_session(session_id)
+        if session_plan is None:
+            raise RegistrationPlanMismatchError(f"No surgical plan bound to session {session_id!r}")
+
+        if session_plan.plan_id != plan_id:
+            raise RegistrationPlanMismatchError(
+                f"Requested plan {plan_id!r} does not match authoritative plan {session_plan.plan_id!r} bound to session {session_id!r}"
+            )
+
+        if not session_plan.is_locked:
+            raise RegistrationPlanMismatchError(
+                f"Authoritative plan {session_plan.plan_id!r} bound to session {session_id!r} is not locked (D315)"
+            )
 
     def _emit_event(self, topic: str, payload: Mapping[str, Any]) -> None:
         """Emit protocol event over dispatcher."""

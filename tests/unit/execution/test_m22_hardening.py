@@ -101,6 +101,17 @@ def sample_cloud() -> FiducialCloud:
 
 
 @pytest.fixture
+def test_planning_service(sample_trajectory: TrajectoryPlan) -> MagicMock:
+    mock_planning = MagicMock()
+    mock_plan = MagicMock()
+    mock_plan.plan_id = "plan-01"
+    mock_plan.is_locked = True
+    mock_plan.trajectories = (sample_trajectory,)
+    mock_planning.get_plan_for_session.return_value = mock_plan
+    return mock_planning
+
+
+@pytest.fixture
 def sample_trajectory() -> TrajectoryPlan:
     return TrajectoryPlan(
         trajectory_id="traj_01",
@@ -159,9 +170,9 @@ class TestM22RecoveryDirectCapabilityEnforcement:
     """Verifies that direct Python calls to RecoveryService methods fail closed without valid capability."""
 
     def test_stage_candidate_requires_capability(
-        self, test_runtime_context: RuntimeContext, secret_filter: SecretFilter, sample_cloud: FiducialCloud
+        self, test_runtime_context: RuntimeContext, secret_filter: SecretFilter, sample_cloud: FiducialCloud, test_planning_service: MagicMock
     ) -> None:
-        srv = RecoveryService(secret_filter=secret_filter)
+        srv = RecoveryService(planning_service=test_planning_service, secret_filter=secret_filter)
         srv.initialize(test_runtime_context)
         srv.start()
 
@@ -203,9 +214,9 @@ class TestM22RecoveryDirectCapabilityEnforcement:
         srv.stop()
 
     def test_verify_candidate_requires_capability(
-        self, test_runtime_context: RuntimeContext, secret_filter: SecretFilter, sample_cloud: FiducialCloud
+        self, test_runtime_context: RuntimeContext, secret_filter: SecretFilter, sample_cloud: FiducialCloud, test_planning_service: MagicMock
     ) -> None:
-        srv = RecoveryService(secret_filter=secret_filter)
+        srv = RecoveryService(planning_service=test_planning_service, secret_filter=secret_filter)
         srv.initialize(test_runtime_context)
         srv.start()
 
@@ -239,7 +250,7 @@ class TestM22RecoveryDirectCapabilityEnforcement:
         srv.stop()
 
     def test_activate_recovery_requires_capability(
-        self, test_runtime_context: RuntimeContext, secret_filter: SecretFilter, sample_cloud: FiducialCloud
+        self, test_runtime_context: RuntimeContext, secret_filter: SecretFilter, sample_cloud: FiducialCloud, test_planning_service: MagicMock
     ) -> None:
         mock_reg = MagicMock(spec=RegistrationService)
         mock_reg.is_registration_verified.return_value = True
@@ -259,8 +270,9 @@ class TestM22RecoveryDirectCapabilityEnforcement:
         )
         reg_status.epoch_id = 1
         mock_reg.get_registration.return_value = reg_status
+        mock_reg._planning_service = test_planning_service
 
-        srv = RecoveryService(registration_service=mock_reg, secret_filter=secret_filter)
+        srv = RecoveryService(registration_service=mock_reg, planning_service=test_planning_service, secret_filter=secret_filter)
         srv.initialize(test_runtime_context)
         srv.start()
 
@@ -300,11 +312,17 @@ class TestM22NavigationDirectCapabilityEnforcement:
     """Verifies that direct Python calls to NavigationService.bind_trajectory fail closed without valid capability."""
 
     def test_bind_trajectory_requires_capability(
-        self, test_runtime_context: RuntimeContext, secret_filter: SecretFilter, sample_trajectory: TrajectoryPlan
+        self,
+        test_runtime_context: RuntimeContext,
+        secret_filter: SecretFilter,
+        sample_trajectory: TrajectoryPlan,
+        test_planning_service: PlanningService,
     ) -> None:
         mock_reg = MagicMock(spec=RegistrationService)
+        mock_reg._planning_service = test_planning_service
         mock_reg.is_registration_verified.return_value = True
         mock_status = MagicMock()
+        mock_status.plan_id = "plan-01"
         mock_status.transform = RigidRegistrationTransform3D(
             rotation_matrix=((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)),
             translation_vector_mm=(0.0, 0.0, 0.0),
@@ -315,7 +333,11 @@ class TestM22NavigationDirectCapabilityEnforcement:
         )
         mock_reg.get_registration.return_value = mock_status
 
-        nav_srv = NavigationService(registration_service=mock_reg, secret_filter=secret_filter)
+        nav_srv = NavigationService(
+            registration_service=mock_reg,
+            planning_service=test_planning_service,
+            secret_filter=secret_filter,
+        )
         nav_srv.initialize(test_runtime_context)
         nav_srv.start()
 
@@ -351,12 +373,16 @@ class TestM22GatewayCoordinationAndInvalidation:
     """Verifies that the gateway coordinates recovery and trajectory binding with automatic capability invalidation."""
 
     def test_gateway_coordinates_recovery_reorientation_stages(
-        self, test_runtime_context: RuntimeContext, secret_filter: SecretFilter, sample_cloud: FiducialCloud
+        self,
+        test_runtime_context: RuntimeContext,
+        secret_filter: SecretFilter,
+        sample_cloud: FiducialCloud,
+        test_planning_service: PlanningService,
     ) -> None:
         dispatcher = MessageDispatcher()
         dispatcher.initialize(test_runtime_context)
 
-        recovery_srv = RecoveryService(secret_filter=secret_filter)
+        recovery_srv = RecoveryService(planning_service=test_planning_service, secret_filter=secret_filter)
         recovery_srv.initialize(test_runtime_context)
 
         mock_gate = MagicMock(spec=SafetyGateService)
@@ -387,6 +413,7 @@ class TestM22GatewayCoordinationAndInvalidation:
             safety_gate_service=mock_gate,
             workflow_service=mock_wf,
             recovery_service=recovery_srv,
+            planning_service=test_planning_service,
             secret_filter=secret_filter,
         )
         gateway.initialize(test_runtime_context)
@@ -432,14 +459,20 @@ class TestM22GatewayCoordinationAndInvalidation:
         recovery_srv.stop()
 
     def test_gateway_coordinates_trajectory_binding(
-        self, test_runtime_context: RuntimeContext, secret_filter: SecretFilter, sample_trajectory: TrajectoryPlan
+        self,
+        test_runtime_context: RuntimeContext,
+        secret_filter: SecretFilter,
+        sample_trajectory: TrajectoryPlan,
+        test_planning_service: PlanningService,
     ) -> None:
         dispatcher = MessageDispatcher()
         dispatcher.initialize(test_runtime_context)
 
         mock_reg = MagicMock(spec=RegistrationService)
+        mock_reg._planning_service = test_planning_service
         mock_reg.is_registration_verified.return_value = True
         mock_status = MagicMock()
+        mock_status.plan_id = "plan-01"
         mock_status.transform = RigidRegistrationTransform3D(
             rotation_matrix=((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)),
             translation_vector_mm=(0.0, 0.0, 0.0),
@@ -450,7 +483,11 @@ class TestM22GatewayCoordinationAndInvalidation:
         )
         mock_reg.get_registration.return_value = mock_status
 
-        nav_srv = NavigationService(registration_service=mock_reg, secret_filter=secret_filter)
+        nav_srv = NavigationService(
+            registration_service=mock_reg,
+            planning_service=test_planning_service,
+            secret_filter=secret_filter,
+        )
         nav_srv.initialize(test_runtime_context)
 
         mock_gate = MagicMock(spec=SafetyGateService)
@@ -481,6 +518,7 @@ class TestM22GatewayCoordinationAndInvalidation:
             safety_gate_service=mock_gate,
             workflow_service=mock_wf,
             navigation_service=nav_srv,
+            planning_service=test_planning_service,
             secret_filter=secret_filter,
         )
         gateway.initialize(test_runtime_context)

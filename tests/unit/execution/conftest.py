@@ -173,7 +173,18 @@ def mock_workflow_service() -> MagicMock:
 
 
 @pytest.fixture
-def mock_navigation_service() -> MagicMock:
+def mock_shared_planning_service() -> MagicMock:
+    mock_plan = MagicMock()
+    mock_plan.plan_id = "plan-01"
+    mock_plan.is_locked = True
+    mock_plan.trajectories = (make_plan_trajectory("traj-01"),)
+    mock_planning = MagicMock()
+    mock_planning.get_plan_for_session.return_value = mock_plan
+    return mock_planning
+
+
+@pytest.fixture
+def mock_navigation_service(mock_shared_planning_service: MagicMock) -> MagicMock:
     nav_svc = MagicMock(spec=NavigationService)
     dev_rec = TrajectoryDeviationRecord(
         record_id="dev-01",
@@ -192,6 +203,7 @@ def mock_navigation_service() -> MagicMock:
         evaluated_at_utc="2025-01-01T12:00:00Z",
     )
     nav_svc.evaluate.return_value = dev_rec
+    nav_svc._planning_service = mock_shared_planning_service
     return nav_svc
 
 
@@ -251,7 +263,7 @@ def make_recovery_request(
 
 
 @pytest.fixture
-def mock_recovery_service() -> MagicMock:
+def mock_recovery_service(mock_shared_planning_service: MagicMock) -> MagicMock:
     rec_svc = MagicMock(spec=RecoveryService)
     rec_status = RecoveryStatusRecord(
         recovery_id="rec-01",
@@ -266,6 +278,7 @@ def mock_recovery_service() -> MagicMock:
     )
     rec_svc.get_recovery_status.return_value = rec_status
     rec_svc.activate_recovery.return_value = rec_status
+    rec_svc._planning_service = mock_shared_planning_service
     return rec_svc
 
 

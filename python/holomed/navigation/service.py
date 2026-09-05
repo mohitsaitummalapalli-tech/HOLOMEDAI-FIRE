@@ -37,7 +37,8 @@ from holomed.navigation.models import (
     TrackedInstrumentPose,
     TrajectoryDeviationRecord,
 )
-from holomed.planning.models import TrajectoryPlan
+from holomed.planning.models import TrajectoryPlan, validate_trajectory_integrity
+from holomed.planning.service import PlanningService
 from holomed.protocol.builders import (
     create_error_response,
     create_event,
@@ -77,11 +78,13 @@ class NavigationService(IService):
         self,
         dispatcher: Optional[MessageDispatcher] = None,
         registration_service: Optional[RegistrationService] = None,
+        planning_service: Optional[PlanningService] = None,
         secret_filter: Optional[SecretFilter] = None,
         logger: Optional[StructuredLogger] = None,
     ) -> None:
         self._dispatcher = dispatcher
         self._registration_service = registration_service
+        self._planning_service = planning_service or getattr(registration_service, "_planning_service", None)
         self._secret_filter = secret_filter
         self._logger = logger or StructuredLogger("navigation_service", secret_filter=secret_filter)
 
@@ -112,7 +115,7 @@ class NavigationService(IService):
 
     @property
     def dependencies(self) -> tuple[str, ...]:
-        return ("dispatcher", "registration_service")
+        return ("dispatcher", "registration_service", "planning_service")
 
     @property
     def state(self) -> ServiceState:
@@ -277,12 +280,54 @@ class NavigationService(IService):
                     f"Session {session_id!r} does not have a verified M13 registration; navigation cannot bind"
                 )
 
+            # Check PlanningService availability (fail closed)
+            if self._planning_service is None:
+                raise NavigationLifecycleError("PlanningService is required for trajectory binding but not configured")
+
+            # Check current session-bound locked plan
+            session_plan = self._planning_service.get_plan_for_session(session_id)
+            if session_plan is None:
+                raise NavigationRegistrationMismatchError(f"Session {session_id!r} does not have a bound surgical plan")
+            if not session_plan.is_locked:
+                raise NavigationRegistrationMismatchError(f"Authoritative plan {session_plan.plan_id!r} bound to session {session_id!r} is not locked")
+
             reg_record = self._registration_service.get_registration(session_id)
             if reg_record is None or reg_record.transform is None:
                 raise NavigationRegistrationMismatchError("Missing transform in active registration record")
 
-            # Transform trajectory into patient tracker frame (mm)
-            physical_traj = transform_trajectory(reg_record.transform, plan_trajectory)
+            # Verify registration plan_id matches the authoritative locked plan for session
+            if reg_record.plan_id != session_plan.plan_id:
+                raise NavigationRegistrationMismatchError(
+                    f"Registration plan {reg_record.plan_id!r} does not match authoritative locked plan {session_plan.plan_id!r} for session {session_id!r}"
+                )
+
+            # Verify trajectory membership in authoritative plan
+            authoritative_traj = None
+            for traj in session_plan.trajectories:
+                if traj.trajectory_id == trajectory_id:
+                    authoritative_traj = traj
+                    break
+            if authoritative_traj is None and plan_trajectory is not None:
+                for traj in session_plan.trajectories:
+                    if traj.trajectory_id == plan_trajectory.trajectory_id:
+                        authoritative_traj = traj
+                        break
+            if authoritative_traj is None:
+                raise NavigationRegistrationMismatchError(
+                    f"Trajectory {trajectory_id!r} not found in authoritative plan {session_plan.plan_id!r} for session {session_id!r}"
+                )
+
+            # Validate optional caller trajectory assertion against authoritative trajectory
+            if plan_trajectory is not None:
+                try:
+                    validate_trajectory_integrity(plan_trajectory, authoritative_traj)
+                except Exception as e:
+                    raise NavigationRegistrationMismatchError(
+                        f"Caller trajectory integrity assertion failed against authoritative trajectory {trajectory_id!r}: {e}"
+                    ) from e
+
+            # Transform authoritative trajectory into patient tracker frame (mm)
+            physical_traj = transform_trajectory(reg_record.transform, authoritative_traj)
             self._bound_trajectories[session_id] = physical_traj
             self._session_states[session_id] = NavigationState.IDLE
 

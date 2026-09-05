@@ -54,7 +54,7 @@ def message_dispatcher(runtime_context: RuntimeContext) -> MessageDispatcher:
 def sample_plan_trajectory() -> TrajectoryPlan:
     """Planned trajectory: entry (0, 0, 0), target (0, 0, 100)."""
     return TrajectoryPlan(
-        trajectory_id="traj_pedicle_screw_l4",
+        trajectory_id="t1",
         target_structure="pedicle_l4",
         entry_point_mm=(0.0, 0.0, 0.0),
         target_point_mm=(0.0, 0.0, 100.0),

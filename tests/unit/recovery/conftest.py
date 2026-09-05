@@ -160,6 +160,17 @@ def mock_registration_service() -> MagicMock:
         passed=True,
         verified_at_utc=datetime.now(timezone.utc).isoformat(),
     )
+    mock_planning = MagicMock()
+    def _get_plan_for_session(sid):
+        p = MagicMock()
+        p.plan_id = "plan-02" if sid == "session-02" else "plan-01"
+        p.is_locked = True
+        mock_traj = MagicMock()
+        mock_traj.trajectory_id = "traj-01"
+        p.trajectories = (mock_traj,)
+        return p
+    mock_planning.get_plan_for_session.side_effect = _get_plan_for_session
+    reg_svc._planning_service = mock_planning
     return reg_svc
 
 

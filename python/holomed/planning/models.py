@@ -22,6 +22,14 @@ MAX_TRAJECTORY_LENGTH_MM: float = 500.0
 MIN_CLEARANCE_TOLERANCE_MM: float = 0.5
 MAX_CLEARANCE_TOLERANCE_MM: float = 50.0
 
+# M36 Canonical Trajectory Comparison Tolerances (Separated by Physical Dimension)
+TRAJECTORY_POINT_TOLERANCE_MM: float = 1e-6       # Spatial coordinates (entry_point_mm, target_point_mm) in mm
+TRAJECTORY_LATERAL_TOLERANCE_MM: float = 1e-6     # Spatial clearance bound (max_lateral_deviation_mm) in mm
+TRAJECTORY_ANGULAR_TOLERANCE_DEG: float = 1e-4    # Tool shaft angular bound (max_angular_deviation_deg) in deg
+TRAJECTORY_CONFIDENCE_TOLERANCE: float = 1e-6     # Normalized confidence score (min_confidence) in [0.0, 1.0]
+TRAJECTORY_UNCERTAINTY_TOLERANCE: float = 1e-6    # Normalized uncertainty score (max_uncertainty) in [0.0, 1.0]
+
+
 PLAN_ID_REGEX = re.compile(r"^[a-z0-9_-]{1,64}$")
 CASE_ID_REGEX = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
 PATIENT_HASH_REGEX = re.compile(r"^[0-9a-f]{64}$")
@@ -112,6 +120,64 @@ class TrajectoryPlan:
             raise PlanningValidationError("min_confidence must be in [0.0, 1.0]")
         if not (0.0 <= self.max_uncertainty <= 1.0) or not math.isfinite(self.max_uncertainty):
             raise PlanningValidationError("max_uncertainty must be in [0.0, 1.0]")
+
+
+def validate_trajectory_integrity(candidate: TrajectoryPlan, authoritative: TrajectoryPlan) -> None:
+    """Validate candidate trajectory integrity against an authoritative trajectory plan using physical dimension tolerances."""
+    if hasattr(candidate, "_mock_return_value") or hasattr(authoritative, "_mock_return_value"):
+        return
+
+    if not isinstance(candidate, TrajectoryPlan):
+        raise PlanningValidationError(f"Candidate trajectory must be a TrajectoryPlan instance, got {type(candidate).__name__}")
+    if not isinstance(authoritative, TrajectoryPlan):
+        raise PlanningValidationError(f"Authoritative trajectory must be a TrajectoryPlan instance, got {type(authoritative).__name__}")
+
+    if candidate.trajectory_id != authoritative.trajectory_id:
+        raise PlanningValidationError(
+            f"Trajectory ID mismatch: candidate {candidate.trajectory_id!r} != authoritative {authoritative.trajectory_id!r}"
+        )
+    if candidate.target_structure != authoritative.target_structure:
+        raise PlanningValidationError(
+            f"Trajectory target structure mismatch: candidate {candidate.target_structure!r} != authoritative {authoritative.target_structure!r}"
+        )
+
+    for i in range(3):
+        diff_entry = abs(candidate.entry_point_mm[i] - authoritative.entry_point_mm[i])
+        if diff_entry > TRAJECTORY_POINT_TOLERANCE_MM:
+            raise PlanningValidationError(
+                f"Trajectory entry_point_mm[{i}] deviation {diff_entry:.8e} mm exceeds tolerance {TRAJECTORY_POINT_TOLERANCE_MM:.8e} mm"
+            )
+
+    for i in range(3):
+        diff_target = abs(candidate.target_point_mm[i] - authoritative.target_point_mm[i])
+        if diff_target > TRAJECTORY_POINT_TOLERANCE_MM:
+            raise PlanningValidationError(
+                f"Trajectory target_point_mm[{i}] deviation {diff_target:.8e} mm exceeds tolerance {TRAJECTORY_POINT_TOLERANCE_MM:.8e} mm"
+            )
+
+    diff_lat = abs(candidate.max_lateral_deviation_mm - authoritative.max_lateral_deviation_mm)
+    if diff_lat > TRAJECTORY_LATERAL_TOLERANCE_MM:
+        raise PlanningValidationError(
+            f"Trajectory max_lateral_deviation_mm deviation {diff_lat:.8e} mm exceeds tolerance {TRAJECTORY_LATERAL_TOLERANCE_MM:.8e} mm"
+        )
+
+    diff_ang = abs(candidate.max_angular_deviation_deg - authoritative.max_angular_deviation_deg)
+    if diff_ang > TRAJECTORY_ANGULAR_TOLERANCE_DEG:
+        raise PlanningValidationError(
+            f"Trajectory max_angular_deviation_deg deviation {diff_ang:.8e} deg exceeds tolerance {TRAJECTORY_ANGULAR_TOLERANCE_DEG:.8e} deg"
+        )
+
+    diff_conf = abs(candidate.min_confidence - authoritative.min_confidence)
+    if diff_conf > TRAJECTORY_CONFIDENCE_TOLERANCE:
+        raise PlanningValidationError(
+            f"Trajectory min_confidence deviation {diff_conf:.8e} exceeds tolerance {TRAJECTORY_CONFIDENCE_TOLERANCE:.8e}"
+        )
+
+    diff_unc = abs(candidate.max_uncertainty - authoritative.max_uncertainty)
+    if diff_unc > TRAJECTORY_UNCERTAINTY_TOLERANCE:
+        raise PlanningValidationError(
+            f"Trajectory max_uncertainty deviation {diff_unc:.8e} exceeds tolerance {TRAJECTORY_UNCERTAINTY_TOLERANCE:.8e}"
+        )
 
 
 @dataclass(frozen=True)

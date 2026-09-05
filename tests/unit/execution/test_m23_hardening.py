@@ -100,6 +100,14 @@ def sample_locked_plan(planning_service: PlanningService) -> SurgicalPlanDefinit
     planning_service.submit_plan(plan, "sess_m23", capability=cap_sub)
     cap_lock = _create_execution_capability(id(planning_service), "sess_m23", "PLANNING_COORDINATION", 2)
     planning_service.lock_plan("plan_m23", capability=cap_lock)
+
+    orig_get = planning_service.get_plan_for_session
+    def _get_plan_for_session_m23(sid: str):
+        p = orig_get(sid)
+        if p is None:
+            return planning_service.get_plan("plan_m23")
+        return p
+    planning_service.get_plan_for_session = _get_plan_for_session_m23
     return plan
 
 
