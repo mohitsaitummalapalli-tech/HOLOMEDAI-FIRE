@@ -53,6 +53,7 @@ from holomed.navigation.models import (
 )
 from holomed.navigation.service import NavigationService
 from holomed.persistence.service import PersistenceService
+from holomed.platform.models import SessionStatus
 from holomed.planning.models import SurgicalLaterality, SurgicalPlanDefinition
 from holomed.planning.service import PlanningService
 from holomed.protocol.builders import (
@@ -2255,8 +2256,9 @@ class ClinicalExecutionGatewayService(IService):
                 exec_status = ExecutionStatus.EXECUTED_CLEAR
                 audit_event = "session_teardown_completed"
 
-            # Durable Persistence Audit
+            # Durable Persistence Audit and Eviction (M35)
             if self._persistence_service is not None:
+                audit_persisted = False
                 try:
                     self._persistence_service.record_audit(
                         {
@@ -2271,8 +2273,24 @@ class ClinicalExecutionGatewayService(IService):
                         },
                         session_id=session_id,
                     )
-                except Exception:
-                    pass
+                    audit_persisted = True
+                except Exception as exc:
+                    failures.append(f"persistence_audit: {exc}")
+
+                if audit_persisted:
+                    try:
+                        has_sess = getattr(self._persistence_service, "has_session", None)
+                        if callable(has_sess) and has_sess(session_id):
+                            rec = self._persistence_service.get_session(session_id)
+                            if rec.status == SessionStatus.ACTIVE and hasattr(self._persistence_service, "close_session"):
+                                self._persistence_service.close_session(session_id)
+                        if hasattr(self._persistence_service, "evict_session"):
+                            self._persistence_service.evict_session(session_id, cap)
+                    except Exception as exc:
+                        failures.append(f"persistence_eviction: {exc}")
+
+            if failures:
+                exec_status = ExecutionStatus.FAILED_NAVIGATION_GEOMETRY
 
             result = SessionTeardownExecutionResult(
                 session_id=session_id,

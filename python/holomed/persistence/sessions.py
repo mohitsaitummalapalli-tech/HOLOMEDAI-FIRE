@@ -252,6 +252,34 @@ class DurableSessionStore:
         self._writers[session_id] = writer
         return record
 
+    def evict_session(self, session_id: str) -> bool:
+        """Evict stopped session from in-memory cache, releasing capacity (M35).
+
+        Returns:
+            True if session was in memory and evicted.
+            False if session was unknown or already evicted.
+
+        Raises:
+            PersistenceLifecycleError: If session is currently ACTIVE.
+        """
+        if session_id not in self._sessions:
+            return False
+
+        rec = self._sessions[session_id]
+        if rec.status == SessionStatus.ACTIVE:
+            raise PersistenceLifecycleError(
+                f"Cannot evict active session {session_id!r}; session must be STOPPED first"
+            )
+
+        if session_id in self._writers:
+            writer = self._writers[session_id]
+            writer.flush()
+            writer.close()
+            del self._writers[session_id]
+
+        del self._sessions[session_id]
+        return True
+
     def clear(self) -> None:
         """Clear transient session mappings (does not delete disk files)."""
         self._sessions.clear()

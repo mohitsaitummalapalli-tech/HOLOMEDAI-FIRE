@@ -72,6 +72,7 @@ class JournalWriter:
         self._entry_count: int = 0
         self._last_entry_hash: str = GENESIS_PREVIOUS_HASH
         self._last_sequence: int = -1
+        self._is_closed: bool = False
 
     @property
     def journal_path(self) -> Path:
@@ -89,9 +90,22 @@ class JournalWriter:
     def last_sequence(self) -> int:
         return self._last_sequence
 
+    @property
+    def is_closed(self) -> bool:
+        """Indicate whether the journal writer lifecycle state is closed."""
+        return self._is_closed
+
     def initialize_storage(self) -> None:
         """Create storage root directory if missing."""
         self._storage_root.mkdir(parents=True, exist_ok=True)
+
+    def flush(self) -> None:
+        """Flush pending writes to storage (no-op as writes are per-append synchronous)."""
+        pass
+
+    def close(self) -> None:
+        """Close writer lifecycle state, rejecting subsequent append_entry calls."""
+        self._is_closed = True
 
     def append_entry(
         self,
@@ -102,6 +116,11 @@ class JournalWriter:
         entry_id: Optional[str] = None,
     ) -> JournalEntry:
         """Append a cryptographically chained entry to the session journal."""
+        if self._is_closed:
+            raise PersistenceLifecycleError(
+                f"JournalWriter for session {self._session_id} is closed"
+            )
+
         if self._in_transaction:
             raise PersistenceLifecycleError("Reentrant call to append_entry rejected by transaction guard")
 

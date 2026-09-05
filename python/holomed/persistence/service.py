@@ -392,6 +392,61 @@ class PersistenceService(IService):
             raise PersistenceResourceIntegrityError("Session store uninitialized")
         return self._session_store.get_session(session_id)
 
+    def has_session(self, session_id: str) -> bool:
+        """Return True if session_id is present in memory store."""
+        if self._session_store is None:
+            return False
+        return self._session_store.has_session(session_id)
+
+    @property
+    def session_count(self) -> int:
+        """Return count of in-memory durable sessions."""
+        if self._session_store is None:
+            return 0
+        return self._session_store.session_count
+
+    def evict_session(self, session_id: str, capability: Any) -> bool:
+        """Evict session-scoped durable session records from memory (M35).
+
+        Validates session_id format, enforces reentrancy guards,
+        enforces strict fail-closed SESSION_TEARDOWN capability binding
+        (capability is not None and requested session_id == capability.session_id),
+        and delegates to DurableSessionStore.
+
+        Returns:
+            True if evicted, False otherwise.
+
+        Raises:
+            PersistenceLifecycleError: If called reentrantly or session is ACTIVE.
+            PersistenceSecurityError: If capability is missing, invalid, inactive, or mismatched.
+        """
+        if not isinstance(session_id, str) or not session_id.strip():
+            return False
+
+        if capability is None:
+            raise PersistenceSecurityError("Missing execution capability for session eviction")
+        if not getattr(capability, "is_active", False):
+            raise PersistenceSecurityError("Teardown capability is inactive or expired")
+        if getattr(capability, "action", None) != "SESSION_TEARDOWN":
+            raise PersistenceSecurityError(
+                f"Capability action mismatch: expected 'SESSION_TEARDOWN', got {getattr(capability, 'action', None)!r}"
+            )
+        if getattr(capability, "session_id", None) != session_id:
+            raise PersistenceSecurityError(
+                f"Capability session mismatch: expected {session_id!r}, got {getattr(capability, 'session_id', None)!r}"
+            )
+
+        if self._in_transaction:
+            raise PersistenceLifecycleError("Reentrant call to evict_session rejected by transaction guard")
+
+        self._in_transaction = True
+        try:
+            if self._session_store is None:
+                return False
+            return self._session_store.evict_session(session_id)
+        finally:
+            self._in_transaction = False
+
     def record_audit(
         self,
         audit_report: Mapping[str, Any],
