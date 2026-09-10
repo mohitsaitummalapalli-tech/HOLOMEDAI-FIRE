@@ -1199,6 +1199,15 @@ class TestEndToEndRecoveryReentryIntegration:
 
         mock_nav = MagicMock()
         mock_rec = MagicMock()
+        mock_plan = MagicMock()
+        mock_plan.get_plan_for_session.return_value = MagicMock(
+            plan_id="plan-e2e-01",
+            is_locked=True,
+            trajectories=(MagicMock(trajectory_id="traj-tumor-01"),),
+        )
+        mock_nav._planning_service = mock_plan
+        mock_rec._planning_service = mock_plan
+        mock_nav.get_bound_trajectory.return_value = MagicMock(trajectory_id="traj-tumor-01")
         logger = StructuredLogger("e2e_test_logger", secret_filter=secret_filter)
         disp_exec = MessageDispatcher()
         disp_exec.initialize(runtime_context)
@@ -1208,6 +1217,7 @@ class TestEndToEndRecoveryReentryIntegration:
             workflow_service=wf_svc,
             navigation_service=mock_nav,
             recovery_service=mock_rec,
+            planning_service=mock_plan,
             persistence_service=mock_persistence,
             secret_filter=secret_filter,
             logger=logger,

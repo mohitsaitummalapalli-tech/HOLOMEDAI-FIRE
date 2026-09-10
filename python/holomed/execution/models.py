@@ -56,14 +56,14 @@ class ExecutionStatus(str, enum.Enum):
 
 @dataclass(frozen=True)
 class NavigationExecutionRequest:
-    """Explicit request to execute real-time navigation under dual-gate evaluation."""
+    """Canonical invocation envelope requesting an atomic navigation cycle."""
 
     session_id: str
     sequence_number: int
     now_utc: str
     instrument_id: str
-    target_trajectory_id: str
     pose: TrackedInstrumentPose
+    target_trajectory_id: Optional[str] = None
     action: SafetyGateAction = SafetyGateAction.TOOL_NAVIGATION
     tool_safety_classification: Optional[ToolSafetyClassification] = None
 
@@ -76,8 +76,9 @@ class NavigationExecutionRequest:
             raise ExecutionValidationError("now_utc must be a non-empty ISO-8601 string")
         if not isinstance(self.instrument_id, str) or not INSTRUMENT_ID_REGEX.match(self.instrument_id):
             raise ExecutionValidationError(f"Invalid instrument_id: {self.instrument_id!r}")
-        if not isinstance(self.target_trajectory_id, str) or not TRAJECTORY_ID_REGEX.match(self.target_trajectory_id):
-            raise ExecutionValidationError(f"Invalid target_trajectory_id: {self.target_trajectory_id!r}")
+        if self.target_trajectory_id is not None:
+            if not isinstance(self.target_trajectory_id, str) or not TRAJECTORY_ID_REGEX.match(self.target_trajectory_id):
+                raise ExecutionValidationError(f"Invalid target_trajectory_id: {self.target_trajectory_id!r}")
         if not isinstance(self.pose, TrackedInstrumentPose):
             raise ExecutionValidationError(f"pose must be a TrackedInstrumentPose, got {type(self.pose).__name__}")
         if self.action != SafetyGateAction.TOOL_NAVIGATION:
@@ -178,7 +179,7 @@ class RecoveryReorientationExecutionRequest:
     plan_trajectory: Optional[TrajectoryPlan] = None
     zones: Optional[Tuple[SafetyExclusionZone, ...]] = None
     landmarks: Optional[Tuple[LandmarkDefinition, ...]] = None
-    registration_error_mm: float = 0.5
+    registration_error_mm: Optional[float] = None
     static_margin_mm: float = 0.0
     recovery_operation: str = "STATUS"  # "STAGE" | "VERIFY" | "ACTIVATE" | "RESET" | "STATUS"
 

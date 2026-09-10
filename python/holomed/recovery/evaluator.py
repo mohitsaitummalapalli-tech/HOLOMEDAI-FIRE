@@ -185,9 +185,9 @@ class RecoveryEvaluator:
         # 3. M15 Proximity Service Check
         if proximity_service is not None:
             prox_status = proximity_service.get_proximity_status(session_id)
-            if prox_status.state.value != "SAFE":
+            if prox_status.state.value not in ("SAFE", "CLEAR"):
                 raise RecoveryConsistencyError(
-                    f"M15 ProximityService state is {prox_status.state.value!r}, expected 'SAFE'"
+                    f"M15 ProximityService state is {prox_status.state.value!r}, expected 'CLEAR' or 'SAFE'"
                 )
             if prox_status.epoch_id != epoch_id:
                 raise RecoveryConsistencyError(
@@ -205,7 +205,10 @@ class RecoveryEvaluator:
                 raise RecoveryConsistencyError(
                     f"M14 NavigationService epoch ({nav_status.epoch_id}) does not match runtime epoch ({epoch_id})"
                 )
-            if not nav_status.has_bound_trajectory:
+            has_bound = getattr(nav_status, "has_bound_trajectory", None)
+            if has_bound is None:
+                has_bound = getattr(nav_status, "trajectory_id", None) is not None
+            if not has_bound:
                 raise RecoveryConsistencyError(
                     f"M14 NavigationService for session {session_id!r} does not have a bound trajectory"
                 )

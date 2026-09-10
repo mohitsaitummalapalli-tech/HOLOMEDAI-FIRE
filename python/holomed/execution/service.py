@@ -352,6 +352,128 @@ class ClinicalExecutionGatewayService(IService):
                     f"Pose sequence_number {request.pose.sequence_number} does not match request {request.sequence_number}"
                 )
 
+            # 1.1 Authoritative Plan & Trajectory Identity Verification
+            early_gate_decision = GateDecision.DENIED_INTERLOCKED
+            early_gate_reason = GateReasonCode.NONE
+
+            if self._planning_service is None:
+                res = NavigationExecutionResult(
+                    session_id=session_id,
+                    execution_status=ExecutionStatus.FAILED_NAVIGATION_GEOMETRY,
+                    gate_decision=early_gate_decision,
+                    gate_reason_code=early_gate_reason,
+                    action=request.action,
+                    sequence_number=request.sequence_number,
+                    instrument_id=request.instrument_id,
+                    target_trajectory_id=request.target_trajectory_id or "",
+                    executed_at_utc=request.now_utc,
+                    error_message="PlanningService handle is unavailable; cannot verify plan ownership",
+                )
+                self._record_execution_result(res)
+                return res
+
+            session_plan = self._planning_service.get_plan_for_session(session_id)
+            if session_plan is None:
+                res = NavigationExecutionResult(
+                    session_id=session_id,
+                    execution_status=ExecutionStatus.FAILED_NAVIGATION_GEOMETRY,
+                    gate_decision=early_gate_decision,
+                    gate_reason_code=early_gate_reason,
+                    action=request.action,
+                    sequence_number=request.sequence_number,
+                    instrument_id=request.instrument_id,
+                    target_trajectory_id=request.target_trajectory_id or "",
+                    executed_at_utc=request.now_utc,
+                    error_message=f"No surgical plan bound to session {session_id!r}",
+                )
+                self._record_execution_result(res)
+                return res
+
+            if not session_plan.is_locked:
+                res = NavigationExecutionResult(
+                    session_id=session_id,
+                    execution_status=ExecutionStatus.FAILED_NAVIGATION_GEOMETRY,
+                    gate_decision=early_gate_decision,
+                    gate_reason_code=early_gate_reason,
+                    action=request.action,
+                    sequence_number=request.sequence_number,
+                    instrument_id=request.instrument_id,
+                    target_trajectory_id=request.target_trajectory_id or "",
+                    executed_at_utc=request.now_utc,
+                    error_message=f"Authoritative plan {session_plan.plan_id!r} bound to session {session_id!r} is not locked",
+                )
+                self._record_execution_result(res)
+                return res
+
+            if self._navigation_service is None:
+                res = NavigationExecutionResult(
+                    session_id=session_id,
+                    execution_status=ExecutionStatus.FAILED_NAVIGATION_GEOMETRY,
+                    gate_decision=early_gate_decision,
+                    gate_reason_code=early_gate_reason,
+                    action=request.action,
+                    sequence_number=request.sequence_number,
+                    instrument_id=request.instrument_id,
+                    target_trajectory_id=request.target_trajectory_id or "",
+                    executed_at_utc=request.now_utc,
+                    error_message="NavigationService handle is unavailable",
+                )
+                self._record_execution_result(res)
+                return res
+
+            bound_traj = self._navigation_service.get_bound_trajectory(session_id)
+            if bound_traj is None:
+                res = NavigationExecutionResult(
+                    session_id=session_id,
+                    execution_status=ExecutionStatus.FAILED_NAVIGATION_GEOMETRY,
+                    gate_decision=early_gate_decision,
+                    gate_reason_code=early_gate_reason,
+                    action=request.action,
+                    sequence_number=request.sequence_number,
+                    instrument_id=request.instrument_id,
+                    target_trajectory_id=request.target_trajectory_id or "",
+                    executed_at_utc=request.now_utc,
+                    error_message=f"No trajectory bound for session {session_id!r}",
+                )
+                self._record_execution_result(res)
+                return res
+
+            plan_trajectories = session_plan.trajectories.values() if isinstance(session_plan.trajectories, dict) else session_plan.trajectories
+            if not any(getattr(t, "trajectory_id", None) == bound_traj.trajectory_id for t in plan_trajectories):
+                res = NavigationExecutionResult(
+                    session_id=session_id,
+                    execution_status=ExecutionStatus.FAILED_NAVIGATION_GEOMETRY,
+                    gate_decision=early_gate_decision,
+                    gate_reason_code=early_gate_reason,
+                    action=request.action,
+                    sequence_number=request.sequence_number,
+                    instrument_id=request.instrument_id,
+                    target_trajectory_id=request.target_trajectory_id or bound_traj.trajectory_id,
+                    executed_at_utc=request.now_utc,
+                    error_message=f"Bound trajectory {bound_traj.trajectory_id!r} not found in authoritative plan {session_plan.plan_id!r}",
+                )
+                self._record_execution_result(res)
+                return res
+
+            if request.target_trajectory_id is not None:
+                if request.target_trajectory_id != bound_traj.trajectory_id:
+                    res = NavigationExecutionResult(
+                        session_id=session_id,
+                        execution_status=ExecutionStatus.FAILED_NAVIGATION_GEOMETRY,
+                        gate_decision=early_gate_decision,
+                        gate_reason_code=early_gate_reason,
+                        action=request.action,
+                        sequence_number=request.sequence_number,
+                        instrument_id=request.instrument_id,
+                        target_trajectory_id=request.target_trajectory_id,
+                        executed_at_utc=request.now_utc,
+                        error_message=f"Target trajectory {request.target_trajectory_id!r} does not match active bound trajectory {bound_traj.trajectory_id!r}",
+                    )
+                    self._record_execution_result(res)
+                    return res
+
+            effective_trajectory_id = bound_traj.trajectory_id
+
             # 2. Step 1: Inline M18 Safety Gate Evaluation (Zero Cached Decisions)
             gate_decision = GateDecision.DENIED_INTERLOCKED
             gate_reason = GateReasonCode.NONE
@@ -362,7 +484,7 @@ class ClinicalExecutionGatewayService(IService):
                     sequence_number=request.sequence_number,
                     now_utc=request.now_utc,
                     instrument_id=request.instrument_id,
-                    target_trajectory_id=request.target_trajectory_id,
+                    target_trajectory_id=effective_trajectory_id,
                 )
                 gate_rec = self._safety_gate_service.evaluate(gate_req)
                 gate_decision = gate_rec.decision
@@ -382,7 +504,7 @@ class ClinicalExecutionGatewayService(IService):
                     action=request.action,
                     sequence_number=request.sequence_number,
                     instrument_id=request.instrument_id,
-                    target_trajectory_id=request.target_trajectory_id,
+                    target_trajectory_id=effective_trajectory_id,
                     executed_at_utc=request.now_utc,
                     error_message=f"Blocked by M18 safety gate: {gate_reason.value}",
                 )
@@ -408,7 +530,7 @@ class ClinicalExecutionGatewayService(IService):
                             action=request.action,
                             sequence_number=request.sequence_number,
                             instrument_id=request.instrument_id,
-                            target_trajectory_id=request.target_trajectory_id,
+                            target_trajectory_id=effective_trajectory_id,
                             executed_at_utc=request.now_utc,
                             workflow_status=wf_status,
                             error_message=f"Blocked by M10 workflow: {wf_status.value}",
@@ -426,7 +548,7 @@ class ClinicalExecutionGatewayService(IService):
                             action=request.action,
                             sequence_number=request.sequence_number,
                             instrument_id=request.instrument_id,
-                            target_trajectory_id=request.target_trajectory_id,
+                            target_trajectory_id=effective_trajectory_id,
                             executed_at_utc=request.now_utc,
                             error_message=f"Blocked by M10 workflow phase: {wf_state.current_phase.value}",
                         )
@@ -434,22 +556,6 @@ class ClinicalExecutionGatewayService(IService):
                         return res
 
             # 4. Step 3: M14 Navigation Pose Validation & Geometric Deviation Calculation
-            if self._navigation_service is None:
-                res = NavigationExecutionResult(
-                    session_id=session_id,
-                    execution_status=ExecutionStatus.FAILED_NAVIGATION_GEOMETRY,
-                    gate_decision=gate_decision,
-                    gate_reason_code=gate_reason,
-                    action=request.action,
-                    sequence_number=request.sequence_number,
-                    instrument_id=request.instrument_id,
-                    target_trajectory_id=request.target_trajectory_id,
-                    executed_at_utc=request.now_utc,
-                    error_message="NavigationService handle is unavailable",
-                )
-                self._record_execution_result(res)
-                return res
-
             deviation_rec: Optional[TrajectoryDeviationRecord] = None
             cap_pose = _create_execution_capability(
                 service_instance_id=id(self._navigation_service),
@@ -487,7 +593,7 @@ class ClinicalExecutionGatewayService(IService):
                     action=request.action,
                     sequence_number=request.sequence_number,
                     instrument_id=request.instrument_id,
-                    target_trajectory_id=request.target_trajectory_id,
+                    target_trajectory_id=effective_trajectory_id,
                     executed_at_utc=request.now_utc,
                     workflow_status=wf_status,
                     error_message=redacted,
@@ -510,7 +616,7 @@ class ClinicalExecutionGatewayService(IService):
                 action=request.action,
                 sequence_number=request.sequence_number,
                 instrument_id=request.instrument_id,
-                target_trajectory_id=request.target_trajectory_id,
+                target_trajectory_id=effective_trajectory_id,
                 executed_at_utc=request.now_utc,
                 workflow_status=wf_status,
                 deviation_record=deviation_rec,

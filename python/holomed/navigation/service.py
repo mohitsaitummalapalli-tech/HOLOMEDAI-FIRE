@@ -96,6 +96,8 @@ class NavigationService(IService):
         # Session tracking state
         # session_id -> bound TrajectoryPlan (in patient_tracker_frame)
         self._bound_trajectories: Dict[str, TrajectoryPlan] = {}
+        # session_id -> authoritative TrajectoryPlan from locked plan
+        self._canonical_trajectories: Dict[str, TrajectoryPlan] = {}
         # (session_id, instrument_id) -> latest TrackedInstrumentPose
         self._latest_poses: Dict[Tuple[str, str], TrackedInstrumentPose] = {}
         # (session_id, instrument_id) -> latest sequence_number
@@ -329,6 +331,7 @@ class NavigationService(IService):
             # Transform authoritative trajectory into patient tracker frame (mm)
             physical_traj = transform_trajectory(reg_record.transform, authoritative_traj)
             self._bound_trajectories[session_id] = physical_traj
+            self._canonical_trajectories[session_id] = authoritative_traj
             self._session_states[session_id] = NavigationState.IDLE
 
             self._emit_event(
@@ -451,6 +454,10 @@ class NavigationService(IService):
 
         self._in_transaction = True
         try:
+            # Check PlanningService availability (fail closed)
+            if self._planning_service is None:
+                raise NavigationLifecycleError("PlanningService is required for navigation evaluation but not configured")
+
             # Verify active M13 registration validity
             if self._registration_service is not None:
                 reg = self._registration_service.get_registration(session_id)
@@ -461,10 +468,36 @@ class NavigationService(IService):
                         f"Registration for session {session_id!r} is not verified; navigation interlocked"
                     )
 
+            # TOCTOU check on authoritative plan lock and trajectory membership
+            session_plan = self._planning_service.get_plan_for_session(session_id)
+            if session_plan is None or not session_plan.is_locked:
+                self._session_states[session_id] = NavigationState.INTERLOCKED
+                raise NavigationRegistrationMismatchError(
+                    f"Authoritative plan for session {session_id!r} is missing or unlocked; navigation interlocked"
+                )
+
             if session_id not in self._bound_trajectories:
                 raise NavigationLifecycleError(f"No trajectory bound for session {session_id!r}")
 
             traj = self._bound_trajectories[session_id]
+
+            # Verify bound trajectory still exists in current authoritative locked plan
+            plan_traj = next((t for t in session_plan.trajectories if t.trajectory_id == traj.trajectory_id), None)
+            if plan_traj is None:
+                self._session_states[session_id] = NavigationState.INTERLOCKED
+                raise NavigationRegistrationMismatchError(
+                    f"Bound trajectory {traj.trajectory_id!r} is not in authoritative plan {session_plan.plan_id!r}; navigation interlocked"
+                )
+
+            canonical_traj = self._canonical_trajectories.get(session_id)
+            if canonical_traj is not None:
+                try:
+                    validate_trajectory_integrity(plan_traj, canonical_traj)
+                except Exception as e:
+                    self._session_states[session_id] = NavigationState.INTERLOCKED
+                    raise NavigationRegistrationMismatchError(
+                        f"Canonical trajectory {traj.trajectory_id!r} in authoritative plan differs from bound trajectory: {e}"
+                    ) from e
             target_inst = instrument_id or self._active_instruments.get(session_id)
             if not target_inst or (session_id, target_inst) not in self._latest_poses:
                 raise NavigationValidationError(f"No active pose submitted for session {session_id!r}")
@@ -532,6 +565,10 @@ class NavigationService(IService):
             updated_at_utc=now_utc,
         )
 
+    def get_bound_trajectory(self, session_id: str) -> Optional[TrajectoryPlan]:
+        """Return the active bound trajectory for a session in patient tracker frame, if any."""
+        return self._bound_trajectories.get(session_id)
+
     def evict_session(self, session_id: str, capability: Optional[Any] = None) -> bool:
         """Evict session-scoped navigation states, poses, sequences, and deviations, releasing capacity (M25)."""
         if self._in_transaction:
@@ -542,6 +579,9 @@ class NavigationService(IService):
             evicted = True
         if session_id in self._bound_trajectories:
             del self._bound_trajectories[session_id]
+            evicted = True
+        if session_id in self._canonical_trajectories:
+            del self._canonical_trajectories[session_id]
             evicted = True
         pose_keys_to_del = [k for k in self._latest_poses if k[0] == session_id]
         for k in pose_keys_to_del:
@@ -564,6 +604,7 @@ class NavigationService(IService):
 
         """Clear all session states and stored telemetry."""
         self._bound_trajectories.clear()
+        self._canonical_trajectories.clear()
         self._latest_poses.clear()
         self._latest_sequences.clear()
         self._latest_deviations.clear()

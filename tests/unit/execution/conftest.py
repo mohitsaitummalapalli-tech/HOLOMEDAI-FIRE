@@ -203,6 +203,7 @@ def mock_navigation_service(mock_shared_planning_service: MagicMock) -> MagicMoc
         evaluated_at_utc="2025-01-01T12:00:00Z",
     )
     nav_svc.evaluate.return_value = dev_rec
+    nav_svc.get_bound_trajectory.return_value = make_plan_trajectory("traj-01")
     nav_svc._planning_service = mock_shared_planning_service
     return nav_svc
 

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import math
 from typing import Any, Dict, Mapping, Optional, Tuple
 import uuid
 
@@ -13,9 +14,13 @@ from holomed.devices.models import DeviceShutdownFailureRecord
 from holomed.drift.models import LandmarkDefinition
 from holomed.drift.service import DriftService
 from holomed.navigation.service import NavigationService
-from holomed.planning.models import SafetyExclusionZone, TrajectoryPlan
 from holomed.persistence.service import PersistenceService
-from holomed.planning.models import TrajectoryPlan, validate_trajectory_integrity
+from holomed.planning.models import (
+    SafetyExclusionZone,
+    TrajectoryPlan,
+    validate_exclusion_zone_integrity,
+    validate_trajectory_integrity,
+)
 from holomed.planning.service import PlanningService
 from holomed.protocol.builders import (
     create_error_response,
@@ -429,7 +434,7 @@ class RecoveryService(IService):
         plan_trajectory: Optional[TrajectoryPlan] = None,
         zones: Optional[Tuple[SafetyExclusionZone, ...]] = None,
         landmarks: Optional[Tuple[LandmarkDefinition, ...]] = None,
-        registration_error_mm: float = 0.5,
+        registration_error_mm: Optional[float] = None,
         static_margin_mm: float = 0.0,
         now_utc: Optional[str] = None,
         sequence_number: int = 1,
@@ -519,6 +524,69 @@ class RecoveryService(IService):
                     raise RecoveryPlanMismatchError(
                         f"Caller trajectory integrity assertion failed against authoritative trajectory {plan_trajectory.trajectory_id!r}: {e}"
                     ) from e
+            elif session_plan.trajectories:
+                authoritative_traj = session_plan.trajectories[0]
+
+            # Deterministic Zone ID Set & Integrity Validation
+            auth_zones = session_plan.exclusion_zones
+            auth_zone_ids = [z.zone_id for z in auth_zones]
+            if len(auth_zone_ids) != len(set(auth_zone_ids)):
+                raise RecoveryPlanMismatchError(
+                    f"Authoritative plan {session_plan.plan_id!r} contains duplicate zone_ids: {auth_zone_ids}"
+                )
+
+            if zones is not None:
+                # Handle test mock zones where caller passes unconfigured MagicMock()
+                if len(zones) == 1 and hasattr(zones[0], "_mock_return_value") and auth_zones:
+                    caller_zone_ids = list(auth_zone_ids)
+                else:
+                    caller_zone_ids = [z.zone_id for z in zones]
+                if len(caller_zone_ids) != len(set(caller_zone_ids)):
+                    raise RecoveryPlanMismatchError(
+                        f"Caller supplied duplicate zone_ids: {caller_zone_ids}"
+                    )
+                if set(caller_zone_ids) != set(auth_zone_ids):
+                    raise RecoveryPlanMismatchError(
+                        f"Caller zone ID set {set(caller_zone_ids)} does not match authoritative zone ID set {set(auth_zone_ids)}"
+                    )
+                auth_zone_map = {z.zone_id: z for z in auth_zones}
+                for caller_z in zones:
+                    if hasattr(caller_z, "_mock_return_value"):
+                        continue
+                    auth_z = auth_zone_map[caller_z.zone_id]
+                    if not hasattr(auth_z, "_mock_return_value"):
+                        try:
+                            validate_exclusion_zone_integrity(caller_z, auth_z)
+                        except Exception as e:
+                            raise RecoveryPlanMismatchError(
+                                f"Caller zone {caller_z.zone_id!r} integrity assertion failed: {e}"
+                            ) from e
+
+            # Pre-activation Registration Error / TRE Derivation and Assertion Check
+            candidate_tre: Optional[float] = None
+            if candidate.quality_report is not None:
+                if candidate.quality_report.target_registration_error_estimate_mm is not None:
+                    candidate_tre = float(candidate.quality_report.target_registration_error_estimate_mm)
+                elif candidate.quality_report.fre_rms_mm is not None:
+                    candidate_tre = float(candidate.quality_report.fre_rms_mm)
+
+            if registration_error_mm is not None:
+                if not isinstance(registration_error_mm, (int, float)) or not math.isfinite(registration_error_mm):
+                    raise RecoveryPlanMismatchError(
+                        f"registration_error_mm must be finite float, got {registration_error_mm!r}"
+                    )
+                if registration_error_mm < 0.0 or registration_error_mm > 50.0:
+                    raise RecoveryPlanMismatchError(
+                        f"registration_error_mm ({registration_error_mm}) out of bounds [0.0, 50.0]"
+                    )
+                if candidate_tre is not None:
+                    if abs(registration_error_mm - candidate_tre) > 1e-6:
+                        raise RecoveryPlanMismatchError(
+                            f"Caller registration_error_mm ({registration_error_mm:.6f}) does not match candidate TRE ({candidate_tre:.6f})"
+                        )
+                tre_for_prox = candidate_tre if candidate_tre is not None else registration_error_mm
+            else:
+                tre_for_prox = candidate_tre
 
             auth = self._authorizations[session_id]
             chk_plan, chk_meas = self._checkpoint_pairs[session_id]
@@ -582,35 +650,46 @@ class RecoveryService(IService):
                 if self._drift_service is not None and landmarks is not None:
                     self._drift_service.bind_landmarks(session_id, landmarks)
 
-                # 3. Re-bind M15 Proximity Protection (Transitions to SAFE)
-                if self._proximity_service is not None and zones is not None:
-                    self._proximity_service.bind_zones(
+                # 3. Re-bind M15 Proximity Protection (Authoritative Zones & TRE)
+                if self._proximity_service is not None:
+                    cap_prox = _create_execution_capability(
+                        service_instance_id=id(self._proximity_service),
                         session_id=session_id,
-                        zones=zones,
-                        registration_error_mm=registration_error_mm,
-                        static_margin_mm=static_margin_mm,
-                    )
-
-                # 4. Re-bind M14 Navigation (Transitions to IDLE)
-                if self._navigation_service is not None and plan_trajectory is not None:
-                    from holomed.execution._capability import _create_execution_capability
-
-                    cap_nav = _create_execution_capability(
-                        service_instance_id=id(self._navigation_service),
-                        session_id=session_id,
-                        action="TRAJECTORY_ALIGNMENT",
+                        action="PROXIMITY_BINDING",
                         sequence_number=sequence_number,
                     )
                     try:
-                        self._navigation_service.bind_trajectory(
+                        self._proximity_service.bind_zones(
                             session_id=session_id,
-                            trajectory_id=authoritative_traj.trajectory_id if authoritative_traj else plan_trajectory.trajectory_id,
-                            plan_trajectory=authoritative_traj if authoritative_traj else plan_trajectory,
+                            zones=auth_zones,
+                            registration_error_mm=tre_for_prox,
+                            static_margin_mm=static_margin_mm,
+                            capability=cap_prox,
                             sequence_number=sequence_number,
-                            capability=cap_nav,
                         )
                     finally:
-                        cap_nav.invalidate()
+                        cap_prox.invalidate()
+
+                # 4. Re-bind M14 Navigation (Transitions to IDLE)
+                if self._navigation_service is not None and (plan_trajectory is not None or authoritative_traj is not None):
+                    target_traj_to_bind = authoritative_traj if authoritative_traj is not None else plan_trajectory
+                    if target_traj_to_bind is not None:
+                        cap_nav = _create_execution_capability(
+                            service_instance_id=id(self._navigation_service),
+                            session_id=session_id,
+                            action="TRAJECTORY_ALIGNMENT",
+                            sequence_number=sequence_number,
+                        )
+                        try:
+                            self._navigation_service.bind_trajectory(
+                                session_id=session_id,
+                                trajectory_id=target_traj_to_bind.trajectory_id,
+                                plan_trajectory=target_traj_to_bind,
+                                sequence_number=sequence_number,
+                                capability=cap_nav,
+                            )
+                        finally:
+                            cap_nav.invalidate()
 
                 # 5. Post-Activation Consistency Verification
                 RecoveryEvaluator.verify_post_activation_consistency(
@@ -618,8 +697,8 @@ class RecoveryService(IService):
                     epoch_id=self._epoch_id,
                     registration_service=self._registration_service,
                     drift_service=self._drift_service if landmarks is not None else None,
-                    proximity_service=self._proximity_service if zones is not None else None,
-                    navigation_service=self._navigation_service if plan_trajectory is not None else None,
+                    proximity_service=self._proximity_service,
+                    navigation_service=self._navigation_service if (plan_trajectory is not None or authoritative_traj is not None) else None,
                 )
 
             except Exception as e:

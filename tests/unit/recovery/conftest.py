@@ -168,6 +168,12 @@ def mock_registration_service() -> MagicMock:
         mock_traj = MagicMock()
         mock_traj.trajectory_id = "traj-01"
         p.trajectories = (mock_traj,)
+        mock_zone = MagicMock()
+        mock_zone.zone_id = "zone-01"
+        mock_zone.bounding_radius_mm = 10.0
+        mock_zone.min_clearance_mm = 5.0
+        mock_zone.center_point_mm = (0.0, 0.0, 0.0)
+        p.exclusion_zones = (mock_zone,)
         return p
     mock_planning.get_plan_for_session.side_effect = _get_plan_for_session
     reg_svc._planning_service = mock_planning
