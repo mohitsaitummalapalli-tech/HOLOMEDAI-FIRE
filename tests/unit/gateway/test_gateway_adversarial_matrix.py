@@ -85,15 +85,15 @@ def test_dispatcher_disconnect_command_and_client_list_query(
     srv.process_client_ingress(conn)
     assert srv.active_connections_count == 1
 
-    # Query gateway.clients
-    q_list = create_query("gateway.clients", "admin", payload={})
+    # Query gateway.clients (M34: requires session_id)
+    q_list = create_query("gateway.clients", "admin", payload={"session_id": "s1"})
     resp_list = message_dispatcher.dispatch(q_list)
     assert resp_list.message_type.value == "RESPONSE"
     assert len(resp_list.payload["clients"]) == 1
     assert resp_list.payload["clients"][0]["client_id"] == "client_to_disconnect"
 
-    # Command disconnect
-    cmd_disc = create_command("gateway.disconnect", "admin", payload={"client_id": "client_to_disconnect"})
+    # Command disconnect (M34: requires matching session_id)
+    cmd_disc = create_command("gateway.disconnect", "admin", payload={"client_id": "client_to_disconnect", "session_id": "s1"})
     resp_disc = message_dispatcher.dispatch(cmd_disc)
     assert resp_disc.message_type.value == "RESPONSE"
     assert resp_disc.payload["disconnected_client_id"] == "client_to_disconnect"

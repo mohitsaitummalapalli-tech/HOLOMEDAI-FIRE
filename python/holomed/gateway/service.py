@@ -445,7 +445,7 @@ class GatewayService(IService):
         return create_response(query_envelope, self.name, payload=payload)
 
     def handle_clients_query(self, query_envelope: MessageEnvelope) -> MessageEnvelope:
-        # Resolve caller session context (M31: isolate visibility to caller's session)
+        # Resolve caller session context (M31, M34: isolate visibility to caller's session fail-closed)
         caller_id = query_envelope.source
         caller_conn = self._connections.get(caller_id)
         if caller_conn is not None and caller_conn.session is not None:
@@ -457,6 +457,11 @@ class GatewayService(IService):
                 else None
             )
 
+        if not caller_session_id or not isinstance(caller_session_id, str) or not caller_session_id.strip():
+            return create_error_response(
+                query_envelope, self.name, "ERR_INVALID_ARGS", "Missing or invalid caller session_id"
+            )
+
         clients = [
             {
                 "client_id": conn.client_id,
@@ -466,7 +471,7 @@ class GatewayService(IService):
             }
             for cid, conn in sorted(self._connections.items())
             if conn.session is not None
-            and (caller_session_id is None or conn.session.session_id == caller_session_id)
+            and conn.session.session_id == caller_session_id
         ]
         return create_response(query_envelope, self.name, payload={"clients": clients})
 
@@ -498,10 +503,15 @@ class GatewayService(IService):
             caller_session_id = payload.get("session_id")
             caller_role = None
 
+        if not caller_session_id or not isinstance(caller_session_id, str) or not caller_session_id.strip():
+            return create_error_response(
+                command_envelope, self.name, "ERR_INVALID_ARGS", "Missing or invalid caller session_id"
+            )
+
         target_session_id = target_conn.session.session_id
 
-        # M31 Invariant A.1: Cross-session disconnect rejected
-        if caller_session_id is not None and target_session_id != caller_session_id:
+        # M31/M34 Invariant A.1: Cross-session disconnect rejected (fail-closed)
+        if target_session_id != caller_session_id:
             return create_error_response(
                 command_envelope,
                 self.name,
