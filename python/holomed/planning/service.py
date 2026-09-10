@@ -324,14 +324,26 @@ class PlanningService(IService):
                 is_locked=True,
                 created_at_utc=plan.created_at_utc or datetime.now(timezone.utc).isoformat(),
             )
+
+            # Derive and register checkpoints into M10 WorkflowService if connected (M33)
+            checkpoints = derive_checkpoints_from_plan(locked_plan)
+            registered_cids: list[str] = []
+            if self._workflow_service is not None:
+                try:
+                    for chk in checkpoints:
+                        self._workflow_service.register_checkpoint(chk, session_id=cap_session)
+                        registered_cids.append(chk.checkpoint_id)
+                except Exception:
+                    # Atomic rollback of any checkpoints registered in this batch
+                    for cid in registered_cids:
+                        try:
+                            self._workflow_service.unregister_checkpoint(cid, session_id=cap_session)
+                        except Exception:
+                            pass
+                    raise
+
             self._plans[plan_id] = locked_plan
             self._total_plans_locked += 1
-
-            # Derive and register checkpoints into M10 WorkflowService if connected
-            checkpoints = derive_checkpoints_from_plan(locked_plan)
-            if self._workflow_service is not None:
-                for chk in checkpoints:
-                    self._workflow_service.register_checkpoint(chk)
 
             self._emit_event(
                 "planning.plan.locked",

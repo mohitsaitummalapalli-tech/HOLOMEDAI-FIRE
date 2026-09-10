@@ -18,7 +18,7 @@ def test_anatomical_checkpoint_evaluation() -> None:
         min_confidence=0.80,
         max_uncertainty=0.20,
     )
-    validator.register_checkpoint(chk)
+    validator.register_checkpoint(chk, session_id="sess")
 
     # 1. Valid metrics -> Passed (status=True)
     it_ok = validator.evaluate_checkpoint("chk_femur", 0.90, 0.10, 1.2, 1, "sess")

@@ -5,7 +5,10 @@ from __future__ import annotations
 
 from typing import Mapping, Optional
 
-from holomed.workflow.exceptions import WorkflowCapacityError
+from holomed.workflow.exceptions import (
+    WorkflowCapacityError,
+    WorkflowValidationError,
+)
 from holomed.workflow.models import (
     MAX_REGISTERED_CHECKPOINTS,
     AnatomicalCheckpoint,
@@ -25,17 +28,50 @@ class AnatomicalCheckpointValidator:
     def checkpoint_count(self) -> int:
         return len(self._checkpoints)
 
-    def register_checkpoint(self, checkpoint: AnatomicalCheckpoint, session_id: Optional[str] = None) -> None:
-        """Register an anatomical checkpoint with optional session ownership."""
-        if len(self._checkpoints) >= MAX_REGISTERED_CHECKPOINTS and checkpoint.checkpoint_id not in self._checkpoints:
+    def register_checkpoint(self, checkpoint: AnatomicalCheckpoint, session_id: str) -> None:
+        """Register an anatomical checkpoint with mandatory session ownership (M33)."""
+        if not isinstance(session_id, str) or not session_id.strip():
+            raise WorkflowValidationError("session_id must be a non-empty string for checkpoint registration")
+
+        if not isinstance(checkpoint, AnatomicalCheckpoint):
+            raise WorkflowValidationError("checkpoint must be an AnatomicalCheckpoint instance")
+
+        cid = checkpoint.checkpoint_id
+        if cid in self._checkpoints:
+            # Check existing owner
+            owner_set = self._session_checkpoints.get(session_id, set())
+            if cid in owner_set:
+                # Same-owner duplicate: update definition in-place without incrementing capacity
+                self._checkpoints[cid] = checkpoint
+                return
+            # Cross-session duplicate: another session already owns this checkpoint ID
+            raise WorkflowValidationError(
+                f"Checkpoint {cid!r} is already registered under another session"
+            )
+
+        if len(self._checkpoints) >= MAX_REGISTERED_CHECKPOINTS:
             raise WorkflowCapacityError(
                 f"Registered checkpoint limit ({MAX_REGISTERED_CHECKPOINTS}) exceeded"
             )
-        self._checkpoints[checkpoint.checkpoint_id] = checkpoint
-        if session_id is not None:
-            if session_id not in self._session_checkpoints:
-                self._session_checkpoints[session_id] = set()
-            self._session_checkpoints[session_id].add(checkpoint.checkpoint_id)
+
+        # Atomic dual-store registration
+        self._checkpoints[cid] = checkpoint
+        if session_id not in self._session_checkpoints:
+            self._session_checkpoints[session_id] = set()
+        self._session_checkpoints[session_id].add(cid)
+
+    def unregister_checkpoint(self, checkpoint_id: str, session_id: str) -> bool:
+        """Unregister a specific checkpoint owned by session_id (for atomic rollback) (M33)."""
+        if not isinstance(session_id, str) or not session_id.strip():
+            return False
+        owner_set = self._session_checkpoints.get(session_id)
+        if owner_set is not None and checkpoint_id in owner_set:
+            owner_set.discard(checkpoint_id)
+            if not owner_set:
+                self._session_checkpoints.pop(session_id, None)
+            self._checkpoints.pop(checkpoint_id, None)
+            return True
+        return False
 
     def evaluate_checkpoint(
         self,
@@ -47,11 +83,34 @@ class AnatomicalCheckpointValidator:
         session_id: str,
     ) -> SafetyInterlock:
         """Evaluate a checkpoint against observation metrics and return a SafetyInterlock."""
-        if session_id:
-            if session_id not in self._session_checkpoints:
-                self._session_checkpoints[session_id] = set()
-            self._session_checkpoints[session_id].add(checkpoint_id)
+        # 1. Require valid session context
+        if not isinstance(session_id, str) or not session_id.strip():
+            return SafetyInterlock(
+                interlock_id=f"chk_missing_{checkpoint_id}",
+                severity=InterlockSeverity.BLOCKING,
+                condition_name="CHECKPOINT_MISSING",
+                status=False,
+                reason=f"Invalid session context for checkpoint {checkpoint_id}",
+                source_service="workflow_service",
+                epoch_id=epoch_id,
+                session_id=session_id if isinstance(session_id, str) else "unknown",
+            )
 
+        # 2. Verify ownership in session index (Do NOT mutate _session_checkpoints)
+        session_checkpoints = self._session_checkpoints.get(session_id)
+        if session_checkpoints is None or checkpoint_id not in session_checkpoints:
+            return SafetyInterlock(
+                interlock_id=f"chk_missing_{checkpoint_id}",
+                severity=InterlockSeverity.BLOCKING,
+                condition_name="CHECKPOINT_MISSING",
+                status=False,
+                reason=f"Checkpoint {checkpoint_id} not registered for session {session_id}",
+                source_service="workflow_service",
+                epoch_id=epoch_id,
+                session_id=session_id,
+            )
+
+        # 3. Locate checkpoint in canonical store
         cp = self._checkpoints.get(checkpoint_id)
         if cp is None:
             return SafetyInterlock(
@@ -116,7 +175,7 @@ class AnatomicalCheckpointValidator:
         )
 
     def evict_session(self, session_id: str) -> bool:
-        """Evict session-scoped checkpoints, releasing capacity (M27)."""
+        """Evict session-scoped checkpoints, releasing capacity (M27, M33)."""
         if not isinstance(session_id, str) or not session_id.strip():
             return False
         chk_ids = self._session_checkpoints.pop(session_id, None)

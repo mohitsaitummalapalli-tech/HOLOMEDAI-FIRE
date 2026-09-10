@@ -631,9 +631,15 @@ class WorkflowService(IService):
             )
         return decision
 
-    def register_checkpoint(self, checkpoint: AnatomicalCheckpoint, session_id: Optional[str] = None) -> None:
-        """Register an anatomical checkpoint for spatial verification with optional session ownership."""
+    def register_checkpoint(self, checkpoint: AnatomicalCheckpoint, session_id: str) -> None:
+        """Register an anatomical checkpoint for spatial verification with mandatory session ownership (M33)."""
+        if not isinstance(session_id, str) or not session_id.strip():
+            raise WorkflowValidationError("session_id must be a non-empty string for checkpoint registration")
         self._checkpoint_validator.register_checkpoint(checkpoint, session_id=session_id)
+
+    def unregister_checkpoint(self, checkpoint_id: str, session_id: str) -> bool:
+        """Unregister an anatomical checkpoint for atomic rollback (M33)."""
+        return self._checkpoint_validator.unregister_checkpoint(checkpoint_id, session_id=session_id)
 
     def evaluate_checkpoint(
         self,
