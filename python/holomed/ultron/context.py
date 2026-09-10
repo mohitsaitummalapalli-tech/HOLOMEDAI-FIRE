@@ -9,9 +9,9 @@ from types import MappingProxyType
 from typing import Optional, Sequence
 
 from holomed.ultron.models import (
-    MAX_CONTEXT_CONFLICTS,
-    MAX_CONTEXT_HISTORY,
-    MAX_CONTEXT_OBSERVATIONS,
+    MAX_SESSION_CONFLICTS,
+    MAX_SESSION_HISTORY,
+    MAX_SESSION_OBSERVATIONS,
     ModalityObservation,
     MultimodalContext,
     MultimodalEntity,
@@ -20,14 +20,19 @@ from holomed.ultron.models import (
 
 
 class MultimodalContextStore:
-    """Bounded, thread-free in-memory context store managing observations, entities, and conflicts."""
+    """Bounded, thread-free in-memory context store managing observations, entities, and conflicts for a clinical session."""
 
-    def __init__(self) -> None:
-        self._observations: deque[ModalityObservation] = deque(maxlen=MAX_CONTEXT_OBSERVATIONS)
-        self._conflicts: deque[ObservationConflict] = deque(maxlen=MAX_CONTEXT_CONFLICTS)
-        self._history: deque[MultimodalContext] = deque(maxlen=MAX_CONTEXT_HISTORY)
+    def __init__(self, session_id: Optional[str] = None) -> None:
+        self._session_id = session_id
+        self._observations: deque[ModalityObservation] = deque(maxlen=MAX_SESSION_OBSERVATIONS)
+        self._conflicts: deque[ObservationConflict] = deque(maxlen=MAX_SESSION_CONFLICTS)
+        self._history: deque[MultimodalContext] = deque(maxlen=MAX_SESSION_HISTORY)
         self._vision_features: dict[str, object] = {}
         self._audio_features: dict[str, object] = {}
+
+    @property
+    def session_id(self) -> Optional[str]:
+        return self._session_id
 
     @property
     def observation_count(self) -> int:
@@ -70,6 +75,7 @@ class MultimodalContextStore:
             active_gestures=tuple(active_gestures),
             vision_features=MappingProxyType(dict(self._vision_features)),
             audio_features=MappingProxyType(dict(self._audio_features)),
+            session_id=self._session_id,
         )
         self._history.append(ctx)
         return ctx

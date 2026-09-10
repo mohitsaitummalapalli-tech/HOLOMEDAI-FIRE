@@ -110,7 +110,7 @@ def test_d218_public_api_execution(
 
     # 5. Reset
     service.reset(epoch_id=1)
-    assert service.context_store.observation_count == 0
+    assert service.context_store is None
 
     # Reset with wrong epoch raises
     with pytest.raises(UltronEpochMismatchError):

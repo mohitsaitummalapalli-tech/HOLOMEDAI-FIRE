@@ -35,6 +35,7 @@ class IntentManager:
         parameters: Optional[Mapping[str, Any]] = None,
         explanation: str = "",
         timestamp_utc: Optional[str] = None,
+        session_id: Optional[str] = None,
     ) -> Optional[ActionIntent]:
         """Synthesize an ActionIntent and filter duplicates using D215 canonical key."""
         params = parameters or {}
@@ -66,7 +67,9 @@ class IntentManager:
             explanation=explanation,
             epoch_id=epoch_id,
             timestamp_utc=ts,
+            session_id=session_id,
         )
+
 
     def clear(self) -> None:
         """Clear all deduplication cache keys."""

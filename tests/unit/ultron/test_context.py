@@ -40,7 +40,7 @@ def test_context_store_bounded_capacities() -> None:
         )
         store.record_observation(obs)
 
-    assert store.observation_count == MAX_CONTEXT_OBSERVATIONS  # 256
+    assert store.observation_count == MAX_CONTEXT_OBSERVATIONS  # 128
 
     # Add 150 conflicts
     for i in range(150):
@@ -55,7 +55,7 @@ def test_context_store_bounded_capacities() -> None:
         )
         store.record_conflict(c)
 
-    assert store.conflict_count == MAX_CONTEXT_CONFLICTS  # 128
+    assert store.conflict_count == MAX_CONTEXT_CONFLICTS  # 64
 
     # Capture 70 snapshots
     dummy_entity = MultimodalEntity(
@@ -73,7 +73,7 @@ def test_context_store_bounded_capacities() -> None:
     for _ in range(70):
         store.capture_snapshot(epoch_id=1, entities=[dummy_entity])
 
-    assert store.history_count == MAX_CONTEXT_HISTORY  # 64
+    assert store.history_count == MAX_CONTEXT_HISTORY  # 32
 
 
 def test_context_store_clear() -> None:

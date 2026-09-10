@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime
 import enum
 import math
+import re
 from types import MappingProxyType
 from typing import Any, Mapping, Optional, Protocol, Tuple
 
@@ -18,11 +19,16 @@ from holomed.protocol.validation import (
 from holomed.ultron.exceptions import UltronValidationError
 
 # Canonical Constants
+SESSION_ID_REGEX = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
+MAX_ACTIVE_PERCEPTION_SESSIONS: int = 32
+MAX_SESSION_OBSERVATIONS: int = 128
+MAX_SESSION_CONFLICTS: int = 64
+MAX_SESSION_HISTORY: int = 32
 MAX_FUSION_TIME_SKEW_MS: float = 100.0
 MAX_MULTIMODAL_ENTITIES: int = 32
-MAX_CONTEXT_OBSERVATIONS: int = 256
-MAX_CONTEXT_CONFLICTS: int = 128
-MAX_CONTEXT_HISTORY: int = 64
+MAX_CONTEXT_OBSERVATIONS: int = 128
+MAX_CONTEXT_CONFLICTS: int = 64
+MAX_CONTEXT_HISTORY: int = 32
 MAX_REASONING_TRACE_STEPS: int = 128
 MAX_INTENT_KEYS: int = 2048
 MAX_RECORDED_ULTRON_EVENTS: int = 1000
@@ -111,6 +117,7 @@ class ModalityObservation:
     timestamp_utc: str
     confidence: float
     payload: Mapping[str, Any]
+    session_id: Optional[str] = None
 
     def __post_init__(self) -> None:
         try:
@@ -147,6 +154,10 @@ class ModalityObservation:
         if not (0.0 <= float(self.confidence) <= 1.0):
             raise UltronValidationError(f"confidence must be in [0.0, 1.0], got {self.confidence}")
 
+        if self.session_id is not None:
+            if not isinstance(self.session_id, str) or not SESSION_ID_REGEX.match(self.session_id):
+                raise UltronValidationError(f"Invalid session_id syntax: {self.session_id!r}")
+
         if not isinstance(self.payload, MappingProxyType):
             object.__setattr__(self, "payload", MappingProxyType(dict(self.payload)))
 
@@ -165,6 +176,7 @@ class MultimodalEntity:
     acoustic_direction: Optional[tuple[float, float]]
     source_modalities: frozenset[Modality]
     epoch_id: int
+    session_id: Optional[str] = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.entity_id, str) or not self.entity_id:
@@ -202,6 +214,7 @@ class ObservationConflict:
     severity: ConflictSeverity
     selected_source: Optional[Modality]
     explanation: str
+    session_id: Optional[str] = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.conflict_id, str) or not self.conflict_id:
@@ -227,6 +240,7 @@ class ActionIntent:
     explanation: str
     epoch_id: int
     timestamp_utc: str
+    session_id: Optional[str] = None
 
     def __post_init__(self) -> None:
         try:
@@ -243,6 +257,9 @@ class ActionIntent:
             validate_timestamp_utc(self.timestamp_utc)
         except Exception as e:
             raise UltronValidationError(f"Invalid timestamp_utc: {e}") from e
+        if self.session_id is not None:
+            if not isinstance(self.session_id, str) or not SESSION_ID_REGEX.match(self.session_id):
+                raise UltronValidationError(f"Invalid session_id syntax: {self.session_id!r}")
         if not isinstance(self.parameters, MappingProxyType):
             object.__setattr__(self, "parameters", MappingProxyType(dict(self.parameters)))
 
@@ -259,6 +276,7 @@ class MultimodalContext:
     active_gestures: tuple[str, ...]
     vision_features: Mapping[str, Any]
     audio_features: Mapping[str, Any]
+    session_id: Optional[str] = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "observations", tuple(self.observations))
@@ -283,11 +301,13 @@ class ReasoningTrace:
     intent_ids: tuple[str, ...]
     processing_time_ms: float
     degraded: bool
+    session_id: Optional[str] = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "input_observation_ids", tuple(self.input_observation_ids))
         object.__setattr__(self, "fired_rule_ids", tuple(self.fired_rule_ids))
         object.__setattr__(self, "conflict_ids", tuple(self.conflict_ids))
+
         object.__setattr__(self, "intent_ids", tuple(self.intent_ids))
 
 

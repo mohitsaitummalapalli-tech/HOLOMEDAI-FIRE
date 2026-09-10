@@ -55,6 +55,7 @@ def _action_pinch_select(ctx: MultimodalContext) -> tuple[ActionIntent, ...]:
             explanation="Pinch gesture detected: trigger selection intent.",
             epoch_id=ctx.epoch_id,
             timestamp_utc=now_utc,
+            session_id=ctx.session_id,
         ),
     )
 
@@ -76,6 +77,7 @@ def _action_point_highlight(ctx: MultimodalContext) -> tuple[ActionIntent, ...]:
             explanation="Pointing gesture detected: trigger highlight intent.",
             epoch_id=ctx.epoch_id,
             timestamp_utc=now_utc,
+            session_id=ctx.session_id,
         ),
     )
 
@@ -96,6 +98,7 @@ def _action_critical_conflict_confirmation(ctx: MultimodalContext) -> tuple[Acti
             explanation="Critical spatial/semantic modality discrepancy detected: request user confirmation.",
             epoch_id=ctx.epoch_id,
             timestamp_utc=now_utc,
+            session_id=ctx.session_id,
         ),
     )
 
@@ -181,6 +184,7 @@ class DeterministicRuleEngine:
                             parameters=raw_intent.parameters,
                             explanation=raw_intent.explanation,
                             timestamp_utc=context.timestamp_utc,
+                            session_id=context.session_id,
                         )
                         if deduped is not None:
                             intents.append(deduped)
@@ -203,12 +207,14 @@ class DeterministicRuleEngine:
             intent_ids=intent_ids[:MAX_REASONING_TRACE_STEPS],
             processing_time_ms=round(elapsed_ms, 3),
             degraded=degraded,
+            session_id=context.session_id,
         )
         self._traces.append(trace)
         if len(self._traces) > 128:
             self._traces.pop(0)
 
         return tuple(intents), trace
+
 
     def clear(self) -> None:
         """Clear all generated intents and reasoning traces."""

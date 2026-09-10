@@ -40,6 +40,10 @@ class UltronSequenceError(UltronError):
     """Raised when observation sequence number decreases or duplicates within a session."""
 
 
+class UltronSessionMismatchError(UltronValidationError):
+    """Raised when envelope session_id does not match payload session_id."""
+
+
 class UltronReasoningError(UltronError):
     """Raised when reasoning evaluation fails or encounters internal inconsistencies."""
 

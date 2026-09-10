@@ -186,9 +186,13 @@ class MultimodalFusionEngine:
             e_type = EntityType.HUMAN
 
         pos = obs.payload.get("position")
-        pos_tuple = tuple(float(v) for v in pos) if pos is not None else None
+        pos_tuple: Optional[tuple[float, float, float]] = (
+            (float(pos[0]), float(pos[1]), float(pos[2])) if pos is not None and len(pos) >= 3 else None
+        )
         acoustic = obs.payload.get("acoustic_direction")
-        acoustic_tuple = tuple(float(v) for v in acoustic) if acoustic is not None else None
+        acoustic_tuple: Optional[tuple[float, float]] = (
+            (float(acoustic[0]), float(acoustic[1])) if acoustic is not None and len(acoustic) >= 2 else None
+        )
         gestures = tuple(obs.payload.get("active_gestures", ()))
 
         eff_conf = compute_effective_confidence(obs.confidence, delta_ms, False)
@@ -204,6 +208,7 @@ class MultimodalFusionEngine:
             acoustic_direction=acoustic_tuple,
             source_modalities=frozenset({obs.modality}),
             epoch_id=epoch_id,
+            session_id=obs.session_id,
         )
         self._entities[entity_id] = entity
 
@@ -224,9 +229,17 @@ class MultimodalFusionEngine:
 
         # If spatial discrepancy between incoming obs and entity position
         pos = obs.payload.get("position")
-        pos_tuple = tuple(float(v) for v in pos) if pos is not None else entity.position
+        pos_tuple: Optional[tuple[float, float, float]] = (
+            (float(pos[0]), float(pos[1]), float(pos[2]))
+            if pos is not None and len(pos) >= 3
+            else entity.position
+        )
         acoustic = obs.payload.get("acoustic_direction")
-        acoustic_tuple = tuple(float(v) for v in acoustic) if acoustic is not None else entity.acoustic_direction
+        acoustic_tuple: Optional[tuple[float, float]] = (
+            (float(acoustic[0]), float(acoustic[1]))
+            if acoustic is not None and len(acoustic) >= 2
+            else entity.acoustic_direction
+        )
         gestures = entity.active_gestures + tuple(obs.payload.get("active_gestures", ()))
 
         # Update entity confidence as weighted average
@@ -243,5 +256,6 @@ class MultimodalFusionEngine:
             acoustic_direction=acoustic_tuple,
             source_modalities=all_modalities,
             epoch_id=epoch_id,
+            session_id=obs.session_id or entity.session_id,
         )
         self._entities[entity.entity_id] = updated_entity

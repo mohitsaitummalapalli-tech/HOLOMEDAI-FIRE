@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Master Ultron Domain Service implementing IService for M04."""
+"""Master Ultron Domain Service implementing IService for M04 with M38 Session Isolation."""
 
 from __future__ import annotations
 
@@ -32,15 +32,21 @@ from holomed.ultron.exceptions import (
     UltronCapacityError,
     UltronEpochMismatchError,
     UltronLifecycleError,
+    UltronReasoningError,
     UltronResourceIntegrityError,
+    UltronSequenceError,
+    UltronSessionMismatchError,
     UltronShutdownError,
     UltronValidationError,
 )
 from holomed.ultron.fusion import MultimodalFusionEngine
 from holomed.ultron.models import (
+    MAX_ACTIVE_PERCEPTION_SESSIONS,
+    SESSION_ID_REGEX,
     ActionIntent,
     ModalityObservation,
     MultimodalContext,
+    ObservationConflict,
 )
 from holomed.ultron.observation import SessionSequenceTracker
 from holomed.ultron.reasoning import DeterministicRuleEngine
@@ -56,7 +62,7 @@ STRUCTURAL_RESOURCE_IDS: tuple[str, ...] = (
 
 
 class UltronService(IService):
-    """Multimodal Intelligence & Deterministic Reasoning Service (Ultron)."""
+    """Multimodal Intelligence & Deterministic Reasoning Service (Ultron) with Session Isolation."""
 
     def __init__(
         self,
@@ -75,12 +81,14 @@ class UltronService(IService):
         self._resources: Optional[OwnedResourceSet] = None
         self._epoch_id: int = 0
 
-        # Subsystem Components
-        self._fusion_engine: Optional[MultimodalFusionEngine] = None
-        self._context_store: Optional[MultimodalContextStore] = None
-        self._rule_engine: Optional[DeterministicRuleEngine] = None
-        self._sequence_tracker: Optional[SessionSequenceTracker] = None
+        # Session-Partitioned Subsystem Components
+        self._session_stores: dict[str, MultimodalContextStore] = {}
+        self._session_fusion_engines: dict[str, MultimodalFusionEngine] = {}
+        self._session_rule_engines: dict[str, DeterministicRuleEngine] = {}
+        self._session_sequence_trackers: dict[str, SessionSequenceTracker] = {}
         self._event_sink: Optional[RecordingUltronEventSink] = None
+
+        self._default_session_id: str = "default_session"
 
         # Metrics
         self._processed_observations: int = 0
@@ -112,15 +120,24 @@ class UltronService(IService):
 
     @property
     def fusion_engine(self) -> Optional[MultimodalFusionEngine]:
-        return self._fusion_engine
+        if self._session_fusion_engines:
+            first_key = next(iter(self._session_fusion_engines.keys()))
+            return self._session_fusion_engines[first_key]
+        return None
 
     @property
     def context_store(self) -> Optional[MultimodalContextStore]:
-        return self._context_store
+        if self._session_stores:
+            first_key = next(iter(self._session_stores.keys()))
+            return self._session_stores[first_key]
+        return None
 
     @property
     def rule_engine(self) -> Optional[DeterministicRuleEngine]:
-        return self._rule_engine
+        if self._session_rule_engines:
+            first_key = next(iter(self._session_rule_engines.keys()))
+            return self._session_rule_engines[first_key]
+        return None
 
     @property
     def event_sink(self) -> Optional[RecordingUltronEventSink]:
@@ -139,11 +156,6 @@ class UltronService(IService):
         for res_id in STRUCTURAL_RESOURCE_IDS:
             self._resources.acquire(res_id)
 
-        # Instantiate components
-        self._fusion_engine = MultimodalFusionEngine()
-        self._context_store = MultimodalContextStore()
-        self._rule_engine = DeterministicRuleEngine()
-        self._sequence_tracker = SessionSequenceTracker()
         self._event_sink = RecordingUltronEventSink()
 
         # Register Dispatcher Routes strictly in INITIALIZED state
@@ -173,6 +185,11 @@ class UltronService(IService):
                 self.handle_reset_command,
                 self.name,
             )
+
+            # Subscribe to session teardown broadcast events
+            self._dispatcher.subscribe_event("workflow.session.purged", self.handle_session_purged_event, self.name)
+            self._dispatcher.subscribe_event("execution.session.purged", self.handle_session_purged_event, self.name)
+            self._dispatcher.subscribe_event("workflow.aborted", self.handle_session_purged_event, self.name)
 
         self._state = ServiceState.INITIALIZED
 
@@ -245,7 +262,7 @@ class UltronService(IService):
             )
 
         status = HealthStatus.HEALTHY
-        msg = f"Processed {self._processed_observations} observations"
+        msg = f"Processed {self._processed_observations} observations across {len(self._session_stores)} active sessions"
         if self._budget_overruns > 5:
             status = HealthStatus.DEGRADED
             msg += f", {self._budget_overruns} budget overruns"
@@ -258,11 +275,43 @@ class UltronService(IService):
         )
 
     # -------------------------------------------------------------------------
-    # Public Core API (D218)
+    # Core Helper: Session Component Resolution
     # -------------------------------------------------------------------------
 
-    def ingest_observation(self, observation: ModalityObservation) -> ModalityObservation:
-        """Synchronously ingest a normalized modality observation."""
+    def _get_or_create_session_components(
+        self, session_id: str
+    ) -> tuple[MultimodalContextStore, MultimodalFusionEngine, DeterministicRuleEngine, SessionSequenceTracker]:
+        """Resolve or instantiate isolated session perception components under capacity bounds."""
+        if not isinstance(session_id, str) or not SESSION_ID_REGEX.match(session_id):
+            raise UltronValidationError(f"Invalid session_id syntax: {session_id!r}")
+
+        if session_id not in self._session_stores:
+            if len(self._session_stores) >= MAX_ACTIVE_PERCEPTION_SESSIONS:
+                raise UltronCapacityError(
+                    f"Max active perception sessions ({MAX_ACTIVE_PERCEPTION_SESSIONS}) exceeded"
+                )
+            self._session_stores[session_id] = MultimodalContextStore(session_id=session_id)
+            self._session_fusion_engines[session_id] = MultimodalFusionEngine()
+            self._session_rule_engines[session_id] = DeterministicRuleEngine()
+            self._session_sequence_trackers[session_id] = SessionSequenceTracker()
+
+        return (
+            self._session_stores[session_id],
+            self._session_fusion_engines[session_id],
+            self._session_rule_engines[session_id],
+            self._session_sequence_trackers[session_id],
+        )
+
+    # -------------------------------------------------------------------------
+    # Public Core API (D218 / M38 Session-Isolated)
+    # -------------------------------------------------------------------------
+
+    def ingest_observation(
+        self,
+        observation: ModalityObservation,
+        session_id: Optional[str] = None,
+    ) -> ModalityObservation:
+        """Synchronously ingest a normalized modality observation into isolated session memory."""
         if self._state != ServiceState.STARTED:
             raise UltronLifecycleError(f"Cannot ingest observation in state {self._state.name}")
 
@@ -271,30 +320,98 @@ class UltronService(IService):
 
         self._in_transaction = True
         try:
-            # 1. Epoch and Sequence validation
-            if self._sequence_tracker is not None:
-                self._sequence_tracker.validate_and_record(observation, self._epoch_id)
+            effective_session_id = session_id or observation.session_id or self._default_session_id
 
-            # 2. Record in bounded context store
-            if self._context_store is not None:
-                self._context_store.record_observation(observation)
+            if session_id is not None and observation.session_id is not None and session_id != observation.session_id:
+                raise UltronSessionMismatchError(
+                    f"Envelope session_id {session_id!r} does not match payload session_id {observation.session_id!r}"
+                )
+
+            if observation.session_id != effective_session_id:
+                stamped_obs = ModalityObservation(
+                    observation_id=observation.observation_id,
+                    modality=observation.modality,
+                    source_id=observation.source_id,
+                    physical_id=observation.physical_id,
+                    epoch_id=observation.epoch_id,
+                    sequence_number=observation.sequence_number,
+                    timestamp_utc=observation.timestamp_utc,
+                    confidence=observation.confidence,
+                    payload=observation.payload,
+                    session_id=effective_session_id,
+                )
+            else:
+                stamped_obs = observation
+
+            store, fusion_engine, rule_engine, sequence_tracker = self._get_or_create_session_components(
+                effective_session_id
+            )
+
+            # Sequence tracking per (session_id, source_id)
+            sequence_tracker.validate_and_record(stamped_obs, self._epoch_id)
+
+            # Record in session-partitioned context store
+            store.record_observation(stamped_obs)
 
             self._processed_observations += 1
             self._emit_event(
                 "ultron.observation.accepted",
                 {
-                    "observation_id": observation.observation_id,
-                    "modality": observation.modality.value,
-                    "source_id": observation.source_id,
-                    "sequence_number": observation.sequence_number,
+                    "observation_id": stamped_obs.observation_id,
+                    "modality": stamped_obs.modality.value,
+                    "source_id": stamped_obs.source_id,
+                    "sequence_number": stamped_obs.sequence_number,
+                    "session_id": effective_session_id,
                 },
             )
-            return observation
+            return stamped_obs
         finally:
             self._in_transaction = False
 
-    def fuse(self) -> MultimodalContext:
-        """Run cross-modal fusion on active observations and return updated MultimodalContext."""
+    def _fuse_session(self, effective_session_id: str) -> MultimodalContext:
+        """Internal helper executing fusion for a session without transaction guard checks."""
+        store, fusion_engine, rule_engine, sequence_tracker = self._get_or_create_session_components(
+            effective_session_id
+        )
+
+        obs_snapshot = tuple(store._observations)
+        entities, conflicts = fusion_engine.fuse_observations(obs_snapshot, self._epoch_id)
+
+        for c in conflicts:
+            stamped_c = ObservationConflict(
+                conflict_id=c.conflict_id,
+                entity_id=c.entity_id,
+                modalities=c.modalities,
+                conflict_type=c.conflict_type,
+                severity=c.severity,
+                selected_source=c.selected_source,
+                explanation=c.explanation,
+                session_id=effective_session_id,
+            )
+            store.record_conflict(stamped_c)
+            self._emit_event(
+                "ultron.conflict.detected",
+                {
+                    "conflict_id": c.conflict_id,
+                    "conflict_type": c.conflict_type.value,
+                    "severity": c.severity.value,
+                    "selected_source": c.selected_source.value if c.selected_source else None,
+                    "session_id": effective_session_id,
+                },
+            )
+
+        # Extract active gestures from latest gesture observation in session
+        active_gestures: list[str] = []
+        for obs in reversed(obs_snapshot):
+            if obs.modality.value == "GESTURE":
+                active_gestures = list(obs.payload.get("active_gestures", []))
+                break
+
+        ctx = store.capture_snapshot(self._epoch_id, entities, active_gestures)
+        return ctx
+
+    def fuse(self, session_id: Optional[str] = None) -> MultimodalContext:
+        """Run cross-modal fusion on active session observations and return updated MultimodalContext."""
         if self._state != ServiceState.STARTED:
             raise UltronLifecycleError(f"Cannot fuse in state {self._state.name}")
 
@@ -303,38 +420,13 @@ class UltronService(IService):
 
         self._in_transaction = True
         try:
-            if self._fusion_engine is None or self._context_store is None:
-                raise UltronResourceIntegrityError("Fusion engine or context store is uninitialized")
-
-            obs_snapshot = tuple(self._context_store._observations)
-            entities, conflicts = self._fusion_engine.fuse_observations(obs_snapshot, self._epoch_id)
-
-            for c in conflicts:
-                self._context_store.record_conflict(c)
-                self._emit_event(
-                    "ultron.conflict.detected",
-                    {
-                        "conflict_id": c.conflict_id,
-                        "conflict_type": c.conflict_type.value,
-                        "severity": c.severity.value,
-                        "selected_source": c.selected_source.value if c.selected_source else None,
-                    },
-                )
-
-            # Extract active gestures from latest gesture observation
-            active_gestures: list[str] = []
-            for obs in reversed(obs_snapshot):
-                if obs.modality.value == "GESTURE":
-                    active_gestures = list(obs.payload.get("active_gestures", []))
-                    break
-
-            ctx = self._context_store.capture_snapshot(self._epoch_id, entities, active_gestures)
-            return ctx
+            effective_session_id = session_id or self._default_session_id
+            return self._fuse_session(effective_session_id)
         finally:
             self._in_transaction = False
 
-    def reason(self, depth: int = 0) -> tuple[ActionIntent, ...]:
-        """Evaluate deterministic rules over current multimodal context."""
+    def reason(self, session_id: Optional[str] = None, depth: int = 0) -> tuple[ActionIntent, ...]:
+        """Evaluate deterministic rules over active session context."""
         if self._state != ServiceState.STARTED:
             raise UltronLifecycleError(f"Cannot reason in state {self._state.name}")
 
@@ -343,11 +435,13 @@ class UltronService(IService):
 
         self._in_transaction = True
         try:
-            if self._rule_engine is None or self._context_store is None:
-                raise UltronResourceIntegrityError("Rule engine or context store is uninitialized")
+            effective_session_id = session_id or self._default_session_id
+            store, fusion_engine, rule_engine, sequence_tracker = self._get_or_create_session_components(
+                effective_session_id
+            )
 
-            ctx = self.fuse() if not self._context_store.history_count else self._context_store._history[-1]
-            intents, trace = self._rule_engine.evaluate(ctx, depth=depth)
+            ctx = self._fuse_session(effective_session_id) if not store.history_count else store._history[-1]
+            intents, trace = rule_engine.evaluate(ctx, depth=depth)
 
             self._total_latency_ms += trace.processing_time_ms
             if trace.degraded:
@@ -358,6 +452,7 @@ class UltronService(IService):
                         "trace_id": trace.trace_id,
                         "processing_time_ms": trace.processing_time_ms,
                         "reason": "PROCESSING_BUDGET_EXCEEDED",
+                        "session_id": effective_session_id,
                     },
                 )
             else:
@@ -368,6 +463,7 @@ class UltronService(IService):
                         "fired_rules_count": len(trace.fired_rule_ids),
                         "intents_count": len(trace.intent_ids),
                         "processing_time_ms": trace.processing_time_ms,
+                        "session_id": effective_session_id,
                     },
                 )
 
@@ -379,6 +475,7 @@ class UltronService(IService):
                         "action_type": intent.action_type.value,
                         "confidence": intent.confidence,
                         "entity_id": intent.entity_id,
+                        "session_id": effective_session_id,
                     },
                 )
 
@@ -386,12 +483,43 @@ class UltronService(IService):
         finally:
             self._in_transaction = False
 
-    def step(self, observation: Optional[ModalityObservation] = None) -> tuple[ActionIntent, ...]:
-        """Perform one complete pipeline cycle: ingest (optional) -> fuse -> reason."""
+    def step(
+        self,
+        observation: Optional[ModalityObservation] = None,
+        session_id: Optional[str] = None,
+    ) -> tuple[ActionIntent, ...]:
+        """Perform one complete pipeline cycle for a session: ingest (optional) -> fuse -> reason."""
+        effective_session_id = session_id or (observation.session_id if observation else self._default_session_id)
         if observation is not None:
-            self.ingest_observation(observation)
-        self.fuse()
-        return self.reason(depth=0)
+            self.ingest_observation(observation, session_id=effective_session_id)
+        self.fuse(effective_session_id)
+        return self.reason(session_id=effective_session_id, depth=0)
+
+    def purge_session(self, session_id: str) -> None:
+        """Atomically purge all transient perception memory, context, and resources for a clinical session."""
+        store = self._session_stores.pop(session_id, None)
+        if store is not None:
+            store.clear()
+        fusion = self._session_fusion_engines.pop(session_id, None)
+        if fusion is not None:
+            fusion.clear()
+        rule = self._session_rule_engines.pop(session_id, None)
+        if rule is not None:
+            rule.clear()
+        seq = self._session_sequence_trackers.pop(session_id, None)
+        if seq is not None:
+            seq.clear()
+        self._emit_event("ultron.session.purged", {"session_id": session_id, "epoch_id": self._epoch_id})
+
+    def handle_session_purged_event(self, event_envelope: MessageEnvelope) -> None:
+        """Handle session teardown broadcast event by purging perception memory."""
+        sess_id = None
+        if isinstance(event_envelope.payload, dict):
+            sess_id = event_envelope.payload.get("session_id")
+        if not sess_id and isinstance(event_envelope.metadata, dict):
+            sess_id = event_envelope.metadata.get("session_id")
+        if sess_id and isinstance(sess_id, str):
+            self.purge_session(sess_id)
 
     def reset(self, epoch_id: int) -> None:
         """Reset internal state for a new epoch."""
@@ -402,32 +530,42 @@ class UltronService(IService):
         self.clear()
 
     def clear(self) -> None:
-        """Clear all active observations, entities, conflicts, and intents."""
-        if self._fusion_engine is not None:
-            self._fusion_engine.clear()
-        if self._context_store is not None:
-            self._context_store.clear()
-        if self._rule_engine is not None:
-            self._rule_engine.clear()
-        if self._sequence_tracker is not None:
-            self._sequence_tracker.clear()
+        """Clear all active observations, entities, conflicts, and intents across all sessions."""
+        for sess_id in list(self._session_stores.keys()):
+            self.purge_session(sess_id)
+        self._session_stores.clear()
+        self._session_fusion_engines.clear()
+        self._session_rule_engines.clear()
+        self._session_sequence_trackers.clear()
         if self._event_sink is not None:
             self._event_sink.clear()
 
     # -------------------------------------------------------------------------
-    # Dispatcher Query & Command Handlers
+    # Dispatcher Query & Command Handlers (M38 Session-Isolated)
     # -------------------------------------------------------------------------
 
     def handle_status_query(self, query_envelope: MessageEnvelope) -> MessageEnvelope:
         """Handle ultron.status query."""
+        sess_id = query_envelope.metadata.get("session_id") or query_envelope.payload.get("session_id")
         avg_latency = (
             round(self._total_latency_ms / float(self._processed_observations), 2)
             if self._processed_observations > 0
             else 0.0
         )
-        entity_count = len(self._fusion_engine.entities) if self._fusion_engine else 0
-        context_count = self._context_store.observation_count if self._context_store else 0
-        reasoning_count = len(self._rule_engine.traces) if self._rule_engine else 0
+
+        entity_count = 0
+        context_count = 0
+        reasoning_count = 0
+
+        if sess_id and sess_id in self._session_stores:
+            entity_count = len(self._session_fusion_engines[sess_id].entities)
+            context_count = self._session_stores[sess_id].observation_count
+            reasoning_count = len(self._session_rule_engines[sess_id].traces)
+        elif not sess_id and len(self._session_stores) == 1:
+            default_key = next(iter(self._session_stores.keys()))
+            entity_count = len(self._session_fusion_engines[default_key].entities)
+            context_count = self._session_stores[default_key].observation_count
+            reasoning_count = len(self._session_rule_engines[default_key].traces)
 
         payload = serialize_ultron_payload(
             {
@@ -440,15 +578,25 @@ class UltronService(IService):
                 "reasoning_count": reasoning_count,
                 "average_latency_ms": avg_latency,
                 "budget_overruns": self._budget_overruns,
+                "active_sessions_count": len(self._session_stores),
             }
         )
         return create_response(query_envelope, self.name, payload=dict(payload))
 
     def handle_context_query(self, query_envelope: MessageEnvelope) -> MessageEnvelope:
-        """Handle ultron.context query."""
+        """Handle ultron.context query with strict session isolation."""
+        sess_id = query_envelope.metadata.get("session_id") or query_envelope.payload.get("session_id")
         entities = []
-        if self._fusion_engine:
-            for e in self._fusion_engine.entities:
+        conflicts_count = 0
+
+        target_fusion = None
+        if sess_id and sess_id in self._session_fusion_engines:
+            target_fusion = self._session_fusion_engines[sess_id]
+        elif not sess_id and len(self._session_fusion_engines) == 1:
+            target_fusion = next(iter(self._session_fusion_engines.values()))
+
+        if target_fusion is not None:
+            for e in target_fusion.entities:
                 entities.append(
                     {
                         "entity_id": e.entity_id,
@@ -458,22 +606,31 @@ class UltronService(IService):
                         "source_modalities": [m.value for m in sorted(e.source_modalities, key=lambda m: m.value)],
                     }
                 )
+            conflicts_count = len(target_fusion.conflicts)
 
         payload = serialize_ultron_payload(
             {
                 "epoch_id": self._epoch_id,
                 "entities_count": len(entities),
                 "entities": entities,
-                "active_conflicts_count": len(self._fusion_engine.conflicts) if self._fusion_engine else 0,
+                "active_conflicts_count": conflicts_count,
             }
         )
         return create_response(query_envelope, self.name, payload=dict(payload))
 
     def handle_reasoning_query(self, query_envelope: MessageEnvelope) -> MessageEnvelope:
-        """Handle ultron.reasoning query."""
+        """Handle ultron.reasoning query with strict session isolation."""
+        sess_id = query_envelope.metadata.get("session_id") or query_envelope.payload.get("session_id")
         traces = []
-        if self._rule_engine:
-            for t in self._rule_engine.traces:
+
+        target_rule = None
+        if sess_id and sess_id in self._session_rule_engines:
+            target_rule = self._session_rule_engines[sess_id]
+        elif not sess_id and len(self._session_rule_engines) == 1:
+            target_rule = next(iter(self._session_rule_engines.values()))
+
+        if target_rule is not None:
+            for t in target_rule.traces:
                 traces.append(
                     {
                         "trace_id": t.trace_id,
