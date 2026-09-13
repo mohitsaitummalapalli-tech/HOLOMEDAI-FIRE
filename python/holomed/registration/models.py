@@ -154,7 +154,7 @@ class FiducialCloud:
 class RigidRegistrationTransform3D:
     """Immutable 6-DOF rigid spatial transformation [R | t] mapping plan space to patient space."""
 
-    rotation_matrix: Tuple[Tuple[float, float, float], ...]
+    rotation_matrix: Tuple[Tuple[float, float, float], Tuple[float, float, float], Tuple[float, float, float]]
     translation_vector_mm: Tuple[float, float, float]
     source_frame: str
     target_frame: str

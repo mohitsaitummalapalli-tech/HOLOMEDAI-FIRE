@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from holomed.core.dispatcher import MessageDispatcher
-from holomed.protocol.builders import create_command, create_query
+from holomed.protocol.builders import create_command, create_query, create_event
 from holomed.runtime.models import HealthStatus
 from holomed.runtime.service import ServiceState
 from holomed.vision.exceptions import (
@@ -77,6 +77,9 @@ def test_vision_service_ingest_frame_and_physical_id_validation(
     service.initialize(test_runtime_context)
     service.start()
 
+    evt = create_event("platform.session.activated", "test", payload={"session_id": "default_session", "epoch_id": 1})
+    service.handle_session_activated_event(evt)
+
     # Valid physical_id (usb://port1) succeeds
     desc_valid, data_valid = make_test_frame(device_id="cam_01", physical_id="usb://port1")
     result = service.ingest_frame(desc_valid, data_valid)
@@ -109,24 +112,27 @@ def test_vision_service_dispatcher_routes(
     service.start()
     dispatcher.start()
 
+    evt = create_event("platform.session.activated", "test", payload={"session_id": "test_session", "epoch_id": 1})
+    service.handle_session_activated_event(evt)
+
     # Query status
-    q_status = create_query("vision.pipeline.status", "client", payload={})
+    q_status = create_query("vision.pipeline.status", "client", payload={}, metadata={"session_id": "test_session"})
     res_status = service.handle_status_query(q_status)
     assert res_status.payload["service_name"] == "vision_service"
     assert res_status.payload["state"] == "STARTED"
 
     # Query audit
-    q_audit = create_query("vision.pipeline.audit", "client", payload={})
+    q_audit = create_query("vision.pipeline.audit", "client", payload={}, metadata={"session_id": "test_session"})
     res_audit = service.handle_audit_query(q_audit)
     assert res_audit.payload["is_consistent"] is True
 
     # Query tracks
-    q_tracks = create_query("vision.tracker.tracks", "client", payload={})
+    q_tracks = create_query("vision.tracker.tracks", "client", payload={}, metadata={"session_id": "test_session"})
     res_tracks = service.handle_tracks_query(q_tracks)
     assert res_tracks.payload["active_tracks_count"] == 0
 
     # Command reset
-    c_reset = create_command("vision.pipeline.reset", "client", payload={})
+    c_reset = create_command("vision.pipeline.reset", "client", payload={}, metadata={"session_id": "test_session"})
     res_reset = service.handle_reset_command(c_reset)
     assert res_reset.payload["reset_completed"] is True
 

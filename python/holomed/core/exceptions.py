@@ -159,3 +159,7 @@ class PipelineRollbackError(PipelineError):
         self.stage_index = stage_index
         self.original_stage_error = original_stage_error
         self.rollback_failures = rollback_failures
+
+class DispatchAuthorizationError(CoreError):
+    """Raised when an authoritative message dispatch lacks valid capability."""
+    pass

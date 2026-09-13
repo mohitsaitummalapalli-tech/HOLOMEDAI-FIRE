@@ -4,6 +4,8 @@ import sys
 import uuid
 import pytest
 
+from typing import Any, Mapping
+
 from holomed.configuration.models import AppConfig, EnvironmentProfile, LogLevel, SecretString
 from holomed.core.dead_letter import DeadLetterQueue
 from holomed.core.dispatcher import MessageDispatcher
@@ -11,6 +13,7 @@ from holomed.core.exceptions import (
     CoreError,
     CorrelationError,
     DeadLetterCapacityError,
+    DispatchAuthorizationError,
     DispatcherLifecycleError,
     DuplicateSubscriptionError,
     InvalidHandlerResponseError,
@@ -108,12 +111,12 @@ class TestHostileHardening:
         failed_rollbacks: list[str] = []
 
         def make_stage(idx: int) -> PipelineStageDescriptor:
-            def execute_stage(ctx: dict[str, Any]) -> dict[str, Any]:
+            def execute_stage(ctx: Mapping[str, Any]) -> Mapping[str, Any]:
                 if idx == 10:
                     raise RuntimeError(f"Storm failure at stage {idx}")
                 return {f"k_{idx}": idx}
 
-            def rollback_stage(ctx: dict[str, Any]) -> None:
+            def rollback_stage(ctx: Mapping[str, Any]) -> None:
                 if idx in (3, 5):
                     failed_rollbacks.append(f"rb_fail_{idx}")
                     raise IOError(f"Rollback disk failure at stage {idx}")
@@ -261,3 +264,18 @@ class TestHostileHardening:
         assert dispatcher.state == DispatcherState.FAILED
         dispatcher.stop()
         assert dispatcher.state == DispatcherState.STOPPED
+
+    def test_unauthorized_dispatch_dead_letter(self) -> None:
+        """Verify unauthorized privileged dispatch records intended dead-letter reason."""
+        dispatcher = MessageDispatcher()
+        dispatcher.initialize(make_context())
+        dispatcher.start()
+
+        evt = create_event("platform.session.activated", "test_source", payload={"session_id": "foo"})
+
+        with pytest.raises(DispatchAuthorizationError):
+            dispatcher.dispatch(evt)
+
+        assert dispatcher.dead_letter_queue.count == 1
+        records = dispatcher.dead_letter_queue.records
+        assert records[0].reason == DeadLetterReason.UNAUTHORIZED_DISPATCH

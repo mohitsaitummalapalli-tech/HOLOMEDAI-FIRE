@@ -68,7 +68,7 @@ class SafetyGateEvaluator:
                     snapshots.append(
                         SubsystemSnapshot(
                             subsystem_name="proximity_service",
-                            state=m15_state,
+                            state=m15_state or "UNKNOWN",
                             epoch_id=m15_epoch,
                             is_nominal=m15_state in ("SAFE", "CLEAR"),
                             details={"monitored_zones": getattr(prox_status, "monitored_zone_count", 0)},
@@ -104,11 +104,12 @@ class SafetyGateEvaluator:
                     snapshots.append(
                         SubsystemSnapshot(
                             subsystem_name="drift_service",
-                            state=m16_state,
+                            state=m16_state or "UNKNOWN",
                             epoch_id=m16_epoch,
                             is_nominal=m16_state in ("READY", "STABLE"),
                             details={"bound_landmarks": getattr(drift_status, "bound_landmark_count", 0)},
                         )
+
                     )
             except Exception:
                 m16_state = "UNKNOWN"
@@ -134,7 +135,7 @@ class SafetyGateEvaluator:
                     snapshots.append(
                         SubsystemSnapshot(
                             subsystem_name="recovery_service",
-                            state=m17_state,
+                            state=m17_state or "UNKNOWN",
                             epoch_id=None,  # registration_revision is NOT an epoch
                             is_nominal=m17_state in ("IDLE", "ACTIVATED"),
                             details={"registration_revision": m17_rev},
@@ -168,7 +169,7 @@ class SafetyGateEvaluator:
                     snapshots.append(
                         SubsystemSnapshot(
                             subsystem_name="registration_service",
-                            state=m13_state,
+                            state=m13_state or "UNKNOWN",
                             epoch_id=m13_epoch,
                             is_nominal=m13_state == "VERIFIED",
                             details={"locked": getattr(reg_record, "locked", False)},
@@ -196,7 +197,7 @@ class SafetyGateEvaluator:
                     snapshots.append(
                         SubsystemSnapshot(
                             subsystem_name="workflow_service",
-                            state=m10_state,
+                            state=m10_state or "UNKNOWN",
                             epoch_id=None,
                             is_nominal=m10_state not in ("RECOVERY_REQUIRED", "ABORTED"),
                             details={"is_terminal": getattr(wf_snapshot, "is_terminal", False)},
@@ -224,7 +225,7 @@ class SafetyGateEvaluator:
                     snapshots.append(
                         SubsystemSnapshot(
                             subsystem_name="navigation_service",
-                            state=m14_state,
+                            state=m14_state or "UNKNOWN",
                             epoch_id=m14_epoch,
                             is_nominal=m14_state in ("IDLE", "TRACKING"),
                             details={"has_bound_trajectory": has_bound_traj},

@@ -1471,7 +1471,7 @@ class ClinicalExecutionGatewayService(IService):
                 sequence_number=request.sequence_number,
                 depth=1,
                 parameters=dict(request.parameters),
-                correlation_id=request.correlation_id,
+                correlation_id=request.correlation_id or "",
                 causation_id=request.causation_id,
                 timestamp_utc=request.now_utc,
             )
@@ -2266,8 +2266,8 @@ class ClinicalExecutionGatewayService(IService):
 
         try:
             cloud = None
+            from holomed.registration.models import FiducialCloud, FiducialPointPair
             if "fiducials" in payload and payload["fiducials"] is not None:
-                from holomed.registration.models import FiducialCloud, FiducialPointPair
                 pairs = tuple(
                     FiducialPointPair(
                         fiducial_id=f["fiducial_id"],
@@ -2558,43 +2558,49 @@ class ClinicalExecutionGatewayService(IService):
 
         try:
             plan = None
+            from holomed.planning.models import (
+                PatientCaseContext,
+                SafetyExclusionZone,
+                SurgicalLaterality,
+                SurgicalPlanDefinition,
+                TrajectoryPlan,
+            )
+            from holomed.workflow.models import InterlockSeverity
             if "plan" in payload and payload["plan"] is not None:
                 p_data = payload["plan"]
                 if isinstance(p_data, SurgicalPlanDefinition):
                     plan = p_data
                 elif isinstance(p_data, dict):
-                    from holomed.planning.models import (
-                        PatientCaseContext,
-                        SafetyExclusionZone,
-                        SurgicalLaterality,
-                        SurgicalPlanDefinition,
-                        TrajectoryPlan,
-                    )
                     ctx_dict = p_data.get("case_context", {})
                     ctx = PatientCaseContext(
                         case_id=ctx_dict.get("case_id", ""),
                         patient_hash=ctx_dict.get("patient_hash", ""),
                         procedure_code=ctx_dict.get("procedure_code", ""),
                         laterality=SurgicalLaterality(ctx_dict.get("laterality", "MIDLINE")),
+                        primary_surgeon_id=ctx_dict.get("primary_surgeon_id", ""),
                         scheduled_date_utc=ctx_dict.get("scheduled_date_utc", ""),
                     )
                     trajs = tuple(
                         TrajectoryPlan(
                             trajectory_id=t["trajectory_id"],
-                            entry_point_plan_mm=tuple(t["entry_point_plan_mm"]),
-                            target_point_plan_mm=tuple(t["target_point_plan_mm"]),
-                            clearance_tolerance_mm=float(t.get("clearance_tolerance_mm", 2.0)),
-                            critical_structure_name=t.get("critical_structure_name", ""),
+                            target_structure=t.get("target_structure", ""),
+                            entry_point_mm=tuple(t["entry_point_mm"]),  # type: ignore
+                            target_point_mm=tuple(t["target_point_mm"]),  # type: ignore
+                            max_lateral_deviation_mm=float(t.get("max_lateral_deviation_mm", 2.0)),
+                            max_angular_deviation_deg=float(t.get("max_angular_deviation_deg", 2.0)),
+                            min_confidence=float(t.get("min_confidence", 0.9)),
+                            max_uncertainty=float(t.get("max_uncertainty", 0.1)),
                         )
                         for t in p_data.get("trajectories", ())
                     )
                     zones = tuple(
                         SafetyExclusionZone(
                             zone_id=z["zone_id"],
-                            centroid_plan_mm=tuple(z["centroid_plan_mm"]),
-                            radius_mm=float(z["radius_mm"]),
-                            critical_structure_name=z.get("critical_structure_name", ""),
-                            severity_level=z.get("severity_level", "INTERLOCK"),
+                            anatomical_structure=z.get("anatomical_structure", ""),
+                            center_point_mm=tuple(z["center_point_mm"]),  # type: ignore
+                            bounding_radius_mm=float(z["bounding_radius_mm"]),
+                            min_clearance_mm=float(z.get("min_clearance_mm", 2.0)),
+                            severity_if_breached=z.get("severity_if_breached", InterlockSeverity.BLOCKING) if isinstance(z.get("severity_if_breached"), InterlockSeverity) else InterlockSeverity(z.get("severity_if_breached", "BLOCKING")),
                         )
                         for z in p_data.get("exclusion_zones", ())
                     )
@@ -2647,7 +2653,7 @@ class ClinicalExecutionGatewayService(IService):
                 res_dict["verification_record"] = {
                     "verification_id": res.verification_record.verification_id,
                     "verified": res.verification_record.verified,
-                    "failure_reasons": list(res.verification_record.failure_reasons),
+                    "details": dict(res.verification_record.details),
                 }
             return create_response(envelope, self.name, payload=res_dict)
         except Exception as e:

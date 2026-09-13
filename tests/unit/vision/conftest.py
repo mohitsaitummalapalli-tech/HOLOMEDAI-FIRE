@@ -7,10 +7,10 @@ import uuid
 import zlib
 import pytest
 
-from holomed.configuration.models import AppConfig, EnvironmentProfile, LogLevel
-from holomed.devices.interfaces import IDevice
+from holomed.configuration.models import AppConfig, EnvironmentProfile, LogLevel, SecretString
+from holomed.devices.interfaces import IDevice, DeviceResourceAccessor, RegistryAuthorityToken
 from holomed.devices.manager import DeviceManager
-from holomed.devices.models import DeviceHealth, DeviceState, DeviceType
+from holomed.devices.models import DeviceHealth, DeviceState, DeviceType, DeviceCapability
 from holomed.devices.registry import DeviceRegistry
 from holomed.runtime.context import RuntimeContext
 from holomed.runtime.models import HealthStatus
@@ -38,20 +38,20 @@ class DummyCameraDevice(IDevice):
         return DeviceType.RGB_CAMERA
 
     @property
-    def capabilities(self) -> frozenset[DeviceCapability]:
-        return frozenset()
+    def capabilities(self) -> tuple[DeviceCapability, ...]:
+        return ()
 
     @property
     def state(self) -> DeviceState:
         return self._state
 
-    def initialize(self) -> None:
-        self._state = DeviceState.INITIALIZED
+    def initialize(self, accessor: DeviceResourceAccessor) -> None:
+        self._state = DeviceState.READY
 
     def start(self) -> None:
         self._state = DeviceState.ACTIVE
 
-    def stop(self) -> None:
+    def stop(self, accessor: DeviceResourceAccessor) -> None:
         self._state = DeviceState.STOPPED
 
     def health(self) -> DeviceHealth:
@@ -71,7 +71,7 @@ def test_runtime_context() -> RuntimeContext:
         host="127.0.0.1",
         port=8080,
         log_level=LogLevel.DEBUG,
-        gemini_api_key="test_key",
+        gemini_api_key=SecretString("test_key"),
         protocol_version="1.0",
     )
     return RuntimeContext(app_config=app_config, epoch_id=1)
@@ -84,7 +84,9 @@ def device_registry_with_camera(test_runtime_context: RuntimeContext) -> tuple[D
     dm.start()
 
     reg = getattr(dm, "registry", None) or getattr(dm, "_registry", None)
-    token = getattr(dm, "registry_token", None) or getattr(dm, "_registry_token", None)
+    assert isinstance(reg, DeviceRegistry), "DeviceRegistry not found on DeviceManager"
+    from typing import cast
+    token = cast(RegistryAuthorityToken, getattr(dm, "registry_token", None) or getattr(dm, "_registry_token", None))
 
     cam = DummyCameraDevice("cam_01", "usb://port1")
     reg.register(cam, token)

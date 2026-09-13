@@ -7,11 +7,14 @@ import json
 import math
 from types import MappingProxyType
 from typing import Any, Mapping, Optional, Sequence
+import re
 import unicodedata
 
 from holomed.audio.exceptions import AudioCapacityError, AudioValidationError
 
 # Numerical Constants (§52)
+SESSION_ID_REGEX = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
+MAX_ACTIVE_PERCEPTION_SESSIONS: int = 32
 MAX_AUDIO_CHANNELS: int = 8
 MAX_BUFFERED_AUDIO_CHUNKS: int = 16
 MAX_AUDIO_CHUNK_BYTES: int = 262144  # 256 KiB
@@ -111,10 +114,14 @@ class AudioChunk:
     payload_bytes: int
     checksum_crc32: int
     buffer_handle_id: str
+    session_id: Optional[str] = None
 
     def __post_init__(self) -> None:
         if not self.chunk_id or not isinstance(self.chunk_id, str):
             raise AudioValidationError("chunk_id must be a non-empty string")
+        if self.session_id is not None:
+            if not isinstance(self.session_id, str) or not SESSION_ID_REGEX.match(self.session_id):
+                raise AudioValidationError(f"Invalid session_id syntax: {self.session_id!r}")
         if not self.device_id or not isinstance(self.device_id, str):
             raise AudioValidationError("device_id must be a non-empty string")
         if not self.physical_id or not isinstance(self.physical_id, str):

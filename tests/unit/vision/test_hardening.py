@@ -46,19 +46,21 @@ PROHIBITED_MODULES = {
 
 def test_topological_dependency_minimal_footprint() -> None:
     """Verify Kahn's topological sort compiles cleanly with vision_service depending solely on device_manager."""
+    from typing import cast, Any
+
     regs = {
-        "device.mgr": ServiceRegistration("device.mgr", lambda: None, ()),
-        "device.ctrl": ServiceRegistration("device.ctrl", lambda: None, ("device.mgr",)),
-        "device.data": ServiceRegistration("device.data", lambda: None, ("device.mgr",)),
-        "device.coord": ServiceRegistration("device.coord", lambda: None, ("device.mgr",)),
+        "device.mgr": ServiceRegistration("device.mgr", cast(Any, lambda: None), ()),
+        "device.ctrl": ServiceRegistration("device.ctrl", cast(Any, lambda: None), ("device.mgr",)),
+        "device.data": ServiceRegistration("device.data", cast(Any, lambda: None), ("device.mgr",)),
+        "device.coord": ServiceRegistration("device.coord", cast(Any, lambda: None), ("device.mgr",)),
         "device.orch": ServiceRegistration(
             "device.orch",
-            lambda: None,
+            cast(Any, lambda: None),
             ("device.mgr", "device.ctrl", "device.data", "device.coord"),
         ),
         "vision.service": ServiceRegistration(
             "vision.service",
-            lambda: None,
+            cast(Any, lambda: None),
             ("device.mgr",),  # Minimal footprint (Issue 9)
         ),
     }

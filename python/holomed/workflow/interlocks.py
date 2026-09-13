@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from typing import Sequence
+from typing import Sequence, Optional
 
 from holomed.workflow._transaction import _RecoveryTransactionCapability
 from holomed.workflow.exceptions import (

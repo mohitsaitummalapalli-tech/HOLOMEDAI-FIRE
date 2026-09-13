@@ -10,6 +10,7 @@ import math
 from types import MappingProxyType
 from typing import Any, Mapping, Optional, Sequence
 import unicodedata
+import re
 import uuid
 
 from holomed.gesture.exceptions import (
@@ -19,6 +20,8 @@ from holomed.gesture.exceptions import (
 from holomed.vision.models import SpatialLandmark
 
 # Hard Architectural Limits
+SESSION_ID_REGEX = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
+MAX_ACTIVE_PERCEPTION_SESSIONS: int = 32
 MAX_HAND_LANDMARKS: int = 21
 MAX_HAND_COORDINATE_METERS: float = 10.0
 PINCH_DISTANCE_METERS: float = 0.035
@@ -225,8 +228,12 @@ class HandObservation:
     landmarks: tuple[SpatialLandmark, ...]
     confidence: float
     is_partial: bool = False
+    session_id: Optional[str] = None
 
     def __post_init__(self) -> None:
+        if self.session_id is not None:
+            if not isinstance(self.session_id, str) or not SESSION_ID_REGEX.match(self.session_id):
+                raise GestureValidationError(f"Invalid session_id syntax: {self.session_id!r}")
         # Validate UUIDv4 frame_id
         if not isinstance(self.frame_id, str):
             raise GestureValidationError(f"frame_id must be str, got {type(self.frame_id).__name__}")

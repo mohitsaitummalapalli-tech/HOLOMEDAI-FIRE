@@ -120,13 +120,28 @@ def test_deterministic_repeated_processing(
     pointing_landmarks: tuple[SpatialLandmark, ...],
 ) -> None:
     """Verify identical inputs yield identical outputs across repeated runs (D208 / Section 46)."""
-    service1 = GestureService()
-    service1.initialize(runtime_context)
-    service1.start()
+    from holomed.core.dispatcher import MessageDispatcher
+    from holomed.platform.session import SessionManager
 
-    service2 = GestureService()
+    # Run 1
+    dispatcher1 = MessageDispatcher()
+    dispatcher1.initialize(runtime_context)
+    sm1 = SessionManager(epoch_id=1, dispatcher=dispatcher1)
+    service1 = GestureService(dispatcher=dispatcher1)
+    service1.initialize(runtime_context)
+    dispatcher1.start()
+    service1.start()
+    sm1.start_session("default_session", epoch_id=1)
+
+    # Run 2
+    dispatcher2 = MessageDispatcher()
+    dispatcher2.initialize(runtime_context)
+    sm2 = SessionManager(epoch_id=2, dispatcher=dispatcher2)
+    service2 = GestureService(dispatcher=dispatcher2)
     service2.initialize(runtime_context)
+    dispatcher2.start()
     service2.start()
+    sm2.start_session("default_session", epoch_id=2)
 
     obs1 = make_observation(pointing_landmarks, sequence_number=1)
     obs2 = make_observation(pointing_landmarks, sequence_number=1)

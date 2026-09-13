@@ -38,6 +38,10 @@ class GestureValidationError(GestureError, DeviceValidationError):
     """Raised when hand observation metadata, parameters, or geometry fail domain validation."""
 
 
+class GestureSessionMismatchError(GestureValidationError):
+    """Raised when envelope session_id does not match payload session_id."""
+
+
 class GestureEpochMismatchError(GestureError):
     """Raised when an ingested hand observation's epoch does not match RuntimeContext.epoch_id."""
 

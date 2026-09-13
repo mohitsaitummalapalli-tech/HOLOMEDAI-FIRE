@@ -34,6 +34,10 @@ class AudioValidationError(AudioError, DeviceValidationError):
     """Raised when audio metadata, parameters, or geometry fail domain validation."""
 
 
+class AudioSessionMismatchError(AudioValidationError):
+    """Raised when envelope session_id does not match payload session_id."""
+
+
 class AudioFrameValidationError(AudioValidationError):
     """Raised when raw PCM audio frames or sample values are malformed or non-finite."""
 
@@ -62,5 +66,5 @@ class AudioShutdownError(AudioError, DeviceShutdownError):
     """Raised when one or more structural resources fail to release cleanly during teardown."""
 
     def __init__(self, message: str, failures: Sequence[DeviceShutdownFailureRecord]) -> None:
-        super().__init__(message, failures)
+        super().__init__(message, tuple(failures))
         self.failures: tuple[DeviceShutdownFailureRecord, ...] = tuple(failures)

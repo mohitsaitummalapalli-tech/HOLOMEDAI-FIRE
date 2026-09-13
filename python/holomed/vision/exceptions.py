@@ -36,6 +36,18 @@ class VisionValidationError(VisionError, DeviceValidationError):
     """Raised on malformed descriptors, dimensions, coordinates, or quaternion errors."""
 
 
+class VisionSessionMismatchError(VisionValidationError):
+    """Raised when envelope session_id does not match payload session_id."""
+
+
+class VisionSequenceError(VisionValidationError):
+    """Raised on non-monotonic or replayed sequence numbers."""
+
+
+class VisionEpochMismatchError(VisionValidationError):
+    """Raised when envelope epoch_id does not match payload epoch_id or service epoch."""
+
+
 class VisionFrameValidationError(VisionValidationError):
     """Raised on corrupted, oversized, or invalid frame pixel buffers."""
 
@@ -52,5 +64,5 @@ class VisionShutdownError(VisionError, DeviceShutdownError):
     """Raised when structural resource release fails during vision service teardown."""
 
     def __init__(self, message: str, failures: Sequence[DeviceShutdownFailureRecord]) -> None:
-        super().__init__(message, failures)
+        super().__init__(message, tuple(failures))
         self.failures = tuple(failures)

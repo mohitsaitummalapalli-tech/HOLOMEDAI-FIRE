@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import pytest
+from holomed.protocol.builders import create_event
 
 from holomed.core.dispatcher import MessageDispatcher
 from holomed.devices.manager import DeviceManager
@@ -15,7 +16,7 @@ from holomed.gesture.exceptions import (
     GestureValidationError,
 )
 from holomed.gesture.service import STRUCTURAL_RESOURCE_IDS, GestureService
-from holomed.protocol.builders import create_command, create_query
+from holomed.protocol.builders import create_command, create_query, create_event
 from holomed.runtime.context import RuntimeContext
 from holomed.runtime.service import ServiceState
 from holomed.vision.models import SpatialLandmark
@@ -47,6 +48,7 @@ def test_service_lifecycle_full_flow(
 
     # Start
     service.start()
+    if hasattr(service, "handle_session_activated_event"): service.handle_session_activated_event(create_event("workflow.session.activated", "test", payload={"session_id": "default_session", "epoch_id": 1}))
     assert service.state == ServiceState.STARTED
 
     # Double start raises GestureLifecycleError
@@ -76,6 +78,7 @@ def test_service_sequence_monotonicity(
     service = GestureService(device_manager=device_manager)
     service.initialize(runtime_context)
     service.start()
+    if hasattr(service, "handle_session_activated_event"): service.handle_session_activated_event(create_event("workflow.session.activated", "test", payload={"session_id": "default_session", "epoch_id": 1}))
 
     # Seq 10: OK
     obs1 = make_observation(open_hand_landmarks, sequence_number=10)
@@ -105,6 +108,7 @@ def test_service_epoch_mismatch(
     service = GestureService(device_manager=device_manager)
     service.initialize(runtime_context)  # epoch_id = 1
     service.start()
+    if hasattr(service, "handle_session_activated_event"): service.handle_session_activated_event(create_event("workflow.session.activated", "test", payload={"session_id": "default_session", "epoch_id": 1}))
 
     obs_wrong_epoch = make_observation(open_hand_landmarks, epoch_id=99)
     with pytest.raises(GestureEpochMismatchError, match="does not match service epoch"):
@@ -120,6 +124,7 @@ def test_service_device_identity_validation(
     service = GestureService(device_manager=device_manager)
     service.initialize(runtime_context)
     service.start()
+    if hasattr(service, "handle_session_activated_event"): service.handle_session_activated_event(create_event("workflow.session.activated", "test", payload={"session_id": "default_session", "epoch_id": 1}))
 
     # Unknown device
     obs_unknown = make_observation(open_hand_landmarks)
@@ -143,6 +148,7 @@ def test_service_reentrancy_guard(
     service = GestureService(device_manager=device_manager)
     service.initialize(runtime_context)
     service.start()
+    if hasattr(service, "handle_session_activated_event"): service.handle_session_activated_event(create_event("workflow.session.activated", "test", payload={"session_id": "default_session", "epoch_id": 1}))
 
     obs = make_observation(open_hand_landmarks)
 
@@ -169,24 +175,25 @@ def test_service_dispatcher_routes(
     service.initialize(runtime_context)
     service.start()
     message_dispatcher.start()
+    if hasattr(locals().get("service"), "handle_session_activated_event"): service.handle_session_activated_event(create_event("workflow.session.activated", "test", payload={"session_id": "default_session", "epoch_id": 1}))
 
     # Ingest one frame
     obs = make_observation(pointing_landmarks, sequence_number=1)
     service.ingest_observation(obs)
 
     # 1. gesture.pipeline.status
-    q_status = create_query("gesture.pipeline.status", source="test", target="gesture_service", payload={})
+    q_status = create_query("gesture.pipeline.status", source="test", target="gesture_service", payload={}, metadata={"session_id": "default_session"})
     resp_status = message_dispatcher.dispatch(q_status)
     assert resp_status.payload["service_name"] == "gesture_service"
     assert resp_status.payload["tracked_hands"] == 1
 
     # 2. gesture.pipeline.audit
-    q_audit = create_query("gesture.pipeline.audit", source="test", target="gesture_service", payload={})
+    q_audit = create_query("gesture.pipeline.audit", source="test", target="gesture_service", payload={}, metadata={"session_id": "default_session"})
     resp_audit = message_dispatcher.dispatch(q_audit)
     assert resp_audit.payload["is_consistent"] is True
 
     # 3. gesture.tracks
-    q_tracks = create_query("gesture.tracks", source="test", target="gesture_service", payload={})
+    q_tracks = create_query("gesture.tracks", source="test", target="gesture_service", payload={}, metadata={"session_id": "default_session"})
     resp_tracks = message_dispatcher.dispatch(q_tracks)
     assert resp_tracks.payload["active_tracks_count"] == 1
 
@@ -209,6 +216,7 @@ def test_service_teardown_failure_handling(
     service = GestureService()
     service.initialize(runtime_context)
     service.start()
+    if hasattr(service, "handle_session_activated_event"): service.handle_session_activated_event(create_event("workflow.session.activated", "test", payload={"session_id": "default_session", "epoch_id": 1}))
 
     # Monkeypatch release to fail
     def failing_release(res_id: str) -> None:

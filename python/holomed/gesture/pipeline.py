@@ -14,6 +14,7 @@ from holomed.gesture.models import (
     GestureProcessingResult,
     GestureQuality,
     GestureResult,
+    Handedness,
     HandLandmark3D,
     HandObservation,
     HandTrack,
@@ -95,7 +96,8 @@ class GesturePipeline:
                 )
 
             # 2. Update Hand Tracker
-            tracks, matched_track_id = self._tracker.update(unprojected, observation.handedness)
+            handedness = Handedness(observation.handedness) if not isinstance(observation.handedness, Handedness) else observation.handedness
+            tracks, matched_track_id = self._tracker.update(unprojected, handedness)
 
             # Check if any tracks dropped out, notify state machine
             active_ids = {t.track_id for t in tracks}
@@ -112,7 +114,7 @@ class GesturePipeline:
             if matched_track_id is not None and unprojected:
                 lms_dict = {lm.landmark_id: lm for lm in unprojected}
                 finger_states = compute_finger_states(lms_dict)
-                spatial_interaction = compute_spatial_interaction(lms_dict, observation.handedness)
+                spatial_interaction = compute_spatial_interaction(lms_dict, handedness)
                 primitive, prim_conf = classify_gesture_primitive(lms_dict, finger_states)
 
                 # Composite confidence: combination of observation confidence and primitive confidence

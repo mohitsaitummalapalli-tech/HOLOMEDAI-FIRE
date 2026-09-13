@@ -12,7 +12,7 @@ from holomed.audio.exceptions import (
 from holomed.audio.models import AudioQuality
 from holomed.audio.service import AudioService
 from holomed.core.dispatcher import MessageDispatcher
-from holomed.protocol.builders import create_command, create_query
+from holomed.protocol.builders import create_command, create_query, create_event
 from tests.unit.audio.conftest import make_test_audio_chunk
 
 
@@ -77,6 +77,9 @@ def test_physical_id_validation_against_registry(
     service.initialize(test_runtime_context)
     service.start()
 
+    evt = create_event("platform.session.activated", "test", payload={"session_id": "default_session", "epoch_id": 1})
+    service.handle_session_activated_event(evt)
+
     # Valid physical_id succeeds
     chunk_valid, pcm_valid = make_test_audio_chunk(device_id="mic_01", physical_id="usb://mic_array_1")
     res = service.ingest_chunk(chunk_valid, pcm_valid)
@@ -101,6 +104,9 @@ def test_session_sequence_monotonic_enforcement_d200(
     service = AudioService(device_manager=dm)
     service.initialize(test_runtime_context)
     service.start()
+
+    evt = create_event("platform.session.activated", "test", payload={"session_id": "default_session", "epoch_id": 1})
+    service.handle_session_activated_event(evt)
 
     chunk1, pcm1 = make_test_audio_chunk(sequence_number=10)
     service.ingest_chunk(chunk1, pcm1)
@@ -128,6 +134,9 @@ def test_epoch_mismatch_rejected(
     service.initialize(test_runtime_context)  # epoch_id = 1
     service.start()
 
+    evt = create_event("platform.session.activated", "test", payload={"session_id": "default_session", "epoch_id": 1})
+    service.handle_session_activated_event(evt)
+
     chunk_wrong_epoch, pcm = make_test_audio_chunk(epoch_id=2)
     with pytest.raises(AudioEpochMismatchError, match="does not match active epoch"):
         service.ingest_chunk(chunk_wrong_epoch, pcm)
@@ -146,23 +155,26 @@ def test_dispatcher_queries_and_commands(
     service.start()
     dispatcher.start()
 
+    evt = create_event("platform.session.activated", "test", payload={"session_id": "test_session", "epoch_id": 1})
+    service.handle_session_activated_event(evt)
+
     # 1. audio.pipeline.status
-    q_status = create_query("audio.pipeline.status", "test_client", payload={})
+    q_status = create_query("audio.pipeline.status", "test_client", payload={}, metadata={"session_id": "test_session"})
     res_status = service.handle_status_query(q_status)
     assert res_status.payload["service_name"] == "audio_service"
     assert res_status.payload["state"] == "STARTED"
 
     # 2. audio.pipeline.audit
-    q_audit = create_query("audio.pipeline.audit", "test_client", payload={})
+    q_audit = create_query("audio.pipeline.audit", "test_client", payload={}, metadata={"session_id": "test_session"})
     res_audit = service.handle_audit_query(q_audit)
     assert res_audit.payload["is_consistent"] is True
 
     # 3. audio.tracker.tracks
-    q_tracks = create_query("audio.tracker.tracks", "test_client", payload={})
+    q_tracks = create_query("audio.tracker.tracks", "test_client", payload={}, metadata={"session_id": "test_session"})
     res_tracks = service.handle_tracks_query(q_tracks)
     assert "active_tracks_count" in res_tracks.payload
 
     # 4. audio.pipeline.reset
-    cmd_reset = create_command("audio.pipeline.reset", "test_client", payload={"epoch_id": 1})
+    cmd_reset = create_command("audio.pipeline.reset", "test_client", payload={"epoch_id": 1}, metadata={"session_id": "test_session"})
     res_reset = service.handle_reset_command(cmd_reset)
     assert res_reset.payload["reset_completed"] is True

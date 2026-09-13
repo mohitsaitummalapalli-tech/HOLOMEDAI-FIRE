@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import enum
 import json
 import math
+import re
 from types import MappingProxyType
 from typing import Any, Mapping, Optional, Sequence
 import unicodedata
@@ -19,6 +20,8 @@ from holomed.vision.exceptions import (
 )
 
 # Hard Architectural Bounds
+SESSION_ID_REGEX = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
+MAX_ACTIVE_PERCEPTION_SESSIONS: int = 32
 MAX_FRAME_WIDTH: int = 1920
 MAX_FRAME_HEIGHT: int = 1080
 MAX_FRAME_BYTES: int = 3145728  # 3.0 MiB
@@ -110,6 +113,7 @@ class FrameDescriptor:
     checksum_crc32: int
     epoch_id: int
     buffer_handle_id: str
+    session_id: Optional[str] = None
 
     def __post_init__(self) -> None:
         # Validate UUIDv4 frame_id
@@ -165,6 +169,9 @@ class FrameDescriptor:
             raise VisionValidationError(f"epoch_id must be positive int, got {self.epoch_id!r}")
         if not isinstance(self.buffer_handle_id, str) or not self.buffer_handle_id:
             raise VisionValidationError("buffer_handle_id cannot be empty")
+        if self.session_id is not None:
+            if not isinstance(self.session_id, str) or not SESSION_ID_REGEX.match(self.session_id):
+                raise VisionValidationError(f"Invalid session_id syntax: {self.session_id!r}")
 
 
 @dataclass(frozen=True)
