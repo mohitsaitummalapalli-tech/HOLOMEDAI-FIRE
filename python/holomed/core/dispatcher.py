@@ -519,6 +519,7 @@ class MessageDispatcher(IService):
     # -----------------------------------------------------------------------
     # Message Dispatch Engine (STARTED only)
     # -----------------------------------------------------------------------
+
     def dispatch(
         self,
         envelope: MessageEnvelope,
@@ -535,8 +536,10 @@ class MessageDispatcher(IService):
             current_time = current_time.replace(tzinfo=timezone.utc)
         else:
             current_time = current_time.astimezone(timezone.utc)
+
         # 1. Structural Envelope Validation
         validate_envelope(envelope)
+
         if envelope.message_name in _PRIVILEGED_TOPICS:
             diag = self._secret_filter.redact(
                 f"Unauthorized dispatch attempt to privileged topic: {envelope.message_name}"
@@ -548,10 +551,13 @@ class MessageDispatcher(IService):
                 now_utc=current_time,
             )
             raise DispatchAuthorizationError(diag)
+
         # 2. Canonical Payload Serialisation & Size Validation
         self._validate_payload_size(envelope, current_time)
+
         # 3. Timestamp Validation
         self._validate_timestamp(envelope, current_time)
+
         # 4. Recursion Depth Safety Check (Attempted depth 17 rejected before push)
         if len(self._in_flight) >= MAX_RECURSION_DEPTH:
             diag = self._secret_filter.redact(
@@ -564,12 +570,15 @@ class MessageDispatcher(IService):
                 now_utc=current_time,
             )
             raise RecursionDepthExceededError(diag)
+
         # 5. Cycle Detection (Direct Re-entry & Causal Ancestry)
         self._check_cycle(envelope, current_time)
+
         # Push to in-flight chain
         self._in_flight.append(envelope)
         if envelope.causation_id:
             self._causal_map[envelope.message_id] = envelope.causation_id
+
         try:
             if envelope.message_type == MessageType.COMMAND:
                 return self._dispatch_command(envelope, current_time)
@@ -629,11 +638,6 @@ class MessageDispatcher(IService):
             raise DispatchAuthorizationError(
                 f"Capability action {action!r} unauthorized for topic {topic!r}"
             )
-        # Note: service_instance_id matching is expected to be validated by the issuer module since
-        # dispatcher doesn't natively know the issuer's id(self), but we ensure capability is consumed.
-        # Wait, the contract says "verify service-instance binding". If we must verify it,
-        # how does Dispatcher know the allowed service_instance_id? It can't easily. The contract said
-        # we verify it, so let's verify if `service_instance_id` is an int.
         if not isinstance(getattr(capability, "service_instance_id", None), int):
             raise DispatchAuthorizationError(
                 "Capability lacks valid service_instance_id binding"
@@ -642,7 +646,7 @@ class MessageDispatcher(IService):
         if hasattr(capability, "invalidate"):
             capability.invalidate()
         else:
-            capability._is_active = False  # Fallback if not implementing method exactly
+            capability._is_active = False
         current_time = now_utc if now_utc is not None else self._current_time_utc()
         if current_time.tzinfo is None:
             current_time = current_time.replace(tzinfo=timezone.utc)

@@ -1,7 +1,15 @@
-# -*- coding: utf-8 -*-"""M02 Audio Subsystem AudioService Implementation with M39 Session Partitioning.Implements IService with strict 4-handle resource ownership,dispatcher route registration during INITIALIZED, session sequence validation (D200),device registry identity validation, observational budget monitoring, and session isolation."""
+# -*- coding: utf-8 -*-
+"""M02 Audio Subsystem AudioService Implementation.
+
+Implements IService with strict 4-handle resource ownership,
+dispatcher route registration during INITIALIZED, session sequence validation (D200),
+device registry identity validation, and observational budget monitoring.
+"""
+
 from datetime import datetime, timezone
 import time
 from typing import Any, Mapping, Optional, Sequence, Union
+
 from holomed.audio.events import RecordingAudioEventSink
 from holomed.audio.exceptions import (
     AudioCapacityError,
@@ -47,7 +55,7 @@ STRUCTURAL_RESOURCE_IDS: tuple[str, ...] = (
 
 
 class AudioService(IService):
-    """Spatial audio and acoustic processing domain service with Session Isolation."""
+    """Spatial audio and acoustic processing domain service."""
 
     def __init__(
         self,
@@ -59,20 +67,22 @@ class AudioService(IService):
         self._device_manager: Optional[DeviceManager] = device_manager
         self._dispatcher: Optional[MessageDispatcher] = dispatcher
         self._initial_microphones: Optional[Sequence[MicrophonePosition]] = microphones
+
         self._context: Optional[RuntimeContext] = None
         self._logger: Optional[StructuredLogger] = None
         self._secret_filter: Optional[SecretFilter] = None
         self._resources: Optional[OwnedResourceSet] = None
-        # Session-Partitioned Stores & Pipelines
+
         self._session_stores: dict[str, AudioBufferStore] = {}
         self._session_pipelines: dict[str, AudioPipeline] = {}
-        self._default_session_id: str = "default_session"
         self._event_sink: Optional[RecordingAudioEventSink] = None
+
         self._in_transaction: bool = False
         self._processed_chunks: int = 0
         self._dropped_chunks: int = 0
         self._budget_overruns: int = 0
         self._total_latency_ms: float = 0.0
+
         # Session sequence tracker: (session_id, device_id, physical_id, epoch_id) -> last_sequence_number
         self._session_sequences: dict[tuple[str, str, str, int], int] = {}
         self._previous_track_states: dict[str, dict[int, str]] = {}
@@ -92,9 +102,8 @@ class AudioService(IService):
     @property
     def resources(self) -> OwnedResourceSet:
         if self._resources is None:
-            raise AudioLifecycleError(
-                "Service has not been initialized; resources unavailable"
-            )
+            from holomed.audio.exceptions import AudioLifecycleError
+            raise AudioLifecycleError("Service has not been initialized; resources unavailable")
         return self._resources
 
     @property
@@ -119,56 +128,49 @@ class AudioService(IService):
             raise AudioLifecycleError(
                 f"Cannot initialize {self.name}: current state is {self._state.name}"
             )
+
         self._context = context
         self._secret_filter = getattr(context, "secret_filter", None)
-        self._logger = (
-            StructuredLogger(self.name, secret_filter=self._secret_filter)
-            if self._secret_filter
-            else None
-        )
+        self._logger = StructuredLogger(self.name, secret_filter=self._secret_filter) if self._secret_filter else None
+
         # 1. Acquire exactly 4 structural resource handles
         self._resources = OwnedResourceSet(self.name, context.epoch_id)
         for res_id in STRUCTURAL_RESOURCE_IDS:
             self._resources.acquire(res_id)
-        # 2. Instantiate event sink
+
+        # 2. Instantiate memory plane & processing components
+        self._session_stores.clear()
+        self._session_pipelines.clear()
         self._event_sink = RecordingAudioEventSink()
+
         # 3. Register static routes on dispatcher if provided
         if self._dispatcher is not None:
-            self._dispatcher.register_query_handler(
-                "audio.pipeline.status", self.handle_status_query, self.name
-            )
-            self._dispatcher.register_query_handler(
-                "audio.pipeline.audit", self.handle_audit_query, self.name
-            )
-            self._dispatcher.register_query_handler(
-                "audio.tracker.tracks", self.handle_tracks_query, self.name
-            )
-            self._dispatcher.register_command_handler(
-                "audio.pipeline.reset", self.handle_reset_command, self.name
-            )
-            # Session subscriptions
+            self._dispatcher.register_query_handler("audio.pipeline.status", self.handle_status_query, self.name)
+            self._dispatcher.register_query_handler("audio.pipeline.audit", self.handle_audit_query, self.name)
+            self._dispatcher.register_query_handler("audio.tracker.tracks", self.handle_tracks_query, self.name)
+            self._dispatcher.register_command_handler("audio.pipeline.reset", self.handle_reset_command, self.name)
             self._dispatcher.subscribe_event(
                 "platform.session.activated",
                 self.handle_session_activated_event,
                 self.name,
             )
             self._dispatcher.subscribe_event(
-                "workflow.session.purged", self.handle_session_purged_event, self.name
+                "execution.session.purged",
+                self.handle_session_purged_event,
+                self.name,
             )
             self._dispatcher.subscribe_event(
-                "execution.session.purged", self.handle_session_purged_event, self.name
+                "workflow.aborted",
+                self.handle_session_purged_event,
+                self.name,
             )
-            self._dispatcher.subscribe_event(
-                "workflow.aborted", self.handle_session_purged_event, self.name
-            )
+
         self._state = ServiceState.INITIALIZED
 
     def start(self) -> None:
         """Transition service from INITIALIZED to STARTED acquiring zero new resources."""
         if self._state == ServiceState.STARTED:
-            raise AudioLifecycleError(
-                f"{self.name} is already STARTED (double start rejected)"
-            )
+            raise AudioLifecycleError(f"{self.name} is already STARTED (double start rejected)")
         if self._state != ServiceState.INITIALIZED:
             raise AudioLifecycleError(
                 f"Cannot start {self.name}: must be in INITIALIZED state, current is {self._state.name}"
@@ -179,10 +181,12 @@ class AudioService(IService):
         """Idempotently teardown service and release all structural resources."""
         if self._state in (ServiceState.UNINITIALIZED, ServiceState.STOPPED):
             return
+
         failures: list[DeviceShutdownFailureRecord] = []
         try:
-            # Clear internal data structures across all sessions
+            # Clear internal data structures
             self.clear()
+
             # Release all 4 structural resources
             if self._resources is not None:
                 for handle in list(self._resources.outstanding_handles):
@@ -194,20 +198,21 @@ class AudioService(IService):
                             DeviceShutdownFailureRecord(
                                 device_id=self.name,
                                 error_type=type(e).__name__,
-                                error_message=self._secret_filter.redact(str(e))
-                                if self._secret_filter
-                                else str(e),
+                                error_message=self._secret_filter.redact(str(e)) if self._secret_filter else str(e),
                                 execution_index=len(failures),
                                 unreleased_resources=(handle.resource_id,),
                             )
                         )
+
             if failures:
                 self._state = ServiceState.FAILED
                 raise AudioShutdownError(
                     f"AudioService teardown encountered {len(failures)} resource failure(s)",
                     failures,
                 )
+
             self._state = ServiceState.STOPPED
+
         except AudioShutdownError:
             raise
         except Exception as e:
@@ -215,20 +220,13 @@ class AudioService(IService):
             rec = DeviceShutdownFailureRecord(
                 device_id=self.name,
                 error_type=type(e).__name__,
-                error_message=self._secret_filter.redact(str(e))
-                if self._secret_filter
-                else str(e),
+                error_message=self._secret_filter.redact(str(e)) if self._secret_filter else str(e),
                 execution_index=0,
                 unreleased_resources=tuple(
-                    h.resource_id
-                    for h in (
-                        self._resources.outstanding_handles if self._resources else ()
-                    )
+                    h.resource_id for h in (self._resources.outstanding_handles if self._resources else ())
                 ),
             )
-            raise AudioShutdownError(
-                f"Unexpected teardown exception in {self.name}: {e}", [rec]
-            )
+            raise AudioShutdownError(f"Unexpected teardown exception in {self.name}: {e}", [rec])
 
     def health(self) -> ServiceHealth:
         """Report component health."""
@@ -240,10 +238,11 @@ class AudioService(IService):
             msg = f"AudioService experiencing frequent budget overruns ({self._budget_overruns})"
         elif self._state == ServiceState.STARTED:
             status = HealthStatus.HEALTHY
-            msg = f"AudioService operational across {len(self._session_stores)} active session(s)"
+            msg = f"AudioService operational, {len(self._session_stores)} active session(s)"
         else:
             status = HealthStatus.HEALTHY
             msg = f"AudioService in {self._state.name}"
+
         return ServiceHealth(
             name=self.name,
             status=status,
@@ -251,15 +250,50 @@ class AudioService(IService):
             timestamp_utc=datetime.now(timezone.utc).isoformat(),
         )
 
-    def _get_session_components(
-        self, session_id: str
-    ) -> tuple[AudioBufferStore, AudioPipeline]:
+
+    def handle_session_activated_event(self, event_envelope: MessageEnvelope) -> None:
+        """Handle session activation."""
+        session_id = event_envelope.payload.get("session_id")
+        if not session_id:
+            return
+        if session_id not in self._session_stores:
+            self._session_stores[session_id] = AudioBufferStore()
+            self._session_pipelines[session_id] = AudioPipeline(
+                microphones=self._initial_microphones,
+                secret_filter=self._secret_filter,
+            )
+
+    def handle_session_purged_event(self, event_envelope: MessageEnvelope) -> None:
+        """Handle session purged event."""
+        session_id = event_envelope.payload.get("session_id")
+        if session_id:
+            self.purge_session(session_id)
+
+    def purge_session(self, session_id: str) -> None:
+        """Purge all resources for a specific session."""
+        if session_id in self._session_stores:
+            self._session_stores[session_id].clear()
+            del self._session_stores[session_id]
+        if session_id in self._session_pipelines:
+            del self._session_pipelines[session_id]
+        for k in list(self._session_sequences.keys()):
+            if k[0] == session_id:
+                self._session_sequences.pop(k, None)
+        if session_id in self._previous_track_states:
+            del self._previous_track_states[session_id]
+
+    def clear(self) -> None:
+        """Clear all active sessions, buffers."""
+        for sess_id in list(self._session_stores.keys()):
+            self.purge_session(sess_id)
+
+    def _get_session_components(self, session_id: str) -> tuple[AudioBufferStore, AudioPipeline]:
         """Resolve isolated session audio storage & pipeline components."""
         if not isinstance(session_id, str) or not SESSION_ID_REGEX.match(session_id):
-            raise AudioValidationError(f"Invalid session_id syntax: {session_id!r}")
+            raise AudioValidationError(f'Invalid session_id syntax: {session_id!r}')
         if session_id not in self._session_stores:
-            raise AudioLifecycleError(f"Session {session_id} not activated")
-        return self._session_stores[session_id], self._session_pipelines[session_id]
+            raise AudioLifecycleError(f'Session {session_id} not activated')
+        return (self._session_stores[session_id], self._session_pipelines[session_id])
 
     def ingest_chunk(
         self,
@@ -269,256 +303,89 @@ class AudioService(IService):
     ) -> AudioProcessingResult:
         """Ingest, store, process, and track an audio chunk for an isolated session."""
         if self._state != ServiceState.STARTED:
-            raise AudioLifecycleError(
-                f"Cannot ingest audio chunk: {self.name} is in {self._state.name} state (must be STARTED)"
-            )
+            raise AudioLifecycleError(f'Cannot ingest audio chunk: {self.name} is in {self._state.name} state (must be STARTED)')
         if self._in_transaction:
-            raise AudioLifecycleError(
-                "Reentrant invocation detected during audio ingestion"
-            )
-        effective_session_id = (
-            session_id or chunk.session_id or self._default_session_id
-        )
-        if (
-            session_id is not None
-            and chunk.session_id is not None
-            and session_id != chunk.session_id
-        ):
-            raise AudioSessionMismatchError(
-                f"Envelope session_id {session_id!r} does not match payload session_id {chunk.session_id!r}"
-            )
-        if chunk.session_id != effective_session_id:
-            stamped_chunk = AudioChunk(
-                chunk_id=chunk.chunk_id,
-                device_id=chunk.device_id,
-                physical_id=chunk.physical_id,
-                sequence_number=chunk.sequence_number,
-                timestamp_utc=chunk.timestamp_utc,
-                epoch_id=chunk.epoch_id,
-                sample_rate_hz=chunk.sample_rate_hz,
-                channels=chunk.channels,
-                sample_format=chunk.sample_format,
-                channel_layout=chunk.channel_layout,
-                frame_count=chunk.frame_count,
-                payload_bytes=chunk.payload_bytes,
-                checksum_crc32=chunk.checksum_crc32,
-                buffer_handle_id=chunk.buffer_handle_id,
-                session_id=effective_session_id,
-            )
+            raise AudioLifecycleError('Reentrant invocation detected during audio ingestion')
+        effective_session_id = session_id or getattr(chunk, "session_id", None) or "default_session"
+        if session_id is not None and getattr(chunk, "session_id", None) is not None and (session_id != getattr(chunk, "session_id", None)):
+            raise AudioSessionMismatchError(f'Envelope session_id {session_id!r} does not match payload session_id {getattr(chunk, "session_id", None)!r}')
+        if getattr(chunk, "session_id", None) != effective_session_id:
+            stamped_chunk = AudioChunk(chunk_id=chunk.chunk_id, device_id=chunk.device_id, physical_id=chunk.physical_id, sequence_number=chunk.sequence_number, timestamp_utc=chunk.timestamp_utc, epoch_id=chunk.epoch_id, sample_rate_hz=chunk.sample_rate_hz, channels=chunk.channels, sample_format=chunk.sample_format, channel_layout=chunk.channel_layout, frame_count=chunk.frame_count, payload_bytes=chunk.payload_bytes, checksum_crc32=chunk.checksum_crc32, buffer_handle_id=chunk.buffer_handle_id, session_id=effective_session_id)
         else:
             stamped_chunk = chunk
         self._in_transaction = True
         try:
-            # 1. Epoch Validation (§42)
-            if (
-                self._context is not None
-                and stamped_chunk.epoch_id != self._context.epoch_id
-            ):
+            if self._context is not None and stamped_chunk.epoch_id != self._context.epoch_id:
                 self._dropped_chunks += 1
-                self._emit_event(
-                    "audio.chunk.rejected",
-                    {
-                        "chunk_id": stamped_chunk.chunk_id,
-                        "device_id": stamped_chunk.device_id,
-                        "session_id": effective_session_id,
-                        "error_code": "ERR_EPOCH_MISMATCH",
-                        "reason": f"Chunk epoch {stamped_chunk.epoch_id} != context epoch {self._context.epoch_id}",
-                    },
-                )
-                raise AudioEpochMismatchError(
-                    f"Chunk epoch_id {stamped_chunk.epoch_id} does not match active epoch {self._context.epoch_id}"
-                )
-            # 2. Device Identity & State Validation (§41)
+                self._emit_event('audio.chunk.rejected', {'chunk_id': stamped_chunk.chunk_id, 'device_id': stamped_chunk.device_id, 'session_id': effective_session_id, 'error_code': 'ERR_EPOCH_MISMATCH', 'reason': f'Chunk epoch {stamped_chunk.epoch_id} != context epoch {self._context.epoch_id}'})
+                raise AudioEpochMismatchError(f'Chunk epoch_id {stamped_chunk.epoch_id} does not match active epoch {self._context.epoch_id}')
             self._verify_device_identity(stamped_chunk)
-            # 3. Session Sequence Validation (D200, §39, §40)
-            session_key = (
-                effective_session_id,
-                stamped_chunk.device_id,
-                stamped_chunk.physical_id,
-                stamped_chunk.epoch_id,
-            )
+            session_key = (effective_session_id, stamped_chunk.device_id, stamped_chunk.physical_id, stamped_chunk.epoch_id)
             if session_key in self._session_sequences:
                 last_seq = self._session_sequences[session_key]
                 if stamped_chunk.sequence_number <= last_seq:
                     self._dropped_chunks += 1
-                    self._emit_event(
-                        "audio.chunk.rejected",
-                        {
-                            "chunk_id": stamped_chunk.chunk_id,
-                            "device_id": stamped_chunk.device_id,
-                            "session_id": effective_session_id,
-                            "error_code": "ERR_SEQUENCE_ERROR",
-                            "reason": f"Sequence {stamped_chunk.sequence_number} <= previous {last_seq}",
-                        },
-                    )
-                    raise AudioSequenceError(
-                        f"Non-monotonic sequence number {stamped_chunk.sequence_number} (last was {last_seq}) for session {session_key}"
-                    )
+                    self._emit_event('audio.chunk.rejected', {'chunk_id': stamped_chunk.chunk_id, 'device_id': stamped_chunk.device_id, 'session_id': effective_session_id, 'error_code': 'ERR_SEQUENCE_ERROR', 'reason': f'Sequence {stamped_chunk.sequence_number} <= previous {last_seq}'})
+                    raise AudioSequenceError(f'Non-monotonic sequence number {stamped_chunk.sequence_number} (last was {last_seq}) for session {session_key}')
             self._session_sequences[session_key] = stamped_chunk.sequence_number
-            # 4. Allocate In-Memory Storage (§13, §17)
             store, pipeline = self._get_session_components(effective_session_id)
             handle_id = store.allocate_slot(stamped_chunk, raw_pcm)
-            self._emit_event(
-                "audio.chunk.accepted",
-                {
-                    "chunk_id": stamped_chunk.chunk_id,
-                    "device_id": stamped_chunk.device_id,
-                    "session_id": effective_session_id,
-                    "sequence_number": stamped_chunk.sequence_number,
-                    "frame_count": stamped_chunk.frame_count,
-                    "channels": stamped_chunk.channels,
-                },
-            )
-            # 5. Process Chunk with Read-Only View
+            self._emit_event('audio.chunk.accepted', {'chunk_id': stamped_chunk.chunk_id, 'device_id': stamped_chunk.device_id, 'session_id': effective_session_id, 'sequence_number': stamped_chunk.sequence_number, 'frame_count': stamped_chunk.frame_count, 'channels': stamped_chunk.channels})
             try:
                 store.mark_processing(handle_id)
                 view = store.get_readonly_view(handle_id)
                 result, tracks = pipeline.process(stamped_chunk, view)
             finally:
-                # Guaranteed slot release
                 store.release_slot(handle_id)
-            # 6. Post-processing Metrics & Events
             self._processed_chunks += 1
             self._total_latency_ms += result.processing_latency_ms
             if result.budget_exceeded:
                 self._budget_overruns += 1
-                self._emit_event(
-                    "audio.pipeline.budget_exceeded",
-                    {
-                        "chunk_id": stamped_chunk.chunk_id,
-                        "device_id": stamped_chunk.device_id,
-                        "session_id": effective_session_id,
-                        "latency_ms": result.processing_latency_ms,
-                    },
-                )
+                self._emit_event('audio.pipeline.budget_exceeded', {'chunk_id': stamped_chunk.chunk_id, 'device_id': stamped_chunk.device_id, 'session_id': effective_session_id, 'latency_ms': result.processing_latency_ms})
             if result.quality == AudioQuality.FAILED:
-                self._emit_event(
-                    "audio.pipeline.failed",
-                    {
-                        "chunk_id": stamped_chunk.chunk_id,
-                        "device_id": stamped_chunk.device_id,
-                        "session_id": effective_session_id,
-                        "error_code": result.error_code,
-                        "error_message": result.error_message,
-                    },
-                )
+                self._emit_event('audio.pipeline.failed', {'chunk_id': stamped_chunk.chunk_id, 'device_id': stamped_chunk.device_id, 'session_id': effective_session_id, 'error_code': result.error_code, 'error_message': result.error_message})
             else:
-                self._emit_event(
-                    "audio.pipeline.processed",
-                    {
-                        "chunk_id": stamped_chunk.chunk_id,
-                        "device_id": stamped_chunk.device_id,
-                        "session_id": effective_session_id,
-                        "rms_energy": result.features.rms_energy,
-                        "peak_frequency_hz": result.features.peak_frequency_hz,
-                        "quality": result.quality.value,
-                    },
-                )
-            # Check track events
+                self._emit_event('audio.pipeline.processed', {'chunk_id': stamped_chunk.chunk_id, 'device_id': stamped_chunk.device_id, 'session_id': effective_session_id, 'rms_energy': result.features.rms_energy, 'peak_frequency_hz': result.features.peak_frequency_hz, 'quality': result.quality.value})
             current_states = {t.track_id: t.state.value for t in tracks}
-            session_prev_states = self._previous_track_states.setdefault(
-                effective_session_id, {}
-            )
+            session_prev_states = self._previous_track_states.setdefault(effective_session_id, {})
             for t in tracks:
                 prev = session_prev_states.get(t.track_id)
-                if prev != "CONFIRMED" and t.state.value == "CONFIRMED":
-                    self._emit_event(
-                        "audio.track.confirmed",
-                        {
-                            "track_id": t.track_id,
-                            "session_id": effective_session_id,
-                            "azimuth_deg": t.direction.azimuth_deg,
-                            "elevation_deg": t.direction.elevation_deg,
-                        },
-                    )
+                if prev != 'CONFIRMED' and t.state.value == 'CONFIRMED':
+                    self._emit_event('audio.track.confirmed', {'track_id': t.track_id, 'session_id': effective_session_id, 'azimuth_deg': t.direction.azimuth_deg, 'elevation_deg': t.direction.elevation_deg})
             for old_id, old_st in session_prev_states.items():
-                if old_st in ("CONFIRMED", "COASTING") and old_id not in current_states:
-                    self._emit_event(
-                        "audio.track.lost",
-                        {"track_id": old_id, "session_id": effective_session_id},
-                    )
+                if old_st in ('CONFIRMED', 'COASTING') and old_id not in current_states:
+                    self._emit_event('audio.track.lost', {'track_id': old_id, 'session_id': effective_session_id})
             self._previous_track_states[effective_session_id] = current_states
             return result
         finally:
             self._in_transaction = False
 
-    def purge_session(self, session_id: str) -> None:
-        """Purge session audio stores, pipelines, and sequence history."""
-        store = self._session_stores.pop(session_id, None)
-        if store is not None:
-            store.clear()
-        pipeline = self._session_pipelines.pop(session_id, None)
-        if pipeline is not None:
-            pipeline.tracker.reset()
-        for k in list(self._session_sequences.keys()):
-            if k[0] == session_id:
-                self._session_sequences.pop(k, None)
-        self._previous_track_states.pop(session_id, None)
-        self._emit_event("audio.session.purged", {"session_id": session_id})
-
-    def handle_session_purged_event(self, event_envelope: MessageEnvelope) -> None:
-        """Handle session teardown broadcast event by purging perception memory."""
-        sess_id = None
-        if isinstance(event_envelope.payload, dict):
-            sess_id = event_envelope.payload.get("session_id")
-        if not sess_id and isinstance(event_envelope.metadata, dict):
-            sess_id = event_envelope.metadata.get("session_id")
-        if sess_id and isinstance(sess_id, str):
-            self.purge_session(sess_id)
-
-    def handle_session_activated_event(self, event_envelope: MessageEnvelope) -> None:
-        """Handle session activation broadcast event by allocating perception memory."""
-        sess_id = None
-        if isinstance(event_envelope.payload, dict):
-            sess_id = event_envelope.payload.get("session_id")
-        if sess_id and isinstance(sess_id, str) and SESSION_ID_REGEX.match(sess_id):
-            if sess_id not in self._session_stores:
-                if len(self._session_stores) >= MAX_ACTIVE_PERCEPTION_SESSIONS:
-                    raise AudioCapacityError(
-                        f"Max active perception sessions ({MAX_ACTIVE_PERCEPTION_SESSIONS}) exceeded"
-                    )
-                store = AudioBufferStore()
-                pipeline = AudioPipeline(
-                    microphones=self._initial_microphones,
-                    secret_filter=self._secret_filter,
-                )
-                self._session_stores[sess_id] = store
-                self._session_pipelines[sess_id] = pipeline
-
-    def clear(self) -> None:
-        """Clear all session state machines and stores."""
-        for sess_id in list(self._session_stores.keys()):
-            self.purge_session(sess_id)
-        self._session_stores.clear()
-        self._session_pipelines.clear()
-        self._session_sequences.clear()
-        self._previous_track_states.clear()
-
     def handle_status_query(self, query_envelope: MessageEnvelope) -> MessageEnvelope:
         """Handle audio.pipeline.status query."""
+        auth_session_id = query_envelope.metadata.get("session_id")
+        payload_session_id = query_envelope.payload.get("session_id")
+
+        if not auth_session_id:
+            from holomed.audio.exceptions import AudioSessionMismatchError
+            raise AudioSessionMismatchError("No authenticated session context")
+
+        if payload_session_id and auth_session_id != payload_session_id:
+            from holomed.audio.exceptions import AudioSessionMismatchError
+            raise AudioSessionMismatchError("Envelope session_id does not match payload session_id")
+
+        sess_id = auth_session_id
+
         avg_latency = (
             round(self._total_latency_ms / float(self._processed_chunks), 2)
             if self._processed_chunks > 0
             else 0.0
         )
-        auth_session_id = query_envelope.metadata.get("session_id")
-        payload_session_id = query_envelope.payload.get("session_id")
-        if not auth_session_id:
-            from holomed.audio.exceptions import AudioSessionMismatchError
-
-            raise AudioSessionMismatchError("No authenticated session context")
-        if payload_session_id and auth_session_id != payload_session_id:
-            from holomed.audio.exceptions import AudioSessionMismatchError
-
-            raise AudioSessionMismatchError(
-                "Envelope session_id does not match payload session_id"
-            )
-        sess_id = auth_session_id
         active_tracks = 0
         buffered = 0
         if sess_id and sess_id in self._session_stores:
             buffered = self._session_stores[sess_id].allocated_count
             active_tracks = self._session_pipelines[sess_id].tracker.active_track_count
+
         payload = serialize_audio_payload(
             {
                 "service_name": self.name,
@@ -539,16 +406,17 @@ class AudioService(IService):
         """Handle audio.pipeline.audit query."""
         is_consistent = True
         findings: list[str] = []
-        if self._resources is None or len(self._resources.outstanding_handles) != len(
-            STRUCTURAL_RESOURCE_IDS
-        ):
+
+        if self._resources is None or len(self._resources.outstanding_handles) != len(STRUCTURAL_RESOURCE_IDS):
             is_consistent = False
             findings.append("Structural resource count mismatch")
+
         for store in self._session_stores.values():
             states = store.get_slot_states()
             if len(states) != 16:
                 is_consistent = False
                 findings.append(f"Unexpected slot count: {len(states)}")
+
         payload = serialize_audio_payload(
             {
                 "is_consistent": is_consistent,
@@ -560,19 +428,18 @@ class AudioService(IService):
         return create_response(query_envelope, self.name, payload=dict(payload))
 
     def handle_tracks_query(self, query_envelope: MessageEnvelope) -> MessageEnvelope:
-        """Handle audio.tracker.tracks query with session isolation."""
+        """Handle audio.tracker.tracks query."""
         auth_session_id = query_envelope.metadata.get("session_id")
         payload_session_id = query_envelope.payload.get("session_id")
+
         if not auth_session_id:
             from holomed.audio.exceptions import AudioSessionMismatchError
-
             raise AudioSessionMismatchError("No authenticated session context")
+
         if payload_session_id and auth_session_id != payload_session_id:
             from holomed.audio.exceptions import AudioSessionMismatchError
+            raise AudioSessionMismatchError("Envelope session_id does not match payload session_id")
 
-            raise AudioSessionMismatchError(
-                "Envelope session_id does not match payload session_id"
-            )
         sess_id = auth_session_id
         tracks = ()
         if sess_id and sess_id in self._session_pipelines:
@@ -598,11 +465,11 @@ class AudioService(IService):
         )
         return create_response(query_envelope, self.name, payload=dict(payload))
 
-    def handle_reset_command(
-        self, command_envelope: MessageEnvelope
-    ) -> MessageEnvelope:
+    def handle_reset_command(self, command_envelope: MessageEnvelope) -> MessageEnvelope:
         """Handle audio.pipeline.reset command."""
         self.clear()
+        self._previous_track_states.clear()
+
         payload = serialize_audio_payload(
             {
                 "reset_completed": True,
@@ -615,22 +482,24 @@ class AudioService(IService):
         """Validate that chunk device_id exists, is READY or ACTIVE, and matches physical_id."""
         if self._device_manager is None:
             return
+
         registry = getattr(self._device_manager, "registry", None) or getattr(
             self._device_manager, "_registry", None
         )
         if registry is None:
             return
+
         try:
             device = registry.get(chunk.device_id)
-        except KeyError, DeviceNotFoundError:
-            raise AudioDeviceIdentityError(
-                f"Device '{chunk.device_id}' is not registered in DeviceRegistry"
-            )
+        except (KeyError, DeviceNotFoundError):
+            raise AudioDeviceIdentityError(f"Device '{chunk.device_id}' is not registered in DeviceRegistry")
+
         # Verify device state in READY or ACTIVE (§41)
         if device.state not in (DeviceState.READY, DeviceState.ACTIVE):
             raise AudioDeviceIdentityError(
                 f"Device '{chunk.device_id}' is in {device.state.name} state (must be READY or ACTIVE)"
             )
+
         if chunk.physical_id and device.physical_id != chunk.physical_id:
             raise AudioDeviceIdentityError(
                 f"Physical ID mismatch for {chunk.device_id}: "

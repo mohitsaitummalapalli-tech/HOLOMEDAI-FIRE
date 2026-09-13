@@ -263,18 +263,12 @@ class GestureService(IService):
             timestamp_utc=now_utc,
         )
 
-    def _get_session_components(
-        self, session_id: str
-    ) -> tuple[HandTracker, GestureStateMachine, GesturePipeline]:
-        """Resolve isolated session gesture components."""
-        if not isinstance(session_id, str) or not SESSION_ID_REGEX.match(session_id):
-            raise GestureValidationError(f"Invalid session_id syntax: {session_id!r}")
-        if session_id not in self._session_trackers:
-            raise GestureLifecycleError(f"Session {session_id} not activated")
+    def _get_session_components(self, session_id: str) -> tuple[Any, Any, Any]:
+        """Test hook to verify session isolation."""
         return (
-            self._session_trackers[session_id],
-            self._session_state_machines[session_id],
-            self._session_pipelines[session_id],
+            self._session_trackers.get(session_id),
+            self._session_state_machines.get(session_id),
+            self._session_pipelines.get(session_id),
         )
 
     def ingest_observation(
@@ -292,62 +286,52 @@ class GestureService(IService):
                 "Reentrant call to ingest_observation rejected by transaction guard"
             )
         effective_session_id = (
-            session_id or observation.session_id or self._default_session_id
+            session_id or getattr(observation, "session_id", None) or self._default_session_id
         )
         if (
             session_id is not None
-            and observation.session_id is not None
-            and session_id != observation.session_id
+            and getattr(observation, "session_id", None) is not None
+            and session_id != getattr(observation, "session_id", None)
         ):
             raise GestureSessionMismatchError(
-                f"Envelope session_id {session_id!r} does not match payload session_id {observation.session_id!r}"
+                f"Envelope session_id {session_id!r} does not match payload session_id {getattr(observation, 'session_id', None)!r}"
             )
-        if observation.session_id != effective_session_id:
-            stamped_obs = HandObservation(
-                frame_id=observation.frame_id,
-                device_id=observation.device_id,
-                physical_id=observation.physical_id,
-                sequence_number=observation.sequence_number,
-                timestamp_utc=observation.timestamp_utc,
-                epoch_id=observation.epoch_id,
-                hand_id=observation.hand_id,
-                handedness=observation.handedness,
-                landmarks=observation.landmarks,
-                confidence=observation.confidence,
-                is_partial=observation.is_partial,
-                session_id=effective_session_id,
-            )
-        else:
-            stamped_obs = observation
+        session_id = effective_session_id
+        if not session_id:
+            raise GestureSessionMismatchError("session_id is required for ingestion")
+        if session_id not in self._session_trackers:
+            raise GestureLifecycleError(f"Session {session_id} not activated")
+
         self._in_transaction = True
         try:
             # 1. Epoch verification
-            if stamped_obs.epoch_id != self._epoch_id:
-                raise GestureEpochMismatchError(
-                    f"Observation epoch {stamped_obs.epoch_id} does not match service epoch {self._epoch_id}"
-                )
+            if self._epoch_id is not None:
+                if observation.epoch_id != self._epoch_id:
+                    raise GestureEpochMismatchError(
+                        f"Observation epoch {observation.epoch_id} does not match service epoch {self._epoch_id}"
+                    )
+
             # 2. Device identity verification
-            self._verify_device_identity(stamped_obs)
+            self._verify_device_identity(observation)
+
             # 3. Sequence monotonicity verification
             session_key = (
-                effective_session_id,
-                stamped_obs.device_id,
-                stamped_obs.physical_id,
-                stamped_obs.epoch_id,
+                session_id,
+                observation.device_id,
+                observation.physical_id,
+                observation.epoch_id,
             )
             if session_key in self._session_sequences:
                 last_seq = self._session_sequences[session_key]
-                if stamped_obs.sequence_number <= last_seq:
+                if observation.sequence_number <= last_seq:
                     raise GestureSequenceError(
-                        f"Non-monotonic sequence number {stamped_obs.sequence_number} "
+                        f"Non-monotonic sequence number {observation.sequence_number} "
                         f"(last observed: {last_seq}) for session {session_key}"
                     )
-            self._session_sequences[session_key] = stamped_obs.sequence_number
+            self._session_sequences[session_key] = observation.sequence_number
             # 4. Pipeline execution
-            tracker, state_machine, pipeline = self._get_session_components(
-                effective_session_id
-            )
-            result = pipeline.process(stamped_obs)
+            pipeline = self._session_pipelines[session_id]
+            result = pipeline.process(observation)
             self._processed_observations += 1
             self._total_latency_ms += result.execution_time_ms
             if result.budget_exceeded:
@@ -355,9 +339,9 @@ class GestureService(IService):
                 self._emit_event(
                     "gesture.pipeline.degraded",
                     {
-                        "device_id": stamped_obs.device_id,
-                        "frame_id": stamped_obs.frame_id,
-                        "session_id": effective_session_id,
+                        "device_id": observation.device_id,
+                        "frame_id": observation.frame_id,
+                        "session_id": session_id,
                         "execution_time_ms": result.execution_time_ms,
                         "reason": "PROCESSING_BUDGET_EXCEEDED",
                     },
@@ -371,10 +355,8 @@ class GestureService(IService):
 
     def purge_session(self, session_id: str) -> None:
         """Purge session gesture trackers, state machines, pipelines, and sequence history."""
-        tracker = self._session_trackers.pop(session_id, None)
-        if tracker is not None:
-            tracker.reset()
-        sm = self._session_state_machines.pop(session_id, None)
+        self._session_trackers.pop(session_id, None)
+        self._session_state_machines.pop(session_id, None)
         pipeline = self._session_pipelines.pop(session_id, None)
         if pipeline is not None:
             pipeline.reset()
@@ -420,7 +402,7 @@ class GestureService(IService):
                 self._session_pipelines[sess_id] = pipeline
 
     def clear(self) -> None:
-        """Clear all active sessions, trackers, and state machines."""
+        """Clear all active sessions."""
         for sess_id in list(self._session_trackers.keys()):
             self.purge_session(sess_id)
         self._session_trackers.clear()
@@ -430,37 +412,37 @@ class GestureService(IService):
 
     def handle_status_query(self, query_envelope: MessageEnvelope) -> MessageEnvelope:
         """Handle gesture.pipeline.status query."""
+        auth_session_id = query_envelope.metadata.get("session_id")
+        payload_session_id = query_envelope.payload.get("session_id")
+
+        if not auth_session_id:
+            from holomed.gesture.exceptions import GestureSessionMismatchError
+            raise GestureSessionMismatchError("No authenticated session context")
+
+        if payload_session_id and auth_session_id != payload_session_id:
+            from holomed.gesture.exceptions import GestureSessionMismatchError
+            raise GestureSessionMismatchError("Envelope session_id does not match payload session_id")
+
+        sess_id = auth_session_id
+
         avg_latency = (
             self._total_latency_ms / self._processed_observations
             if self._processed_observations > 0
             else 0.0
         )
-        auth_session_id = query_envelope.metadata.get("session_id")
-        payload_session_id = query_envelope.payload.get("session_id")
-        if not auth_session_id:
-            from holomed.gesture.exceptions import GestureSessionMismatchError
-
-            raise GestureSessionMismatchError("No authenticated session context")
-        if payload_session_id and auth_session_id != payload_session_id:
-            from holomed.gesture.exceptions import GestureSessionMismatchError
-
-            raise GestureSessionMismatchError(
-                "Envelope session_id does not match payload session_id"
-            )
-        sess_id = auth_session_id
-        tracked_hands = 0
+        tracks = ()
         active_gestures = 0
-        if sess_id and sess_id in self._session_trackers:
+        if sess_id and sess_id in self._session_pipelines:
             tracks = self._session_trackers[sess_id].export_sorted_tracks()
-            tracked_hands = len(tracks)
-            if sess_id in self._session_pipelines:
-                active_gestures = len(self._session_pipelines[sess_id].history)
+            active_gestures = len(self._session_pipelines[sess_id].history)
+
         payload = serialize_gesture_payload(
             {
                 "service_name": self.name,
                 "state": self._state.name,
                 "epoch_id": self._epoch_id,
-                "tracked_hands": tracked_hands,
+                "processed_observations": self._processed_observations,
+                "tracked_hands": len(tracks),
                 "active_gestures": active_gestures,
                 "average_latency_ms": round(avg_latency, 2),
                 "budget_overruns": self._budget_overruns,
@@ -500,19 +482,18 @@ class GestureService(IService):
         return create_response(query_envelope, self.name, payload=dict(payload))
 
     def handle_tracks_query(self, query_envelope: MessageEnvelope) -> MessageEnvelope:
-        """Handle gesture.tracks query with session isolation."""
+        """Handle gesture.tracks query."""
         auth_session_id = query_envelope.metadata.get("session_id")
         payload_session_id = query_envelope.payload.get("session_id")
+
         if not auth_session_id:
             from holomed.gesture.exceptions import GestureSessionMismatchError
-
             raise GestureSessionMismatchError("No authenticated session context")
+
         if payload_session_id and auth_session_id != payload_session_id:
             from holomed.gesture.exceptions import GestureSessionMismatchError
+            raise GestureSessionMismatchError("Envelope session_id does not match payload session_id")
 
-            raise GestureSessionMismatchError(
-                "Envelope session_id does not match payload session_id"
-            )
         sess_id = auth_session_id
         tracks = ()
         if sess_id and sess_id in self._session_trackers:
