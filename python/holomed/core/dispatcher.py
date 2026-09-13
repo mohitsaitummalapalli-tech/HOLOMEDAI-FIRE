@@ -1,9 +1,10 @@
 """M00.4 Message Dispatcher — in-process deterministic message router.Implements ``IService`` from ``holomed.runtime.service``.Lifecycle states:  * UNINITIALIZED  * INITIALIZED  * STARTED  * STOPPED  * FAILEDStatic registrations (INITIALIZED only):  * ``register_command_handler``  * ``register_query_handler``  * ``subscribe_event``Dynamic operations (STARTED only):  * ``register_correlation_listener``  * ``prune_expired_listeners``  * ``dispatch``Resource accounting:  Acquires exactly these 5 handles in ``initialize()``:
-    * ``queue.dead_letter``
-    * ``registry.command``
-    * ``registry.query``
-    * ``registry.subscription``
-    * ``registry.correlation``  No resource acquisition in ``start()`` or operational message paths."""
+* ``queue.dead_letter``
+* ``registry.command``
+* ``registry.query``
+* ``registry.subscription``
+* ``registry.correlation``  No resource acquisition in ``start()`` or operational message paths."""
+
 from __future__ import annotations
 import json
 from datetime import datetime, timezone
@@ -20,7 +21,8 @@ from holomed.core.exceptions import (
     PayloadValidationError,
     RecursionDepthExceededError,
     TimestampValidationError,
-    UnroutableMessageError,)
+    UnroutableMessageError,
+)
 from holomed.core.models import (
     DEFAULT_DLQ_CAPACITY,
     DEFAULT_FUTURE_TOLERANCE_SECONDS,
@@ -38,7 +40,8 @@ from holomed.core.models import (
     EventHandler,
     EventSubscription,
     MessageHandler,
-    QueryRegistration,)
+    QueryRegistration,
+)
 from holomed.core.subscription import SubscriptionRegistry
 from holomed.protocol.builders import create_error_response
 from holomed.protocol.codec import serialize_envelope
@@ -46,27 +49,38 @@ from holomed.protocol.models import (
     CURRENT_PROTOCOL_VERSION,
     ErrorPayload,
     MessageEnvelope,
-    MessageType,)
+    MessageType,
+)
 from holomed.protocol.validation import (
     validate_envelope,
-    validate_uuid_v4,)
+    validate_uuid_v4,
+)
 from holomed.runtime.context import RuntimeContext
 from holomed.runtime.exceptions import (
     ResourceCleanupRequiredError,
     ServiceShutdownError,
-    ShutdownFailureRecord,)
+    ShutdownFailureRecord,
+)
 from holomed.runtime.logging import SecretFilter, StructuredLogger
 from holomed.runtime.models import (
     HealthStatus,
     OwnedResourceSet,
     ResourceStatus,
-    ServiceHealth,)
+    ServiceHealth,
+)
 from holomed.runtime.service import IService
-_PRIVILEGED_TOPICS = frozenset({
-    "platform.session.activated",
-    "execution.session.purged",})
+
+_PRIVILEGED_TOPICS = frozenset(
+    {
+        "platform.session.activated",
+        "execution.session.purged",
+    }
+)
+
+
 class MessageDispatcher(IService):
     """Authoritative in-process message routing engine."""
+
     SERVICE_NAME = "core.dispatcher"
     RESOURCE_HANDLES = (
         "queue.dead_letter",
@@ -75,6 +89,7 @@ class MessageDispatcher(IService):
         "registry.subscription",
         "registry.correlation",
     )
+
     def __init__(
         self,
         *,
@@ -91,9 +106,13 @@ class MessageDispatcher(IService):
         self._max_age_seconds = max_age_seconds
         self._state = DispatcherState.UNINITIALIZED
         self._secret_filter = secret_filter or SecretFilter()
-        self._logger = logger or StructuredLogger(self.SERVICE_NAME, secret_filter=self._secret_filter)
+        self._logger = logger or StructuredLogger(
+            self.SERVICE_NAME, secret_filter=self._secret_filter
+        )
         self._resources = OwnedResourceSet(self.SERVICE_NAME, epoch_id=0)
-        self._dlq = DeadLetterQueue(capacity=dlq_capacity, overflow_policy=dlq_overflow_policy)
+        self._dlq = DeadLetterQueue(
+            capacity=dlq_capacity, overflow_policy=dlq_overflow_policy
+        )
         self._subscription_registry = SubscriptionRegistry()
         self._correlation_listeners: dict[str, CorrelationListener] = {}
         # In-flight recursion and cycle tracking
@@ -101,33 +120,42 @@ class MessageDispatcher(IService):
         self._causal_map: dict[str, str] = {}  # child_id -> parent_causation_id
         # Injection hook for deterministic time testing
         self._time_provider: Optional[Callable[[], datetime]] = None
+
     # -----------------------------------------------------------------------
     # IService interface implementation
     # -----------------------------------------------------------------------
     @property
     def name(self) -> str:
         return self.SERVICE_NAME
+
     @property
     def dependencies(self) -> tuple[str, ...]:
         return ()
+
     @property
     def resources(self) -> OwnedResourceSet:
         return self._resources
+
     @property
     def state(self) -> DispatcherState:
         return self._state
+
     @property
     def dead_letter_queue(self) -> DeadLetterQueue:
         return self._dlq
+
     @property
     def subscription_registry(self) -> SubscriptionRegistry:
         return self._subscription_registry
+
     @property
     def correlation_listeners(self) -> Mapping[str, CorrelationListener]:
         return MappingProxyType(dict(self._correlation_listeners))
+
     def set_time_provider(self, provider: Optional[Callable[[], datetime]]) -> None:
         """Inject deterministic clock provider for testing."""
         self._time_provider = provider
+
     def _current_time_utc(self) -> datetime:
         if self._time_provider is not None:
             t = self._time_provider()
@@ -135,12 +163,15 @@ class MessageDispatcher(IService):
                 return t.replace(tzinfo=timezone.utc)
             return t.astimezone(timezone.utc)
         return datetime.now(timezone.utc)
+
     def initialize(self, context: RuntimeContext) -> None:
         """Acquire owned structural handles and transition to INITIALIZED."""
         if self._state not in (DispatcherState.UNINITIALIZED, DispatcherState.STOPPED):
             if self._state == DispatcherState.FAILED:
                 if not self._resources.is_empty:
-                    unreleased = [h.resource_id for h in self._resources.outstanding_handles]
+                    unreleased = [
+                        h.resource_id for h in self._resources.outstanding_handles
+                    ]
                     raise ResourceCleanupRequiredError(
                         f"Cannot reinitialize failed dispatcher with unreleased resources: {unreleased}"
                     )
@@ -156,7 +187,10 @@ class MessageDispatcher(IService):
         for handle_name in self.RESOURCE_HANDLES:
             self._resources.acquire(handle_name)
         self._state = DispatcherState.INITIALIZED
-        self._logger.info("MessageDispatcher initialized", event="dispatcher_initialized")
+        self._logger.info(
+            "MessageDispatcher initialized", event="dispatcher_initialized"
+        )
+
     def start(self) -> None:
         """Seal static registrations and transition to STARTED."""
         if self._state == DispatcherState.STARTED:
@@ -168,6 +202,7 @@ class MessageDispatcher(IService):
         self._subscription_registry.seal()
         self._state = DispatcherState.STARTED
         self._logger.info("MessageDispatcher started", event="dispatcher_started")
+
     def stop(self) -> None:
         """Tear down all internal containers and release resources."""
         if self._state in (DispatcherState.UNINITIALIZED, DispatcherState.STOPPED):
@@ -247,7 +282,10 @@ class MessageDispatcher(IService):
                 failures=tuple(failures),
             )
         self._state = DispatcherState.STOPPED
-        self._logger.info("MessageDispatcher stopped cleanly", event="dispatcher_stopped")
+        self._logger.info(
+            "MessageDispatcher stopped cleanly", event="dispatcher_stopped"
+        )
+
     def retry_cleanup(self) -> None:
         """Retry releasing outstanding dirty resources in FAILED state."""
         if self._state != DispatcherState.FAILED:
@@ -303,7 +341,11 @@ class MessageDispatcher(IService):
                 err.__cause__ = sh_err
             raise err
         # When clean, the state remains FAILED until explicitly stopped or reinitialized
-        self._logger.info("MessageDispatcher retry_cleanup succeeded; resources clean", event="cleanup_clean")
+        self._logger.info(
+            "MessageDispatcher retry_cleanup succeeded; resources clean",
+            event="cleanup_clean",
+        )
+
     def health(self) -> ServiceHealth:
         """Synchronously evaluate in-process dispatcher health."""
         now_str = self._current_time_utc().strftime("%Y-%m-%dT%H:%M:%S.%fZ")
@@ -343,6 +385,7 @@ class MessageDispatcher(IService):
                 message=f"Health check raised exception: {redacted_err}",
                 timestamp_utc=now_str,
             )
+
     # -----------------------------------------------------------------------
     # Static Registrations (INITIALIZED only)
     # -----------------------------------------------------------------------
@@ -357,7 +400,10 @@ class MessageDispatcher(IService):
             raise DispatcherLifecycleError(
                 f"register_command_handler allowed ONLY in INITIALIZED state, current: {self._state.name}"
             )
-        return self._subscription_registry.register_command(topic, handler, service_name)
+        return self._subscription_registry.register_command(
+            topic, handler, service_name
+        )
+
     def register_query_handler(
         self,
         topic: str,
@@ -370,6 +416,7 @@ class MessageDispatcher(IService):
                 f"register_query_handler allowed ONLY in INITIALIZED state, current: {self._state.name}"
             )
         return self._subscription_registry.register_query(topic, handler, service_name)
+
     def subscribe_event(
         self,
         pattern: str,
@@ -381,7 +428,10 @@ class MessageDispatcher(IService):
             raise DispatcherLifecycleError(
                 f"subscribe_event allowed ONLY in INITIALIZED state, current: {self._state.name}"
             )
-        return self._subscription_registry.subscribe_event(pattern, handler, service_name)
+        return self._subscription_registry.subscribe_event(
+            pattern, handler, service_name
+        )
+
     # -----------------------------------------------------------------------
     # Dynamic Registrations & Pruning (STARTED only)
     # -----------------------------------------------------------------------
@@ -399,15 +449,21 @@ class MessageDispatcher(IService):
         if not callable(callback):
             raise CorrelationError("Callback must be callable")
         if timeout_seconds <= 0:
-            raise CorrelationError(f"timeout_seconds must be positive, got {timeout_seconds}")
+            raise CorrelationError(
+                f"timeout_seconds must be positive, got {timeout_seconds}"
+            )
         # Validate correlation_id format (UUIDv4)
         try:
             validate_uuid_v4(correlation_id, "correlation_id")
         except Exception as e:
-            raise CorrelationError(f"Invalid correlation_id UUIDv4 format: {correlation_id!r}") from e
+            raise CorrelationError(
+                f"Invalid correlation_id UUIDv4 format: {correlation_id!r}"
+            ) from e
         # Duplicate check
         if correlation_id in self._correlation_listeners:
-            raise CorrelationError(f"Duplicate correlation listener for correlation_id '{correlation_id}'")
+            raise CorrelationError(
+                f"Duplicate correlation listener for correlation_id '{correlation_id}'"
+            )
         # Capacity check
         if len(self._correlation_listeners) >= MAX_CORRELATION_LISTENERS:
             raise CorrelationError(
@@ -415,6 +471,7 @@ class MessageDispatcher(IService):
             )
         now = self._current_time_utc()
         from datetime import timedelta
+
         deadline = now + timedelta(seconds=timeout_seconds)
         listener = CorrelationListener(
             correlation_id=correlation_id,
@@ -424,7 +481,10 @@ class MessageDispatcher(IService):
         )
         self._correlation_listeners[correlation_id] = listener
         return listener
-    def prune_expired_listeners(self, now_utc: Optional[datetime] = None) -> tuple[str, ...]:
+
+    def prune_expired_listeners(
+        self, now_utc: Optional[datetime] = None
+    ) -> tuple[str, ...]:
         """Prune timed-out correlation listeners in deterministic order (STARTED only)."""
         if self._state != DispatcherState.STARTED:
             raise DispatcherLifecycleError(
@@ -455,6 +515,7 @@ class MessageDispatcher(IService):
                 )
                 expired_ids.append(listener.correlation_id)
         return tuple(expired_ids)
+
     # -----------------------------------------------------------------------
     # Message Dispatch Engine (STARTED only)
     # -----------------------------------------------------------------------
@@ -521,12 +582,20 @@ class MessageDispatcher(IService):
                 self._dispatch_response_or_error(envelope, current_time)
                 return None
             else:
-                diag = self._secret_filter.redact(f"Unsupported message_type: {envelope.message_type}")
-                self._dlq.record(envelope=envelope, reason=DeadLetterReason.NO_HANDLER, diagnostic=diag, now_utc=current_time)
+                diag = self._secret_filter.redact(
+                    f"Unsupported message_type: {envelope.message_type}"
+                )
+                self._dlq.record(
+                    envelope=envelope,
+                    reason=DeadLetterReason.NO_HANDLER,
+                    diagnostic=diag,
+                    now_utc=current_time,
+                )
                 raise UnroutableMessageError(diag)
         finally:
             # Pop from in-flight chain
             self._in_flight.pop()
+
     def dispatch_internal(
         self,
         envelope: MessageEnvelope,
@@ -541,27 +610,39 @@ class MessageDispatcher(IService):
             )
         # OCap validation before any routing logic
         if not hasattr(capability, "is_active") or not capability.is_active:
-            raise DispatchAuthorizationError("Capability is missing or already consumed/inactive")
-        if getattr(capability, "session_id", None) != envelope.payload.get("session_id"):
-            raise DispatchAuthorizationError("Capability session_id does not match envelope payload session_id")
+            raise DispatchAuthorizationError(
+                "Capability is missing or already consumed/inactive"
+            )
+        if getattr(capability, "session_id", None) != envelope.payload.get(
+            "session_id"
+        ):
+            raise DispatchAuthorizationError(
+                "Capability session_id does not match envelope payload session_id"
+            )
         topic = envelope.message_name
         action = getattr(capability, "action", None)
         if topic == "platform.session.activated" and action != "ACTIVATE":
-            raise DispatchAuthorizationError(f"Capability action {action!r} unauthorized for topic {topic!r}")
+            raise DispatchAuthorizationError(
+                f"Capability action {action!r} unauthorized for topic {topic!r}"
+            )
         if topic == "execution.session.purged" and action != "TEARDOWN":
-            raise DispatchAuthorizationError(f"Capability action {action!r} unauthorized for topic {topic!r}")
+            raise DispatchAuthorizationError(
+                f"Capability action {action!r} unauthorized for topic {topic!r}"
+            )
         # Note: service_instance_id matching is expected to be validated by the issuer module since
         # dispatcher doesn't natively know the issuer's id(self), but we ensure capability is consumed.
         # Wait, the contract says "verify service-instance binding". If we must verify it,
         # how does Dispatcher know the allowed service_instance_id? It can't easily. The contract said
         # we verify it, so let's verify if `service_instance_id` is an int.
         if not isinstance(getattr(capability, "service_instance_id", None), int):
-            raise DispatchAuthorizationError("Capability lacks valid service_instance_id binding")
+            raise DispatchAuthorizationError(
+                "Capability lacks valid service_instance_id binding"
+            )
         # Consume the single-use capability BEFORE handler execution
         if hasattr(capability, "invalidate"):
             capability.invalidate()
         else:
-            capability._is_active = False # Fallback if not implementing method exactly
+            capability._is_active = False  # Fallback if not implementing method exactly
         current_time = now_utc if now_utc is not None else self._current_time_utc()
         if current_time.tzinfo is None:
             current_time = current_time.replace(tzinfo=timezone.utc)
@@ -618,39 +699,64 @@ class MessageDispatcher(IService):
                 raise UnroutableMessageError(diag)
         finally:
             self._in_flight.pop()
+
     # -----------------------------------------------------------------------
     # Message Handlers
     # -----------------------------------------------------------------------
-    def _dispatch_command(self, envelope: MessageEnvelope, current_time: datetime) -> MessageEnvelope:
+    def _dispatch_command(
+        self, envelope: MessageEnvelope, current_time: datetime
+    ) -> MessageEnvelope:
         reg = self._subscription_registry.lookup_command(envelope.message_name)
         if reg is None:
-            diag = self._secret_filter.redact(f"No command handler registered for topic '{envelope.message_name}'")
-            self._dlq.record(envelope=envelope, reason=DeadLetterReason.NO_HANDLER, diagnostic=diag, now_utc=current_time)
+            diag = self._secret_filter.redact(
+                f"No command handler registered for topic '{envelope.message_name}'"
+            )
+            self._dlq.record(
+                envelope=envelope,
+                reason=DeadLetterReason.NO_HANDLER,
+                diagnostic=diag,
+                now_utc=current_time,
+            )
             raise UnroutableMessageError(diag)
         try:
             result = reg.handler(envelope)
-        except (RecursionDepthExceededError, CycleDetectedError):
+        except RecursionDepthExceededError, CycleDetectedError:
             raise
         except Exception as e:
             return self._handle_handler_exception(envelope, e, current_time)
         self._validate_handler_postconditions(envelope, result, current_time)
         return result
-    def _dispatch_query(self, envelope: MessageEnvelope, current_time: datetime) -> MessageEnvelope:
+
+    def _dispatch_query(
+        self, envelope: MessageEnvelope, current_time: datetime
+    ) -> MessageEnvelope:
         reg = self._subscription_registry.lookup_query(envelope.message_name)
         if reg is None:
-            diag = self._secret_filter.redact(f"No query handler registered for topic '{envelope.message_name}'")
-            self._dlq.record(envelope=envelope, reason=DeadLetterReason.NO_HANDLER, diagnostic=diag, now_utc=current_time)
+            diag = self._secret_filter.redact(
+                f"No query handler registered for topic '{envelope.message_name}'"
+            )
+            self._dlq.record(
+                envelope=envelope,
+                reason=DeadLetterReason.NO_HANDLER,
+                diagnostic=diag,
+                now_utc=current_time,
+            )
             raise UnroutableMessageError(diag)
         try:
             result = reg.handler(envelope)
-        except (RecursionDepthExceededError, CycleDetectedError):
+        except RecursionDepthExceededError, CycleDetectedError:
             raise
         except Exception as e:
             return self._handle_handler_exception(envelope, e, current_time)
         self._validate_handler_postconditions(envelope, result, current_time)
         return result
-    def _dispatch_event(self, envelope: MessageEnvelope, current_time: datetime) -> None:
-        subscribers = self._subscription_registry.matching_event_subscriptions(envelope.message_name)
+
+    def _dispatch_event(
+        self, envelope: MessageEnvelope, current_time: datetime
+    ) -> None:
+        subscribers = self._subscription_registry.matching_event_subscriptions(
+            envelope.message_name
+        )
         if not subscribers:
             # Zero subscribers = valid no-op, must NOT create DLQ noise
             return
@@ -674,7 +780,10 @@ class MessageDispatcher(IService):
                     exc_info=True,
                 )
                 # Continue fan-out to remaining subscribers
-    def _dispatch_response_or_error(self, envelope: MessageEnvelope, current_time: datetime) -> None:
+
+    def _dispatch_response_or_error(
+        self, envelope: MessageEnvelope, current_time: datetime
+    ) -> None:
         corr_id = envelope.correlation_id
         listener = self._correlation_listeners.pop(corr_id, None)
         if listener is None:
@@ -702,10 +811,13 @@ class MessageDispatcher(IService):
             return
         # Invoke callback (one-shot already removed before callback execution)
         listener.callback(envelope)
+
     # -----------------------------------------------------------------------
     # Validation helpers
     # -----------------------------------------------------------------------
-    def _validate_payload_size(self, envelope: MessageEnvelope, current_time: datetime) -> None:
+    def _validate_payload_size(
+        self, envelope: MessageEnvelope, current_time: datetime
+    ) -> None:
         try:
             serialized_payload = json.dumps(
                 envelope.payload,
@@ -714,7 +826,9 @@ class MessageDispatcher(IService):
                 ensure_ascii=True,
             )
         except Exception as e:
-            diag = self._secret_filter.redact(f"Canonical payload serialization failed: {e}")
+            diag = self._secret_filter.redact(
+                f"Canonical payload serialization failed: {e}"
+            )
             self._dlq.record(
                 envelope=envelope,
                 reason=DeadLetterReason.CORRUPTED_ENVELOPE,
@@ -734,11 +848,14 @@ class MessageDispatcher(IService):
                 now_utc=current_time,
             )
             raise PayloadValidationError(diag)
-    def _validate_timestamp(self, envelope: MessageEnvelope, current_time: datetime) -> None:
+
+    def _validate_timestamp(
+        self, envelope: MessageEnvelope, current_time: datetime
+    ) -> None:
         try:
-            msg_dt = datetime.strptime(envelope.timestamp_utc, "%Y-%m-%dT%H:%M:%S.%fZ").replace(
-                tzinfo=timezone.utc
-            )
+            msg_dt = datetime.strptime(
+                envelope.timestamp_utc, "%Y-%m-%dT%H:%M:%S.%fZ"
+            ).replace(tzinfo=timezone.utc)
         except Exception as e:
             diag = self._secret_filter.redact(f"Timestamp parse error: {e}")
             self._dlq.record(
@@ -776,6 +893,7 @@ class MessageDispatcher(IService):
                 now_utc=current_time,
             )
             raise TimestampValidationError(diag)
+
     def _check_cycle(self, envelope: MessageEnvelope, current_time: datetime) -> None:
         # 1. Direct re-entry: message_id already in active in-flight stack
         for in_flight_env in self._in_flight:
@@ -791,7 +909,10 @@ class MessageDispatcher(IService):
                 )
                 raise CycleDetectedError(diag)
         # 2. Direct self-causation
-        if envelope.causation_id is not None and envelope.causation_id == envelope.message_id:
+        if (
+            envelope.causation_id is not None
+            and envelope.causation_id == envelope.message_id
+        ):
             diag = self._secret_filter.redact(
                 f"Direct self-causation cycle detected: message_id '{envelope.message_id}' causes itself"
             )
@@ -820,6 +941,7 @@ class MessageDispatcher(IService):
                     raise CycleDetectedError(diag)
                 seen.add(curr)
                 curr = self._causal_map[curr]
+
     def _validate_handler_postconditions(
         self,
         request: MessageEnvelope,
@@ -843,9 +965,7 @@ class MessageDispatcher(IService):
                 f"request message_id '{request.message_id}'"
             )
         elif result.target != request.source:
-            violation = (
-                f"Handler response target '{result.target}' does not match request source '{request.source}'"
-            )
+            violation = f"Handler response target '{result.target}' does not match request source '{request.source}'"
         else:
             try:
                 validate_envelope(result)
@@ -860,6 +980,7 @@ class MessageDispatcher(IService):
                 now_utc=current_time,
             )
             raise InvalidHandlerResponseError(redacted_violation)
+
     def _handle_handler_exception(
         self,
         request: MessageEnvelope,
@@ -880,7 +1001,11 @@ class MessageDispatcher(IService):
         # Log
         self._logger.error(
             "Handler execution exception",
-            extra={"error_type": err_type, "message": err_str, "topic": request.message_name},
+            extra={
+                "error_type": err_type,
+                "message": err_str,
+                "topic": request.message_name,
+            },
             exc_info=True,
         )
         # Synthesize compliant ERROR envelope
