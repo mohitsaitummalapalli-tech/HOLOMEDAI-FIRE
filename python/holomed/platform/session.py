@@ -96,6 +96,21 @@ class SessionManager:
             created_timestamp_utc=cur.created_timestamp_utc,
         )
         self._sessions[session_id] = stopped
+
+        if self._dispatcher is not None:
+            capability = _PlatformCapability(
+                internal_key=_INTERNAL_PLATFORM_KEY,
+                service_instance_id=id(self),
+                session_id=session_id,
+                action="DEACTIVATE",
+            )
+            evt = create_event(
+                message_name="platform.session.stopped",
+                source="platform.session_manager",
+                payload={"session_id": session_id, "epoch_id": cur.epoch_id}
+            )
+            self._dispatcher.dispatch_internal(evt, capability)
+
         return stopped
 
     def get_session(self, session_id: str) -> SessionContext:
@@ -144,7 +159,23 @@ class SessionManager:
     def evict_session(self, session_id: str) -> bool:
         """Evict a session context from memory, releasing capacity (M25)."""
         if session_id in self._sessions:
+            cur = self._sessions[session_id]
             del self._sessions[session_id]
+
+            if self._dispatcher is not None:
+                capability = _PlatformCapability(
+                    internal_key=_INTERNAL_PLATFORM_KEY,
+                    service_instance_id=id(self),
+                    session_id=session_id,
+                    action="EVICT",
+                )
+                evt = create_event(
+                    message_name="platform.session.evicted",
+                    source="platform.session_manager",
+                    payload={"session_id": session_id, "epoch_id": cur.epoch_id}
+                )
+                self._dispatcher.dispatch_internal(evt, capability)
+
             return True
         return False
 
