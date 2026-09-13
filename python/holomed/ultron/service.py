@@ -190,6 +190,16 @@ class UltronService(IService):
             self._dispatcher.subscribe_event("workflow.session.purged", self.handle_session_purged_event, self.name)
             self._dispatcher.subscribe_event("execution.session.purged", self.handle_session_purged_event, self.name)
             self._dispatcher.subscribe_event("workflow.aborted", self.handle_session_purged_event, self.name)
+            self._dispatcher.subscribe_event(
+                "platform.session.stopped",
+                self.handle_session_purged_event,
+                self.name,
+            )
+            self._dispatcher.subscribe_event(
+                "platform.session.evicted",
+                self.handle_session_purged_event,
+                self.name,
+            )
 
         self._state = ServiceState.INITIALIZED
 

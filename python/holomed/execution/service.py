@@ -237,6 +237,16 @@ class ClinicalExecutionGatewayService(IService):
             self._dispatcher.register_query_handler(
                 "execution.status.get", self.handle_get_status_query, self.name
             )
+            self._dispatcher.subscribe_event(
+                "platform.session.stopped",
+                self.handle_session_purged_event,
+                self.name,
+            )
+            self._dispatcher.subscribe_event(
+                "platform.session.evicted",
+                self.handle_session_purged_event,
+                self.name,
+            )
 
 
         self._state = ServiceState.INITIALIZED
@@ -1619,6 +1629,17 @@ class ClinicalExecutionGatewayService(IService):
             epoch_id=self._epoch_id,
             updated_at_utc=latest.executed_at_utc,
         )
+
+    def purge_session(self, session_id: str) -> None:
+        """Purge session-transient state for a specific session."""
+        self._latest_results.pop(session_id, None)
+        self._persisted_states.pop(session_id, None)
+
+    def handle_session_purged_event(self, event_envelope: MessageEnvelope) -> None:
+        """Handle session lifecycle teardown event."""
+        session_id = event_envelope.payload.get("session_id")
+        if session_id:
+            self.purge_session(session_id)
 
     def clear(self) -> None:
         """Clear transient session tracking cache."""

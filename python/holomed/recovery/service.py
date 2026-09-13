@@ -152,6 +152,16 @@ class RecoveryService(IService):
         # Register Dispatcher Routes (M22: recovery.stage/verify/activate removed; query retained)
         if self._dispatcher is not None:
             self._dispatcher.register_query_handler("recovery.status.get", self.handle_get_status_query, self.name)
+            self._dispatcher.subscribe_event(
+                "platform.session.stopped",
+                self.handle_session_purged_event,
+                self.name,
+            )
+            self._dispatcher.subscribe_event(
+                "platform.session.evicted",
+                self.handle_session_purged_event,
+                self.name,
+            )
 
         self._state = ServiceState.INITIALIZED
 
@@ -816,6 +826,12 @@ class RecoveryService(IService):
         self._checkpoint_pairs.pop(session_id, None)
         self._latest_records.pop(session_id, None)
         return evicted
+
+    def handle_session_purged_event(self, event_envelope: MessageEnvelope) -> None:
+        """Handle session lifecycle teardown event."""
+        session_id = event_envelope.payload.get("session_id")
+        if session_id:
+            self.evict_session(session_id)
 
     def clear(self) -> None:
 

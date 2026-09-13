@@ -135,6 +135,16 @@ class SafetyGateService(IService):
         # Register Dispatcher Routes (M30: Query only, raw evaluate command removed)
         if self._dispatcher is not None:
             self._dispatcher.register_query_handler(TOPIC_SAFETY_STATUS_GET, self.handle_get_status_query, self.name)
+            self._dispatcher.subscribe_event(
+                "platform.session.stopped",
+                self.handle_session_purged_event,
+                self.name,
+            )
+            self._dispatcher.subscribe_event(
+                "platform.session.evicted",
+                self.handle_session_purged_event,
+                self.name,
+            )
 
         self._state = ServiceState.INITIALIZED
 
@@ -301,6 +311,12 @@ class SafetyGateService(IService):
             del self._persisted_states[session_id]
             evicted = True
         return evicted
+
+    def handle_session_purged_event(self, event_envelope: MessageEnvelope) -> None:
+        """Handle session lifecycle teardown event."""
+        session_id = event_envelope.payload.get("session_id")
+        if session_id:
+            self.evict_session(session_id)
 
     def clear(self) -> None:
         """Clear transient session tracking cache."""

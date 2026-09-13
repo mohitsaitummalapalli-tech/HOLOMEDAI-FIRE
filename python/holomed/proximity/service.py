@@ -164,6 +164,16 @@ class ProximityService(IService):
             self._dispatcher.register_command_handler("proximity.evaluate", self.handle_evaluate_command, self.name)
             self._dispatcher.register_query_handler("proximity.status.get", self.handle_get_status_query, self.name)
             self._dispatcher.register_query_handler("proximity.zones.get", self.handle_get_zones_query, self.name)
+            self._dispatcher.subscribe_event(
+                "platform.session.stopped",
+                self.handle_session_purged_event,
+                self.name,
+            )
+            self._dispatcher.subscribe_event(
+                "platform.session.evicted",
+                self.handle_session_purged_event,
+                self.name,
+            )
 
         self._state = ServiceState.INITIALIZED
 
@@ -615,6 +625,12 @@ class ProximityService(IService):
             del self._clearance_history[k]
             evicted = True
         return evicted
+
+    def handle_session_purged_event(self, event_envelope: MessageEnvelope) -> None:
+        """Handle session lifecycle teardown event."""
+        session_id = event_envelope.payload.get("session_id")
+        if session_id:
+            self.evict_session(session_id)
 
     def clear(self) -> None:
 

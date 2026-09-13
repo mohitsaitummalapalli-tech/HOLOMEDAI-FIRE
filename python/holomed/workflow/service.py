@@ -185,6 +185,16 @@ class WorkflowService(IService):
                 self.handle_abort_command,
                 self.name,
             )
+            self._dispatcher.subscribe_event(
+                "platform.session.stopped",
+                self.handle_session_purged_event,
+                self.name,
+            )
+            self._dispatcher.subscribe_event(
+                "platform.session.evicted",
+                self.handle_session_purged_event,
+                self.name,
+            )
 
         self._state = ServiceState.INITIALIZED
 
@@ -693,6 +703,12 @@ class WorkflowService(IService):
         if self._checkpoint_validator.evict_session(session_id):
             evicted = True
         return evicted
+
+    def handle_session_purged_event(self, event_envelope: MessageEnvelope) -> None:
+        """Handle session lifecycle teardown event."""
+        session_id = event_envelope.payload.get("session_id")
+        if session_id:
+            self.evict_session(session_id)
 
     def clear(self) -> None:
         """Clear transient in-memory state."""
