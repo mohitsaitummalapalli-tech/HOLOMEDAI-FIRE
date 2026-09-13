@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 import pytest
+from unittest.mock import MagicMock
 
 from holomed.core.dispatcher import MessageDispatcher
 from holomed.core.exceptions import UnroutableMessageError
@@ -311,6 +312,8 @@ def test_e2e_plan_creation_locking_checkpoint_registration_and_workflow(
 ) -> None:
     """Verify complete end-to-end flow from planning to workflow interlock validation."""
     wf = WorkflowService(dispatcher=message_dispatcher, secret_filter=secret_filter)
+    # M42 isolated business-logic local stub
+    wf._is_session_active = MagicMock(return_value=True)
     wf.initialize(runtime_context)
     wf.start()
 

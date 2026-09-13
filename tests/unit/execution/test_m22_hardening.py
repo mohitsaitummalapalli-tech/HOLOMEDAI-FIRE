@@ -416,6 +416,10 @@ class TestM22GatewayCoordinationAndInvalidation:
             planning_service=test_planning_service,
             secret_filter=secret_filter,
         )
+
+        # M42 isolated business-logic local stub
+
+        gateway._is_session_active = MagicMock(return_value=True)
         gateway.initialize(test_runtime_context)
         dispatcher.start()
         recovery_srv.start()
@@ -521,6 +525,10 @@ class TestM22GatewayCoordinationAndInvalidation:
             planning_service=test_planning_service,
             secret_filter=secret_filter,
         )
+
+        # M42 isolated business-logic local stub
+
+        gateway._is_session_active = MagicMock(return_value=True)
         gateway.initialize(test_runtime_context)
         dispatcher.start()
         nav_srv.start()

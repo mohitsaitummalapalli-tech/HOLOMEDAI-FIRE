@@ -39,7 +39,7 @@ def m25_services(runtime_context):
     dispatcher = MessageDispatcher()
     dispatcher.initialize(runtime_context)
 
-    platform = PlatformService()
+    platform = PlatformService(dispatcher=dispatcher)
     platform.initialize(runtime_context)
     platform.start()
 
@@ -63,7 +63,7 @@ def m25_services(runtime_context):
     recovery.initialize(runtime_context)
     recovery.start()
 
-    safety_gate = SafetyGateService(dispatcher=None, workflow_service=workflow)
+    safety_gate = SafetyGateService(dispatcher=dispatcher, workflow_service=workflow)
     safety_gate.initialize(runtime_context)
     safety_gate.start()
 

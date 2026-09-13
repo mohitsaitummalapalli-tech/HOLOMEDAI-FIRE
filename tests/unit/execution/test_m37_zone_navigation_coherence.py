@@ -344,6 +344,10 @@ def _setup_gateway_and_subsystems(
         planning_service=plan_srv,
         secret_filter=secret_filter,
     )
+
+    # M42 isolated business-logic local stub
+
+    gateway._is_session_active = MagicMock(return_value=True)
     gateway.initialize(runtime_context)
 
     dispatcher.start()
@@ -537,7 +541,7 @@ class TestM37ZoneNavigationCoherence:
         assert nav_srv.get_navigation_status("session_01").last_deviation is None
 
     def test_vector_07_execute_navigation_rejects_when_session_plan_unlocked(
-        self, runtime_context: RuntimeContext, secret_filter: SecretFilter
+        self, runtime_context: RuntimeContext, secret_filter: SecretFilter, mock_dispatcher: MagicMock
     ) -> None:
         """Vector 7: Session plan has is_locked=False."""
         plan_srv = _setup_planning_service(runtime_context, secret_filter)
@@ -562,10 +566,15 @@ class TestM37ZoneNavigationCoherence:
         nav_srv.start()
 
         gateway = ClinicalExecutionGatewayService(
+            dispatcher=mock_dispatcher,
             navigation_service=nav_srv,
             planning_service=plan_srv,
             secret_filter=secret_filter,
         )
+
+        # M42 isolated business-logic local stub
+
+        gateway._is_session_active = MagicMock(return_value=True)
         gateway.initialize(runtime_context)
         gateway.start()
 
@@ -585,13 +594,16 @@ class TestM37ZoneNavigationCoherence:
         assert nav_srv.get_navigation_status("session_01").last_deviation is None
 
     def test_vector_08_execute_navigation_rejects_missing_planning_service(
-        self, runtime_context: RuntimeContext, secret_filter: SecretFilter
+        self, runtime_context: RuntimeContext, secret_filter: SecretFilter, mock_dispatcher: MagicMock
     ) -> None:
         """Vector 8: Gateway constructed with _planning_service=None fails closed."""
         gateway = ClinicalExecutionGatewayService(
+            dispatcher=mock_dispatcher,
             planning_service=None,
             secret_filter=secret_filter,
         )
+        # M42 isolated business-logic local stub
+        gateway._is_session_active = MagicMock(return_value=True)
         gateway.initialize(runtime_context)
         gateway.start()
 

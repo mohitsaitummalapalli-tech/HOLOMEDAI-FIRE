@@ -45,6 +45,8 @@ def _make_started_gate_service(
         secret_filter=secret_filter,
         logger=logger,
     )
+    # M42 isolated business-logic local stub
+    svc._is_session_active = MagicMock(return_value=True)
     svc.initialize(runtime_context)
     svc.start()
     return svc
@@ -61,6 +63,8 @@ class TestSafetyGateServiceLifecycle:
             secret_filter=secret_filter,
             logger=logger,
         )
+        # M42 isolated business-logic local stub
+        svc._is_session_active = MagicMock(return_value=True)
         assert svc.state == ServiceState.UNINITIALIZED
 
         svc.initialize(runtime_context)
@@ -76,6 +80,8 @@ class TestSafetyGateServiceLifecycle:
             secret_filter=secret_filter,
             logger=logger,
         )
+        # M42 isolated business-logic local stub
+        svc._is_session_active = MagicMock(return_value=True)
         svc.initialize(runtime_context)
         svc.start()
         assert svc.state == ServiceState.STARTED
@@ -96,6 +102,8 @@ class TestSafetyGateServiceLifecycle:
             secret_filter=secret_filter,
             logger=logger,
         )
+        # M42 isolated business-logic local stub
+        svc._is_session_active = MagicMock(return_value=True)
         assert svc.health().status == HealthStatus.UNHEALTHY
 
         svc.initialize(runtime_context)

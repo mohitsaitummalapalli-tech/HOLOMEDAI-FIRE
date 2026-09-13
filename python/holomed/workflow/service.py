@@ -15,8 +15,9 @@ from holomed.protocol.builders import (
     create_error_response,
     create_event,
     create_response,
+    create_query,
 )
-from holomed.protocol.models import MessageEnvelope
+from holomed.protocol.models import MessageEnvelope, MessageType
 from holomed.runtime.context import RuntimeContext
 from holomed.runtime.logging import SecretFilter, StructuredLogger
 from holomed.runtime.models import (
@@ -282,6 +283,24 @@ class WorkflowService(IService):
             timestamp_utc=now_utc,
         )
 
+    def _is_session_active(self, session_id: str) -> bool:
+        """Check authoritatively via platform if session is active."""
+        if not self._dispatcher:
+            return False
+
+        query = create_query(
+            message_name="platform.session.status.get",
+            source=self.name,
+            payload={"session_id": session_id}
+        )
+        try:
+            res = self._dispatcher.dispatch(query)
+            if res is not None and res.message_type == MessageType.RESPONSE:
+                return res.payload.get("status") == "ACTIVE"
+        except Exception as e:
+            self._logger.warning(f"Failed to verify session {session_id!r} status: {e}")
+        return False
+
     # -------------------------------------------------------------------------
     # Core Clinical Workflow API
     # -------------------------------------------------------------------------
@@ -302,6 +321,9 @@ class WorkflowService(IService):
 
         self._in_transaction = True
         try:
+            if not self._is_session_active(session_id):
+                raise WorkflowLifecycleError(f"Session {session_id!r} is not ACTIVE")
+
             if session_id in self._workflows:
                 sm = self._workflows[session_id]
                 if not sm.is_terminal:

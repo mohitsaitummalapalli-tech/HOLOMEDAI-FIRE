@@ -16,8 +16,9 @@ from holomed.protocol.builders import (
     create_error_response,
     create_event,
     create_response,
+    create_query,
 )
-from holomed.protocol.models import MessageEnvelope
+from holomed.protocol.models import MessageEnvelope, MessageType
 from holomed.proximity.service import ProximityService
 from holomed.recovery.service import RecoveryService
 from holomed.registration.service import RegistrationService
@@ -224,6 +225,24 @@ class SafetyGateService(IService):
             timestamp_utc=now_utc,
         )
 
+    def _is_session_active(self, session_id: str) -> bool:
+        """Check authoritatively via platform if session is active."""
+        if not self._dispatcher:
+            return False
+
+        query = create_query(
+            message_name="platform.session.status.get",
+            source=self.name,
+            payload={"session_id": session_id}
+        )
+        try:
+            res = self._dispatcher.dispatch(query)
+            if res is not None and res.message_type == MessageType.RESPONSE:
+                return res.payload.get("status") == "ACTIVE"
+        except Exception as e:
+            self._logger.warning(f"Failed to verify session {session_id!r} status: {e}")
+        return False
+
     # -------------------------------------------------------------------------
     # Core Safety Gate Evaluation
     # -------------------------------------------------------------------------
@@ -238,6 +257,8 @@ class SafetyGateService(IService):
         self._in_transaction = True
         try:
             session_id = request.session_id
+            if not self._is_session_active(request.session_id):
+                raise SafetyGateLifecycleError(f"Session {request.session_id!r} is not ACTIVE")
             if session_id not in self._latest_decisions and len(self._latest_decisions) >= MAX_ACTIVE_GATE_SESSIONS:
                 raise SafetyGateCapacityError(f"Max active gate sessions ({MAX_ACTIVE_GATE_SESSIONS}) exceeded")
 

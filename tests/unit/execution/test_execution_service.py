@@ -53,6 +53,8 @@ def _make_started_service(
         secret_filter=secret_filter,
         logger=logger,
     )
+    # M42 isolated business-logic local stub
+    svc._is_session_active = MagicMock(return_value=True)
     svc.initialize(runtime_context)
     svc.start()
     return svc
@@ -69,6 +71,8 @@ class TestExecutionServiceLifecycle:
             secret_filter=secret_filter,
             logger=logger,
         )
+        # M42 isolated business-logic local stub
+        svc._is_session_active = MagicMock(return_value=True)
         assert svc.state == ServiceState.UNINITIALIZED
 
         svc.initialize(runtime_context)
@@ -84,6 +88,8 @@ class TestExecutionServiceLifecycle:
             secret_filter=secret_filter,
             logger=logger,
         )
+        # M42 isolated business-logic local stub
+        svc._is_session_active = MagicMock(return_value=True)
         svc.initialize(runtime_context)
         svc.start()
         assert svc.state == ServiceState.STARTED
@@ -104,6 +110,8 @@ class TestExecutionServiceLifecycle:
             secret_filter=secret_filter,
             logger=logger,
         )
+        # M42 isolated business-logic local stub
+        svc._is_session_active = MagicMock(return_value=True)
         assert svc.health().status == HealthStatus.UNHEALTHY
 
         svc.initialize(runtime_context)
@@ -252,6 +260,8 @@ class TestExecutionRecoveryReorientation:
             secret_filter=secret_filter,
             logger=logger,
         )
+        # M42 isolated business-logic local stub
+        svc._is_session_active = MagicMock(return_value=True)
         svc.initialize(runtime_context)
         svc.start()
 

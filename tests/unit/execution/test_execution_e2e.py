@@ -57,6 +57,8 @@ class TestExecutionE2E:
             secret_filter=secret_filter,
             logger=logger,
         )
+        # M42 isolated business-logic local stub
+        svc._is_session_active = MagicMock(return_value=True)
         svc.initialize(runtime_context)
         svc.start()
         assert svc.state == ServiceState.STARTED

@@ -196,6 +196,12 @@ class TestM30CanonicalStatusQuery:
         ctx = _make_runtime_context()
         disp = MessageDispatcher()
         disp.initialize(ctx)
+
+        def mock_status_handler(msg):
+            from holomed.protocol.builders import create_response
+            return create_response(msg, "mock_platform", {"status": "ACTIVE"})
+        disp.register_query_handler("platform.session.status.get", mock_status_handler, "mock_platform")
+
         sg = SafetyGateService(dispatcher=disp)
         sg.initialize(ctx)
         disp.start()
@@ -229,6 +235,12 @@ class TestM30CanonicalStatusQuery:
         ctx = _make_runtime_context()
         disp = MessageDispatcher()
         disp.initialize(ctx)
+
+        def mock_status_handler(msg):
+            from holomed.protocol.builders import create_response
+            return create_response(msg, "mock_platform", {"status": "ACTIVE"})
+        disp.register_query_handler("platform.session.status.get", mock_status_handler, "mock_platform")
+
         mock_persistence = MagicMock(spec=PersistenceService)
         sg = SafetyGateService(dispatcher=disp, persistence_service=mock_persistence)
         sg.initialize(ctx)
@@ -264,6 +276,12 @@ class TestM30CanonicalStatusQuery:
         ctx = _make_runtime_context()
         disp = MessageDispatcher()
         disp.initialize(ctx)
+
+        def mock_status_handler(msg):
+            from holomed.protocol.builders import create_response
+            return create_response(msg, "mock_platform", {"status": "ACTIVE"})
+        disp.register_query_handler("platform.session.status.get", mock_status_handler, "mock_platform")
+
         sg = SafetyGateService(dispatcher=disp)
         sg.initialize(ctx)
         disp.start()
@@ -288,6 +306,11 @@ class TestM30CanonicalEventTopic:
         ctx = _make_runtime_context()
         disp = MessageDispatcher()
         disp.initialize(ctx)
+
+        def mock_status_handler(msg):
+            from holomed.protocol.builders import create_response
+            return create_response(msg, "mock_platform", {"status": "ACTIVE"})
+        disp.register_query_handler("platform.session.status.get", mock_status_handler, "mock_platform")
 
         received_events = []
 
@@ -324,24 +347,18 @@ class TestM30ExecutionGatewayIntegration:
         dispatcher = MessageDispatcher()
         dispatcher.initialize(ctx)
 
-        platform = PlatformService()
+        platform = PlatformService(dispatcher=dispatcher)
         platform.initialize(ctx)
-        platform.start()
-        platform.start_session("session_exec_m30")
 
         tool_service = ToolService(dispatcher=dispatcher)
         tool_service.initialize(ctx)
         tool_service.register_tool(make_dummy_tool("tool.telemetry"))
-        tool_service.start()
 
-        # Real SafetyGateService wired with real MessageDispatcher (M30 production wiring)
         safety_gate = SafetyGateService(dispatcher=dispatcher)
         safety_gate.initialize(ctx)
-        safety_gate.start()
 
         persistence = PersistenceService()
         persistence.initialize(ctx)
-        persistence.start()
 
         gateway = ClinicalExecutionGatewayService(
             dispatcher=dispatcher,
@@ -351,8 +368,16 @@ class TestM30ExecutionGatewayIntegration:
             platform_service=platform,
         )
         gateway.initialize(ctx)
-        gateway.start()
+
+        # Start all services
         dispatcher.start()
+        platform.start()
+        tool_service.start()
+        safety_gate.start()
+        persistence.start()
+        gateway.start()
+
+        platform.start_session("session_exec_m30")
 
         req = ToolExecutionRequest(
             session_id="session_exec_m30",
@@ -387,6 +412,11 @@ class TestM30ExecutionGatewayIntegration:
         disp = MessageDispatcher()
         disp.initialize(ctx)
 
+        def mock_status_handler(msg):
+            from holomed.protocol.builders import create_response
+            return create_response(msg, "mock_platform", {"status": "ACTIVE"})
+        disp.register_query_handler("platform.session.status.get", mock_status_handler, "mock_platform")
+
         workflow_mock = MagicMock()
         workflow_mock.get_phase.return_value = WorkflowPhase.ABORTED
 
@@ -399,6 +429,7 @@ class TestM30ExecutionGatewayIntegration:
             registration_service=reg_mock,
         )
         sg.initialize(ctx)
+        disp.start()
         sg.start()
 
         # Workflow ABORTED must yield DENIED_INTERLOCKED with WORKFLOW_PHASE_BLOCKED
@@ -443,6 +474,12 @@ class TestM30SessionIsolation:
         ctx = _make_runtime_context()
         disp = MessageDispatcher()
         disp.initialize(ctx)
+
+        def mock_status_handler(msg):
+            from holomed.protocol.builders import create_response
+            return create_response(msg, "mock_platform", {"status": "UNKNOWN"})
+        disp.register_query_handler("platform.session.status.get", mock_status_handler, "mock_platform")
+
         sg = SafetyGateService(dispatcher=disp)
         sg.initialize(ctx)
         disp.start()
@@ -467,8 +504,15 @@ class TestM30FailureSemantics:
         ctx = _make_runtime_context()
         disp = MessageDispatcher()
         disp.initialize(ctx)
+
+        def mock_status_handler(msg):
+            from holomed.protocol.builders import create_response
+            return create_response(msg, "mock_platform", {"status": "ACTIVE"})
+        disp.register_query_handler("platform.session.status.get", mock_status_handler, "mock_platform")
+
         sg = SafetyGateService(dispatcher=disp)
         sg.initialize(ctx)
+        disp.start()
         sg.start()
 
         # Reentrant evict_session call must fail closed
@@ -485,15 +529,21 @@ class TestM30FailureSemantics:
         disp = MessageDispatcher()
         disp.initialize(ctx)
 
+        def mock_status_handler(msg):
+            from holomed.protocol.builders import create_response
+            return create_response(msg, "mock_platform", {"status": "ACTIVE"})
+        disp.register_query_handler("platform.session.status.get", mock_status_handler, "mock_platform")
+
         broken_workflow = MagicMock()
         broken_workflow.get_phase.side_effect = RuntimeError("Evaluator dependency crashed")
 
         sg = SafetyGateService(dispatcher=disp, workflow_service=broken_workflow)
         sg.initialize(ctx)
+        disp.start()
         sg.start()
 
         req = GateRequest(
-            session_id="session_fail_01",
+            session_id="session_test_01",
             action=SafetyGateAction.TOOL_NAVIGATION,
             sequence_number=1,
             now_utc=datetime.now(timezone.utc).isoformat(),
@@ -511,11 +561,17 @@ class TestM30FailureSemantics:
         disp = MessageDispatcher()
         disp.initialize(ctx)
 
+        def mock_status_handler(msg):
+            from holomed.protocol.builders import create_response
+            return create_response(msg, "mock_platform", {"status": "ACTIVE"})
+        disp.register_query_handler("platform.session.status.get", mock_status_handler, "mock_platform")
+
         broken_persistence = MagicMock(spec=PersistenceService)
         broken_persistence.record_audit.side_effect = IOError("Disk full")
 
         sg = SafetyGateService(dispatcher=disp, persistence_service=broken_persistence)
         sg.initialize(ctx)
+        disp.start()
         sg.start()
 
         req = GateRequest(
@@ -533,8 +589,15 @@ class TestM30FailureSemantics:
         ctx = _make_runtime_context()
         disp = MessageDispatcher()
         disp.initialize(ctx)
+
+        def mock_status_handler(msg):
+            from holomed.protocol.builders import create_response
+            return create_response(msg, "mock_platform", {"status": "ACTIVE"})
+        disp.register_query_handler("platform.session.status.get", mock_status_handler, "mock_platform")
+
         sg = SafetyGateService(dispatcher=disp)
         sg.initialize(ctx)
+        disp.start()
         sg.start()
 
         for i in range(MAX_ACTIVE_GATE_SESSIONS):

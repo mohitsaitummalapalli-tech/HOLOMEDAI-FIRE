@@ -273,6 +273,10 @@ class TestM23GatewayRegistrationCoordination:
             registration_service=reg_srv,
             secret_filter=secret_filter,
         )
+
+        # M42 isolated business-logic local stub
+
+        gw._is_session_active = MagicMock(return_value=True)
         gw.initialize(runtime_context)
         message_dispatcher.start()
         gw.start()
@@ -386,6 +390,10 @@ class TestM23GatewayRegistrationCoordination:
             registration_service=reg_srv,
             secret_filter=secret_filter,
         )
+
+        # M42 isolated business-logic local stub
+
+        gw._is_session_active = MagicMock(return_value=True)
         gw.initialize(runtime_context)
         gw.start()
 
@@ -447,6 +455,10 @@ class TestM23GatewayRegistrationCoordination:
             registration_service=reg_srv,
             secret_filter=secret_filter,
         )
+
+        # M42 isolated business-logic local stub
+
+        gw._is_session_active = MagicMock(return_value=True)
         gw.initialize(runtime_context)
         gw.start()
 
@@ -515,6 +527,10 @@ class TestM23GatewayRegistrationCoordination:
             registration_service=reg_srv,
             secret_filter=secret_filter,
         )
+
+        # M42 isolated business-logic local stub
+
+        gw._is_session_active = MagicMock(return_value=True)
         gw.initialize(runtime_context)
         gw.start()
 

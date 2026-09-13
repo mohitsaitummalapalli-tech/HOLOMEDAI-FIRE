@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import pytest
+from unittest.mock import MagicMock
 
 from holomed.core.dispatcher import MessageDispatcher
 from holomed.runtime.context import RuntimeContext
@@ -33,6 +34,8 @@ def test_warning_interlock_permits_transition(
 ) -> None:
     """Verify WARNING interlock is non-blocking and permits phase transition."""
     srv = WorkflowService(dispatcher=message_dispatcher, secret_filter=secret_filter)
+    # M42 isolated business-logic local stub
+    srv._is_session_active = MagicMock(return_value=True)
     srv.initialize(runtime_context)
     message_dispatcher.start()
     srv.start()
@@ -87,6 +90,8 @@ def test_epoch_and_session_isolation_in_service(
 ) -> None:
     """Verify service rejects confirmation responses from mismatched epochs or dead sessions."""
     srv = WorkflowService(dispatcher=message_dispatcher, secret_filter=secret_filter)
+    # M42 isolated business-logic local stub
+    srv._is_session_active = MagicMock(return_value=True)
     srv.initialize(runtime_context)
     message_dispatcher.start()
     srv.start()
@@ -130,6 +135,8 @@ def test_reentrancy_guard_in_workflow_service(
 ) -> None:
     """Verify transaction guard rejects reentrant mutation attempts."""
     srv = WorkflowService(dispatcher=message_dispatcher, secret_filter=secret_filter)
+    # M42 isolated business-logic local stub
+    srv._is_session_active = MagicMock(return_value=True)
     srv.initialize(runtime_context)
     srv.start()
 
@@ -148,6 +155,8 @@ def test_secret_redaction_in_diagnostics(
 ) -> None:
     """Verify secret filter masks sensitive tokens in dispatcher error responses."""
     srv = WorkflowService(dispatcher=message_dispatcher, secret_filter=secret_filter)
+    # M42 isolated business-logic local stub
+    srv._is_session_active = MagicMock(return_value=True)
     srv.initialize(runtime_context)
     message_dispatcher.start()
     srv.start()

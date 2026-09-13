@@ -129,7 +129,7 @@ def m29_services(runtime_context: RuntimeContext):
     dispatcher = MessageDispatcher()
     dispatcher.initialize(ctx)
 
-    platform = PlatformService()
+    platform = PlatformService(dispatcher=dispatcher)
     platform.initialize(ctx)
     platform.start()
 
@@ -142,8 +142,8 @@ def m29_services(runtime_context: RuntimeContext):
     tool_service.register_tool(make_dummy_tool("tool.telemetry"))
     tool_service.start()
 
-    # SafetyGateService initialized with dispatcher=None to avoid topic format issue
-    safety_gate = SafetyGateService(dispatcher=None, workflow_service=workflow)
+    # SafetyGateService initialized with dispatcher=dispatcher
+    safety_gate = SafetyGateService(dispatcher=dispatcher, workflow_service=workflow)
     safety_gate.initialize(ctx)
     safety_gate.start()
 

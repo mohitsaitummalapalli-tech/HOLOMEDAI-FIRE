@@ -218,6 +218,8 @@ class TestM24DispatcherHardening:
     ) -> None:
         """Requirement 5: execution.planning.execute is registered on dispatcher."""
         gateway = ClinicalExecutionGatewayService(dispatcher=message_dispatcher, secret_filter=secret_filter)
+        # M42 isolated business-logic local stub
+        gateway._is_session_active = MagicMock(return_value=True)
         gateway.initialize(runtime_context)
         message_dispatcher.start()
         gateway.start()
@@ -240,6 +242,8 @@ class TestM24DispatcherProtocolValidation:
     ) -> None:
         """Requirement 6: Missing required fields returns error response."""
         gateway = ClinicalExecutionGatewayService(dispatcher=message_dispatcher, secret_filter=secret_filter)
+        # M42 isolated business-logic local stub
+        gateway._is_session_active = MagicMock(return_value=True)
         gateway.initialize(runtime_context)
         message_dispatcher.start()
         gateway.start()
@@ -258,6 +262,8 @@ class TestM24DispatcherProtocolValidation:
     ) -> None:
         """Requirement 7: Malformed payload returns error response."""
         gateway = ClinicalExecutionGatewayService(dispatcher=message_dispatcher, secret_filter=secret_filter)
+        # M42 isolated business-logic local stub
+        gateway._is_session_active = MagicMock(return_value=True)
         gateway.initialize(runtime_context)
         message_dispatcher.start()
         gateway.start()
@@ -471,6 +477,10 @@ class TestM24GatewayPlanningExecution:
             planning_service=plan_srv,
             secret_filter=secret_filter,
         )
+
+        # M42 isolated business-logic local stub
+
+        gateway._is_session_active = MagicMock(return_value=True)
         gateway.initialize(runtime_context)
         gateway.start()
 
@@ -498,6 +508,8 @@ class TestM24GatewayPlanningExecution:
     ) -> None:
         """Requirement 19: Valid LOCK via execute_planning locks plan and derives checkpoints."""
         wf_srv = WorkflowService(secret_filter=secret_filter)
+        # M42 isolated business-logic local stub
+        wf_srv._is_session_active = MagicMock(return_value=True)
         wf_srv.initialize(runtime_context)
         wf_srv.start()
 
@@ -514,6 +526,10 @@ class TestM24GatewayPlanningExecution:
             planning_service=plan_srv,
             secret_filter=secret_filter,
         )
+
+        # M42 isolated business-logic local stub
+
+        gateway._is_session_active = MagicMock(return_value=True)
         gateway.initialize(runtime_context)
         gateway.start()
 
@@ -580,6 +596,10 @@ class TestM24GatewayPlanningExecution:
             planning_service=plan_srv,
             secret_filter=secret_filter,
         )
+
+        # M42 isolated business-logic local stub
+
+        gateway._is_session_active = MagicMock(return_value=True)
         gateway.initialize(runtime_context)
         gateway.start()
 
@@ -631,6 +651,10 @@ class TestM24GatewayPlanningExecution:
             planning_service=plan_srv,
             secret_filter=secret_filter,
         )
+
+        # M42 isolated business-logic local stub
+
+        gateway._is_session_active = MagicMock(return_value=True)
         gateway.initialize(runtime_context)
         gateway.start()
 
@@ -668,6 +692,10 @@ class TestM24GatewayPlanningExecution:
             planning_service=plan_srv,
             secret_filter=secret_filter,
         )
+
+        # M42 isolated business-logic local stub
+
+        gateway._is_session_active = MagicMock(return_value=True)
         gateway.initialize(runtime_context)
         gateway.start()
 
@@ -711,6 +739,10 @@ class TestM24DualGateInterlocks:
             planning_service=plan_srv,
             secret_filter=secret_filter,
         )
+
+        # M42 isolated business-logic local stub
+
+        gateway._is_session_active = MagicMock(return_value=True)
         gateway.initialize(runtime_context)
         gateway.start()
 
@@ -753,6 +785,10 @@ class TestM24DualGateInterlocks:
             planning_service=plan_srv,
             secret_filter=secret_filter,
         )
+
+        # M42 isolated business-logic local stub
+
+        gateway._is_session_active = MagicMock(return_value=True)
         gateway.initialize(runtime_context)
         gateway.start()
 
@@ -799,6 +835,10 @@ class TestM24DualGateInterlocks:
             planning_service=plan_srv,
             secret_filter=secret_filter,
         )
+
+        # M42 isolated business-logic local stub
+
+        gateway._is_session_active = MagicMock(return_value=True)
         gateway.initialize(runtime_context)
         gateway.start()
 
@@ -843,6 +883,10 @@ class TestM24ResilienceAndAudit:
             planning_service=plan_srv,
             secret_filter=secret_filter,
         )
+
+        # M42 isolated business-logic local stub
+
+        gateway._is_session_active = MagicMock(return_value=True)
         gateway.initialize(runtime_context)
         gateway.start()
 
@@ -888,6 +932,10 @@ class TestM24ResilienceAndAudit:
             planning_service=plan_srv,
             secret_filter=secret_filter,
         )
+
+        # M42 isolated business-logic local stub
+
+        gateway._is_session_active = MagicMock(return_value=True)
         gateway.initialize(runtime_context)
         gateway.start()
 
@@ -931,6 +979,10 @@ class TestM24ResilienceAndAudit:
             persistence_service=mock_persistence,
             secret_filter=secret_filter,
         )
+
+        # M42 isolated business-logic local stub
+
+        gateway._is_session_active = MagicMock(return_value=True)
         gateway.initialize(runtime_context)
         gateway.start()
 
@@ -985,6 +1037,10 @@ class TestM24ResilienceAndAudit:
             planning_service=plan_srv,
             secret_filter=secret_filter,
         )
+
+        # M42 isolated business-logic local stub
+
+        gateway._is_session_active = MagicMock(return_value=True)
         gateway.initialize(runtime_context)
         gateway.start()
 

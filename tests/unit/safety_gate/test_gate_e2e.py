@@ -52,6 +52,8 @@ class TestSafetyGateE2E:
             secret_filter=secret_filter,
             logger=logger,
         )
+        # M42 isolated business-logic local stub
+        gate_svc._is_session_active = MagicMock(return_value=True)
         gate_svc.initialize(runtime_context)
         gate_svc.start()
         assert gate_svc.state == ServiceState.STARTED

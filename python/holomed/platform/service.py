@@ -180,6 +180,11 @@ class PlatformService(IService):
                 self.handle_audit_query,
                 self.name,
             )
+            self._dispatcher.register_query_handler(
+                "platform.session.status.get",
+                self.handle_session_status_query,
+                self.name,
+            )
             self._dispatcher.register_command_handler(
                 "platform.reset",
                 self.handle_reset_command,
@@ -534,6 +539,43 @@ class PlatformService(IService):
                 error_message=redacted_err,
             )
 
+    def handle_session_status_query(self, query_envelope: MessageEnvelope) -> MessageEnvelope:
+        """Handle platform.session.status.get query (read-only snapshot)."""
+        session_id = query_envelope.payload.get("session_id")
+        if not session_id:
+            return create_error_response(
+                query_envelope,
+                self.name,
+                error_code="INVALID_SESSION",
+                error_message="Missing session_id",
+            )
+        try:
+            if self._session_manager is None:
+                raise PlatformResourceIntegrityError("Session manager uninitialized")
+
+            ctx = self._session_manager.get_session(str(session_id))
+            status = ctx.status.value if ctx else "UNKNOWN"
+
+            payload = serialize_platform_payload(
+                {
+                    "session_id": str(session_id),
+                    "status": status,
+                }
+            )
+            return create_response(query_envelope, self.name, payload=dict(payload))
+        except Exception as e:
+            raw_err = str(e)
+            redacted_err = self._secret_filter.redact(raw_err) if self._secret_filter else raw_err
+            err_code = type(e).__name__.upper()
+            if not err_code.startswith("ERR_"):
+                err_code = f"ERR_{err_code}"
+            return create_error_response(
+                query_envelope,
+                self.name,
+                error_code=err_code,
+                error_message=redacted_err,
+            )
+
     def handle_audit_query(self, query_envelope: MessageEnvelope) -> MessageEnvelope:
         """Handle platform.audit query."""
         try:
@@ -543,10 +585,13 @@ class PlatformService(IService):
         except Exception as e:
             raw_err = str(e)
             redacted_err = self._secret_filter.redact(raw_err) if self._secret_filter else raw_err
+            err_code = type(e).__name__.upper()
+            if not err_code.startswith("ERR_"):
+                err_code = f"ERR_{err_code}"
             return create_error_response(
                 query_envelope,
                 self.name,
-                error_code=type(e).__name__,
+                error_code=err_code,
                 error_message=redacted_err,
             )
 

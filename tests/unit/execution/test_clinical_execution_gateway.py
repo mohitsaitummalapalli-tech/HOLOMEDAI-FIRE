@@ -16,6 +16,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import pickle
 import pytest
+from unittest.mock import MagicMock
 
 from holomed.core.dispatcher import MessageDispatcher
 from holomed.core.exceptions import UnroutableMessageError
@@ -120,6 +121,8 @@ def test_all_six_execution_routes_registered(
     dispatcher = MessageDispatcher()
     dispatcher.initialize(test_runtime_context)
     gateway = ClinicalExecutionGatewayService(dispatcher=dispatcher)
+    # M42 isolated business-logic local stub
+    gateway._is_session_active = MagicMock(return_value=True)
     gateway.initialize(test_runtime_context)
 
     # Verify registered routes
@@ -264,6 +267,10 @@ def test_execution_tool_invoke_command_success(
         workflow_service=mock_wf,
         tool_service=tool_srv,
     )
+
+    # M42 isolated business-logic local stub
+
+    gateway._is_session_active = MagicMock(return_value=True)
     gateway.initialize(test_runtime_context)
     dispatcher.start()
     gateway.start()
@@ -322,6 +329,10 @@ def test_execution_tool_invoke_blocked_by_safety_gate(
         workflow_service=mock_wf,
         tool_service=tool_srv,
     )
+
+    # M42 isolated business-logic local stub
+
+    gateway._is_session_active = MagicMock(return_value=True)
     gateway.initialize(test_runtime_context)
     dispatcher.start()
     gateway.start()
@@ -392,6 +403,10 @@ def test_execution_tool_invoke_blocked_by_workflow(
         workflow_service=mock_wf,
         tool_service=tool_srv,
     )
+
+    # M42 isolated business-logic local stub
+
+    gateway._is_session_active = MagicMock(return_value=True)
     gateway.initialize(test_runtime_context)
     dispatcher.start()
     gateway.start()
@@ -443,6 +458,10 @@ def test_execution_workflow_resume_command(
         dispatcher=dispatcher,
         workflow_service=mock_wf,
     )
+
+    # M42 isolated business-logic local stub
+
+    gateway._is_session_active = MagicMock(return_value=True)
     gateway.initialize(test_runtime_context)
     dispatcher.start()
     gateway.start()
@@ -530,6 +549,10 @@ def test_m32_execution_recovery_reset_calls_canonical_api(
         recovery_service=mock_rec,
         secret_filter=secret_filter,
     )
+
+    # M42 isolated business-logic local stub
+
+    gateway._is_session_active = MagicMock(return_value=True)
     gateway.initialize(test_runtime_context)
     dispatcher.start()
     gateway.start()

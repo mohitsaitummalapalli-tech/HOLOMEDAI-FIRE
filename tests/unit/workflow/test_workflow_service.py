@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import pytest
+from unittest.mock import MagicMock
 
 from holomed.core.dispatcher import MessageDispatcher
 from holomed.protocol.builders import create_command, create_query
@@ -32,6 +33,8 @@ def test_workflow_service_lifecycle_and_resources(
 ) -> None:
     """Verify WorkflowService acquires and releases exactly 4 structural handles."""
     srv = WorkflowService(dispatcher=message_dispatcher, secret_filter=secret_filter)
+    # M42 isolated business-logic local stub
+    srv._is_session_active = MagicMock(return_value=True)
     assert srv.state == ServiceState.UNINITIALIZED
 
     srv.initialize(runtime_context)
@@ -62,6 +65,8 @@ def test_start_workflow_and_phase_transition(
 ) -> None:
     """Verify workflow start and sequential progression."""
     srv = WorkflowService(dispatcher=message_dispatcher, secret_filter=secret_filter)
+    # M42 isolated business-logic local stub
+    srv._is_session_active = MagicMock(return_value=True)
     srv.initialize(runtime_context)
     message_dispatcher.start()
     srv.start()
@@ -96,6 +101,8 @@ def test_human_confirmation_gate_in_service(
 ) -> None:
     """Verify explicit human confirmation unblocks NAVIGATION transition."""
     srv = WorkflowService(dispatcher=message_dispatcher, secret_filter=secret_filter)
+    # M42 isolated business-logic local stub
+    srv._is_session_active = MagicMock(return_value=True)
     srv.initialize(runtime_context)
     message_dispatcher.start()
     srv.start()
@@ -135,6 +142,8 @@ def test_blocking_and_critical_interlocks_in_service(
 ) -> None:
     """Verify blocking and critical interlocks halt workflow transitions."""
     srv = WorkflowService(dispatcher=message_dispatcher, secret_filter=secret_filter)
+    # M42 isolated business-logic local stub
+    srv._is_session_active = MagicMock(return_value=True)
     srv.initialize(runtime_context)
     message_dispatcher.start()
     srv.start()
@@ -172,6 +181,8 @@ def test_dispatcher_routes(
 ) -> None:
     """Verify dispatcher query and command handlers route cleanly."""
     srv = WorkflowService(dispatcher=message_dispatcher, secret_filter=secret_filter)
+    # M42 isolated business-logic local stub
+    srv._is_session_active = MagicMock(return_value=True)
     srv.initialize(runtime_context)
     message_dispatcher.start()
     srv.start()

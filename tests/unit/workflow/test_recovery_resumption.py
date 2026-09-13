@@ -58,6 +58,8 @@ def _setup_started_workflow_service(
         secret_filter=secret_filter,
         persistence_service=mock_persistence,
     )
+    # M42 isolated business-logic local stub
+    svc._is_session_active = MagicMock(return_value=True)
     svc.initialize(runtime_context)
     if message_dispatcher.state != DispatcherState.STARTED:
         message_dispatcher.start()
@@ -1222,6 +1224,8 @@ class TestEndToEndRecoveryReentryIntegration:
             secret_filter=secret_filter,
             logger=logger,
         )
+        # M42 isolated business-logic local stub
+        exec_svc._is_session_active = MagicMock(return_value=True)
         exec_svc.initialize(runtime_context)
         disp_exec.start()
         exec_svc.start()

@@ -6,6 +6,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Optional
 import pytest
+from unittest.mock import MagicMock
 
 from holomed.core.dispatcher import MessageDispatcher
 from holomed.execution.models import (
@@ -111,6 +112,8 @@ def test_spoofed_workflow_transition_cannot_mutate_b(
 ) -> None:
     """2. Real ingress execution test: spoofed workflow.transition fails before reaching WorkflowService."""
     wf_srv = WorkflowService(dispatcher=message_dispatcher, secret_filter=secret_filter)
+    # M42 isolated business-logic local stub
+    wf_srv._is_session_active = MagicMock(return_value=True)
     gw_srv = GatewayService(dispatcher=message_dispatcher, workflow_service=wf_srv, secret_filter=secret_filter)
 
     wf_srv.initialize(runtime_context)
@@ -155,6 +158,8 @@ def test_spoofed_execution_tool_invoke_cannot_mutate_b(
 ) -> None:
     """3. Real ingress execution test: spoofed execution.tool.invoke rejected at perimeter."""
     exec_srv = ClinicalExecutionGatewayService(dispatcher=message_dispatcher, secret_filter=secret_filter)
+    # M42 isolated business-logic local stub
+    exec_srv._is_session_active = MagicMock(return_value=True)
     gw_srv = GatewayService(dispatcher=message_dispatcher, secret_filter=secret_filter)
 
     exec_srv.initialize(runtime_context)
@@ -198,12 +203,16 @@ def test_spoofed_execution_session_teardown_cannot_destroy_b(
     """4. Real ingress execution test: spoofed execution.session.teardown cannot destroy Session B."""
     plat_srv = PlatformService(dispatcher=message_dispatcher, secret_filter=secret_filter)
     wf_srv = WorkflowService(dispatcher=message_dispatcher, secret_filter=secret_filter)
+    # M42 isolated business-logic local stub
+    wf_srv._is_session_active = MagicMock(return_value=True)
     exec_srv = ClinicalExecutionGatewayService(
         dispatcher=message_dispatcher,
         workflow_service=wf_srv,
         platform_service=plat_srv,
         secret_filter=secret_filter,
     )
+    # M42 isolated business-logic local stub
+    exec_srv._is_session_active = MagicMock(return_value=True)
     gw_srv = GatewayService(dispatcher=message_dispatcher, workflow_service=wf_srv, secret_filter=secret_filter)
 
     plat_srv.initialize(runtime_context)
@@ -258,6 +267,8 @@ def test_same_session_payload_allowed(
 ) -> None:
     """5. Verify compliant client specifying payload['session_id'] == session.session_id succeeds."""
     wf_srv = WorkflowService(dispatcher=message_dispatcher, secret_filter=secret_filter)
+    # M42 isolated business-logic local stub
+    wf_srv._is_session_active = MagicMock(return_value=True)
     gw_srv = GatewayService(dispatcher=message_dispatcher, workflow_service=wf_srv, secret_filter=secret_filter)
 
     wf_srv.initialize(runtime_context)
@@ -611,6 +622,8 @@ def test_teardown_step11_gateway_integration(
         gateway_service=gw_srv,
         secret_filter=secret_filter,
     )
+    # M42 isolated business-logic local stub
+    exec_srv._is_session_active = MagicMock(return_value=True)
 
     gw_srv.initialize(runtime_context)
     exec_srv.initialize(runtime_context)
@@ -657,6 +670,8 @@ def test_teardown_gateway_failure_aggregation(
         gateway_service=failing_gw,
         secret_filter=secret_filter,
     )
+    # M42 isolated business-logic local stub
+    exec_srv._is_session_active = MagicMock(return_value=True)
 
     plat_srv.initialize(runtime_context)
     exec_srv.initialize(runtime_context)

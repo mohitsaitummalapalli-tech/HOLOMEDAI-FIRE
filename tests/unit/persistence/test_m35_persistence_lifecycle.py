@@ -441,7 +441,7 @@ def execution_gateway_fixture(runtime_context: RuntimeContext, temp_storage_root
     dispatcher = MessageDispatcher()
     dispatcher.initialize(runtime_context)
 
-    platform = PlatformService()
+    platform = PlatformService(dispatcher=dispatcher)
     platform.initialize(runtime_context)
     platform.start()
 

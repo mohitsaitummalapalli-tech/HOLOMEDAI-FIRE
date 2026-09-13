@@ -95,11 +95,15 @@ def m26_environment(runtime_context):
     dispatcher = MessageDispatcher()
     dispatcher.initialize(runtime_context)
 
-    platform = PlatformService()
+    platform = PlatformService(dispatcher=dispatcher)
     platform.initialize(runtime_context)
     platform.start()
 
     workflow = WorkflowService(dispatcher=dispatcher, platform_service=platform)
+
+    # M42 isolated business-logic local stub
+
+    workflow._is_session_active = MagicMock(return_value=True)
     workflow.initialize(runtime_context)
     workflow.start()
 
@@ -136,6 +140,10 @@ def m26_environment(runtime_context):
         proximity_service=proximity,
         drift_service=drift,
     )
+
+    # M42 isolated business-logic local stub
+
+    safety_gate._is_session_active = MagicMock(return_value=True)
     safety_gate.initialize(runtime_context)
     safety_gate.start()
 
@@ -156,6 +164,10 @@ def m26_environment(runtime_context):
         proximity_service=proximity,
         drift_service=drift,
     )
+
+    # M42 isolated business-logic local stub
+
+    gateway._is_session_active = MagicMock(return_value=True)
     gateway.initialize(runtime_context)
     gateway.start()
 

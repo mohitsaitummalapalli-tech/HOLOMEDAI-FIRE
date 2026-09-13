@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import pytest
+from unittest.mock import MagicMock
 
 from holomed.core.dispatcher import MessageDispatcher
 from holomed.gateway.exceptions import (
@@ -127,6 +128,8 @@ def test_e2e_workflow_command_routing_through_gateway(
 ) -> None:
     """Verify external client issuing workflow.start routes through dispatcher to WorkflowService."""
     wf_srv = WorkflowService(dispatcher=message_dispatcher, secret_filter=secret_filter)
+    # M42 isolated business-logic local stub
+    wf_srv._is_session_active = MagicMock(return_value=True)
     gw_srv = GatewayService(dispatcher=message_dispatcher, workflow_service=wf_srv, secret_filter=secret_filter)
 
     wf_srv.initialize(runtime_context)

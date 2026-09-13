@@ -51,7 +51,7 @@ def m27_env(runtime_context):
     dispatcher = MessageDispatcher()
     dispatcher.initialize(runtime_context)
 
-    platform = PlatformService()
+    platform = PlatformService(dispatcher=dispatcher)
     platform.initialize(runtime_context)
     platform.start()
 

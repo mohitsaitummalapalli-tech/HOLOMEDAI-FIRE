@@ -820,6 +820,10 @@ class TestM36GatewayIngressAndLifecycleIsolation:
             planning_service=plan_srv,
             secret_filter=secret_filter,
         )
+
+        # M42 isolated business-logic local stub
+
+        gateway._is_session_active = MagicMock(return_value=True)
         gateway.initialize(runtime_context)
         dispatcher.start()
         reg_srv.start()
@@ -911,6 +915,10 @@ class TestM36GatewayIngressAndLifecycleIsolation:
             planning_service=ps1,
             secret_filter=secret_filter,
         )
+
+        # M42 isolated business-logic local stub
+
+        gateway._is_session_active = MagicMock(return_value=True)
         with pytest.raises(ExecutionLifecycleError, match="RegistrationService planning_service instance mismatch with Gateway"):
             gateway.initialize(runtime_context)
 
