@@ -224,3 +224,47 @@ def test_dispatcher_routes(
     assert resp_ab.payload["current_phase"] == "ABORTED"
 
     srv.stop()
+
+
+def test_inactive_session_rejected_for_mutations(
+    runtime_context: RuntimeContext,
+    message_dispatcher: MessageDispatcher,
+    secret_filter: SecretFilter,
+) -> None:
+    """Verify that an inactive session synchronously rejects all workflow mutations."""
+    srv = WorkflowService(dispatcher=message_dispatcher, secret_filter=secret_filter)
+    # 1. Start with an active session to initialize it in memory
+    srv._is_session_active = MagicMock(return_value=True)
+    srv.initialize(runtime_context)
+    message_dispatcher.start()
+    srv.start()
+
+    sess_id = "sess_inactive_mut"
+    srv.start_workflow(sess_id)
+
+    # 2. Simulate session going inactive (e.g., STOPPED or FAILED in Platform)
+    # The session is still in `srv._workflows` because the eviction event hasn't been processed yet.
+    srv._is_session_active = MagicMock(return_value=False)
+
+    # 3. Prove that transition_phase rejects
+    with pytest.raises(WorkflowLifecycleError, match="is not ACTIVE"):
+        srv.transition_phase(sess_id, WorkflowPhase.PRE_PROCEDURE_PLANNING, 1)
+
+    # 4. Prove that confirm rejects
+    resp = ConfirmationResponse(
+        confirmation_id="conf_1",
+        session_id=sess_id,
+        epoch_id=1,
+        approved=True,
+        operator_id="op",
+        timestamp_utc="2026-09-01T20:00:00Z",
+        sequence_number=1,
+    )
+    with pytest.raises(WorkflowLifecycleError, match="is not ACTIVE"):
+        srv.confirm(resp)
+
+    # 5. Prove that abort_workflow rejects
+    with pytest.raises(WorkflowLifecycleError, match="is not ACTIVE"):
+        srv.abort_workflow(sess_id, 2)
+
+    srv.stop()

@@ -374,6 +374,8 @@ class WorkflowService(IService):
 
         self._in_transaction = True
         try:
+            if not self._is_session_active(session_id):
+                raise WorkflowLifecycleError(f"Session {session_id!r} is not ACTIVE")
             if session_id not in self._workflows:
                 raise WorkflowSessionError(f"Session {session_id!r} has no active workflow")
 
@@ -430,6 +432,8 @@ class WorkflowService(IService):
         sequence_number: int,
     ) -> ConfirmationRequest:
         """Create a pending confirmation request for a clinical phase."""
+        if not self._is_session_active(session_id):
+            raise WorkflowLifecycleError(f"Session {session_id!r} is not ACTIVE")
         if session_id not in self._workflows:
             raise WorkflowSessionError(f"Session {session_id!r} has no active workflow")
         cm = self._confirmations[session_id]
@@ -454,6 +458,8 @@ class WorkflowService(IService):
     def confirm(self, response: ConfirmationResponse) -> ConfirmationRequest:
         """Resolve a pending confirmation with an operator response."""
         session_id = response.session_id
+        if not self._is_session_active(session_id):
+            raise WorkflowLifecycleError(f"Session {session_id!r} is not ACTIVE")
         if session_id not in self._confirmations:
             raise WorkflowSessionError(f"Session {session_id!r} has no active confirmation manager")
 
@@ -478,6 +484,8 @@ class WorkflowService(IService):
         reason: str = "",
     ) -> WorkflowStateSnapshot:
         """Safely transition active workflow to ABORTED."""
+        if not self._is_session_active(session_id):
+            raise WorkflowLifecycleError(f"Session {session_id!r} is not ACTIVE")
         if session_id not in self._workflows:
             raise WorkflowSessionError(f"Session {session_id!r} not found")
         sm = self._workflows[session_id]
@@ -505,6 +513,8 @@ class WorkflowService(IService):
         capability = None
         try:
             session_id = request.session_id
+            if not self._is_session_active(session_id):
+                raise WorkflowLifecycleError(f"Session {session_id!r} is not ACTIVE")
             if session_id not in self._workflows:
                 raise WorkflowSessionError(f"Session {session_id!r} has no active workflow")
 
