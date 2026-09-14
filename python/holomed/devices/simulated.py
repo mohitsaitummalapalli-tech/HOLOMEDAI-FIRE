@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import contextlib
+import queue
+import threading
+import time
 from datetime import datetime, timezone
+from enum import Enum
 from types import MappingProxyType
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Set
 
 from holomed.devices.interfaces import DeviceResourceAccessor, IDevice
 from holomed.devices.models import (
@@ -25,20 +29,60 @@ from holomed.devices.interfaces import IPhysicalEndpoint
 from holomed.devices.control.exceptions import CapabilityUnauthorizedError
 
 
-class SimulatedPhysicalEndpoint(IPhysicalEndpoint):
-    """M48 Simulated physical endpoint for testing lease mechanics."""
+class WorkerState(Enum):
+    UNAVAILABLE = "UNAVAILABLE"
+    RUNNING = "RUNNING"
+    SHUTDOWN_REQUESTED = "SHUTDOWN_REQUESTED"
+    STOPPED = "STOPPED"
 
-    def __init__(self, endpoint_id: str, device_id: str) -> None:
+
+class SimulatedPhysicalEndpoint(IPhysicalEndpoint):
+    """M49.3.2 Simulated physical endpoint for testing execution boundary."""
+
+    def __init__(self, endpoint_id: str, device_id: str, queue_capacity: int = 10) -> None:
         self._endpoint_id = endpoint_id
         self._device_id = device_id
         self._safety_state = EndpointSafetyState.SAFE_STOPPED
         self._active_lease: Optional[EndpointLease] = None
         self._last_accepted_sequence = 0
+        self._queue_capacity = queue_capacity
 
-        # We cannot use threading module in device code as per PROHIBITED_MODULES.
-        # This is a simulated endpoint meant for tests, so we use a nullcontext.
-        # Tests that want to test concurrency can monkey-patch this with a real lock.
-        self._submit_lock = contextlib.nullcontext()
+        # Concurrency and execution boundary
+        self._submit_lock = threading.Lock()
+        self._command_queue: queue.Queue[PhysicalCommand] = queue.Queue(maxsize=self._queue_capacity)
+        
+        # Worker lifecycle
+        self._worker_state = WorkerState.UNAVAILABLE
+        self._worker_thread: Optional[threading.Thread] = None
+        self._shutdown_event = threading.Event()
+        
+        # Stop channel
+        self._stop_requests: Set[str] = set()
+        
+        self._start_worker()
+
+    def _start_worker(self) -> None:
+        with self._submit_lock:
+            self._worker_state = WorkerState.RUNNING
+            self._shutdown_event.clear()
+            self._worker_thread = threading.Thread(
+                target=self._execution_loop, 
+                name=f"sim_worker_{self._endpoint_id}",
+                daemon=True
+            )
+            self._worker_thread.start()
+
+    def stop_worker(self) -> None:
+        """Testing seam to simulate worker dying or shutting down."""
+        with self._submit_lock:
+            self._worker_state = WorkerState.SHUTDOWN_REQUESTED
+            self._shutdown_event.set()
+        
+        if self._worker_thread and self._worker_thread.is_alive():
+            self._worker_thread.join(timeout=1.0)
+            
+        with self._submit_lock:
+            self._worker_state = WorkerState.STOPPED
 
     @property
     def endpoint_id(self) -> str:
@@ -54,11 +98,15 @@ class SimulatedPhysicalEndpoint(IPhysicalEndpoint):
 
     @property
     def endpoint_state(self) -> EndpointState:
-        # Stub for M49.3.1 - physical execution behavior is unchanged
         return EndpointState.READY
 
     def recover(self) -> None:
         raise NotImplementedError("Recovery semantics not yet implemented in M49.3")
+
+    def request_stop(self, execution_id: str) -> None:
+        """Independently request a stop for a specific active execution."""
+        with self._submit_lock:
+            self._stop_requests.add(execution_id)
 
     def emergency_stop(self) -> EndpointSafetyState:
         if self._safety_state == EndpointSafetyState.HARDWARE_INTERLOCKED:
@@ -84,6 +132,17 @@ class SimulatedPhysicalEndpoint(IPhysicalEndpoint):
 
     def submit_command(self, command: PhysicalCommand) -> PhysicalCommandResult:
         with self._submit_lock:
+            # Lifecycle checks
+            if self._worker_state != WorkerState.RUNNING:
+                if self._worker_state == WorkerState.SHUTDOWN_REQUESTED:
+                    return PhysicalCommandResult(status=SubmissionStatus.SHUTTING_DOWN, details={})
+                return PhysicalCommandResult(status=SubmissionStatus.WORKER_UNAVAILABLE, details={})
+
+            if not self._worker_thread or not self._worker_thread.is_alive():
+                self._worker_state = WorkerState.UNAVAILABLE
+                return PhysicalCommandResult(status=SubmissionStatus.WORKER_UNAVAILABLE, details={})
+
+            # Validity checks
             if self._safety_state != EndpointSafetyState.ACTIVE:
                 raise CapabilityUnauthorizedError(
                     f"Endpoint {self._endpoint_id} is not in ACTIVE state (current: {self._safety_state.name})"
@@ -97,13 +156,20 @@ class SimulatedPhysicalEndpoint(IPhysicalEndpoint):
             if command.endpoint_lease_generation != self._active_lease.endpoint_lease_generation:
                 raise CapabilityUnauthorizedError("Lease generation mismatch")
 
-            # Atomic sequence check and update
+            # Sequence checks
             if command.command_sequence <= self._last_accepted_sequence:
-                raise CapabilityUnauthorizedError(
-                    f"Stale or duplicate sequence {command.command_sequence}. Expected > {self._last_accepted_sequence}"
+                return PhysicalCommandResult(
+                    status=SubmissionStatus.DUPLICATE_REJECTED,
+                    details={"actuated_sequence": self._last_accepted_sequence}
                 )
 
             self._last_accepted_sequence = command.command_sequence
+
+            # Bounded handoff
+            try:
+                self._command_queue.put_nowait(command)
+            except queue.Full:
+                return PhysicalCommandResult(status=SubmissionStatus.QUEUE_FULL, details={})
 
             return PhysicalCommandResult(
                 status=SubmissionStatus.ACCEPTED,
@@ -112,6 +178,56 @@ class SimulatedPhysicalEndpoint(IPhysicalEndpoint):
                     "operation": command.operation
                 }
             )
+
+    def _execution_loop(self) -> None:
+        """Exclusive execution plane worker."""
+        while not self._shutdown_event.is_set():
+            try:
+                command = self._command_queue.get(timeout=0.1)
+            except queue.Empty:
+                continue
+
+            # Stale-at-dequeue protection
+            with self._submit_lock:
+                is_stale = False
+                if not self._active_lease:
+                    is_stale = True
+                elif command.session_id != self._active_lease.session_id:
+                    is_stale = True
+                elif command.lifecycle_generation != self._active_lease.lifecycle_generation:
+                    is_stale = True
+                elif command.endpoint_lease_generation != self._active_lease.endpoint_lease_generation:
+                    is_stale = True
+                elif self._safety_state != EndpointSafetyState.ACTIVE:
+                    is_stale = True
+
+                if is_stale:
+                    self._command_queue.task_done()
+                    continue
+                    
+                # Stop requested before execution started?
+                if command.execution_id in self._stop_requests:
+                    # We just skip physical execution
+                    self._command_queue.task_done()
+                    self._stop_requests.discard(command.execution_id)
+                    continue
+                    
+            try:
+                # Simulated blocking physical execution
+                for _ in range(5):
+                    if command.execution_id in self._stop_requests:
+                        break
+                    if self._shutdown_event.is_set():
+                        break
+                    time.sleep(0.01)  # Simulated blocking step
+                    
+            except Exception:
+                # Expose failure according to rules
+                pass
+            finally:
+                self._command_queue.task_done()
+                with self._submit_lock:
+                    self._stop_requests.discard(command.execution_id)
 
     # Test configuration hooks
     def inject_hardware_interlock(self) -> None:

@@ -103,6 +103,10 @@ class IPhysicalEndpoint(abc.ABC):
     def emergency_stop(self) -> EndpointSafetyState:
         """Asynchronously halt physical output and return terminal safe state."""
 
+    @abc.abstractmethod
+    def request_stop(self, execution_id: str) -> None:
+        """Independently request a stop for a specific active execution."""
+
     @property
     @abc.abstractmethod
     def active_lease(self) -> Optional[EndpointLease]:
