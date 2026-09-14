@@ -110,3 +110,10 @@ class NavigationShutdownError(NavigationError):
     ) -> None:
         super().__init__(message, error_code="ERR_NAV_SHUTDOWN", details=details, recoverable=False)
         self.failures = tuple(failures)
+
+
+class NavigationInterlockError(NavigationError):
+    """M47: Raised when navigation evaluation is blocked by a spatial recovery interlock."""
+
+    def __init__(self, message: str, details: Optional[Mapping[str, Any]] = None) -> None:
+        super().__init__(message, error_code="ERR_NAV_SPATIAL_INTERLOCK", details=details, recoverable=False)

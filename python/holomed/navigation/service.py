@@ -23,6 +23,7 @@ from holomed.navigation.exceptions import (
     NavigationCapacityError,
     NavigationError,
     NavigationFrameMismatchError,
+    NavigationInterlockError,
     NavigationLifecycleError,
     NavigationRegistrationMismatchError,
     NavigationSequenceError,
@@ -111,6 +112,9 @@ class NavigationService(IService):
 
         self._in_transaction: bool = False
 
+        # M47: Session-level spatial recovery interlocks (session_id set)
+        self._spatial_recovery_interlocks: set[str] = set()
+
     @property
     def name(self) -> str:
         return "navigation_service"
@@ -157,6 +161,17 @@ class NavigationService(IService):
             self._dispatcher.subscribe_event(
                 "platform.session.evicted",
                 self.handle_session_purged_event,
+                self.name,
+            )
+            # M47: Subscribe to recovery lifecycle events for spatial interlock
+            self._dispatcher.subscribe_event(
+                "recovery.failed",
+                self.handle_recovery_failed_event,
+                self.name,
+            )
+            self._dispatcher.subscribe_event(
+                "recovery.spatial.activated",
+                self.handle_recovery_activated_event,
                 self.name,
             )
 
@@ -462,6 +477,13 @@ class NavigationService(IService):
         if self._in_transaction:
             raise NavigationLifecycleError("Reentrant call to evaluate rejected")
 
+        # M47: Spatial recovery interlock check — blocks continuous evaluation
+        if session_id in self._spatial_recovery_interlocks:
+            self._session_states[session_id] = NavigationState.INTERLOCKED
+            raise NavigationInterlockError(
+                f"Navigation evaluation blocked: spatial recovery interlock active for session {session_id!r}"
+            )
+
         self._in_transaction = True
         try:
             # Check PlanningService availability (fail closed)
@@ -615,6 +637,33 @@ class NavigationService(IService):
         if session_id:
             self.evict_session(session_id)
 
+    def handle_recovery_failed_event(self, event_envelope: MessageEnvelope) -> None:
+        """M47: Handle recovery.failed — activate spatial recovery interlock.
+
+        Sets the session state to INTERLOCKED and adds the session to the
+        spatial recovery interlock set without evicting trajectory/pose state.
+        Idempotent: repeated events for the same session are safe.
+        """
+        session_id = event_envelope.payload.get("session_id")
+        if not session_id:
+            return
+        self._spatial_recovery_interlocks.add(session_id)
+        if session_id in self._session_states:
+            self._session_states[session_id] = NavigationState.INTERLOCKED
+
+    def handle_recovery_activated_event(self, event_envelope: MessageEnvelope) -> None:
+        """M47: Handle recovery.spatial.activated — clear spatial recovery interlock.
+
+        Removes the session from the spatial recovery interlock set.
+        Does NOT automatically change NavigationState — the next evaluate()
+        call will compute the correct state from fresh spatial data.
+        Idempotent: clearing a non-existent interlock is safe.
+        """
+        session_id = event_envelope.payload.get("session_id")
+        if not session_id:
+            return
+        self._spatial_recovery_interlocks.discard(session_id)
+
 
     def clear(self) -> None:
 
@@ -626,6 +675,8 @@ class NavigationService(IService):
         self._latest_deviations.clear()
         self._session_states.clear()
         self._active_instruments.clear()
+        # M47: Clear all spatial recovery interlocks
+        self._spatial_recovery_interlocks.clear()
 
     # -------------------------------------------------------------------------
     # Helper & Protocol Handlers

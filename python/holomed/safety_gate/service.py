@@ -48,6 +48,7 @@ from holomed.safety_gate.models import (
     GateDecision,
     GateReasonCode,
     GateRequest,
+    GateSeverity,
     GateStatusRecord,
     SafetyGateAction,
 )
@@ -97,6 +98,9 @@ class SafetyGateService(IService):
         # session_id -> (last_decision, last_reason_code) for persistence deduplication
         self._persisted_states: Dict[str, Tuple[GateDecision, GateReasonCode]] = {}
 
+        # M47: Session-level spatial recovery interlocks (session_id set)
+        self._spatial_recovery_interlocks: set[str] = set()
+
         self._in_transaction: bool = False
 
     @property
@@ -144,6 +148,17 @@ class SafetyGateService(IService):
             self._dispatcher.subscribe_event(
                 "platform.session.evicted",
                 self.handle_session_purged_event,
+                self.name,
+            )
+            # M47: Subscribe to recovery lifecycle events for spatial interlock
+            self._dispatcher.subscribe_event(
+                "recovery.failed",
+                self.handle_recovery_failed_event,
+                self.name,
+            )
+            self._dispatcher.subscribe_event(
+                "recovery.spatial.activated",
+                self.handle_recovery_activated_event,
                 self.name,
             )
 
@@ -317,7 +332,24 @@ class SafetyGateService(IService):
             self._in_transaction = False
 
     def get_gate_status(self, session_id: str) -> Optional[GateStatusRecord]:
-        """Query latest cached safety gate decision for a session."""
+        """Query latest cached safety gate decision for a session.
+
+        M47: If the session has an active spatial recovery interlock, returns
+        an explicit DENIED_INTERLOCKED / SPATIAL_RECOVERY_FAILED record
+        regardless of any stale action-level cached decision.
+        """
+        if session_id in self._spatial_recovery_interlocks:
+            now_utc = datetime.now(timezone.utc).isoformat()
+            return GateStatusRecord(
+                session_id=session_id,
+                decision=GateDecision.DENIED_INTERLOCKED,
+                severity=GateSeverity.BLOCKING,
+                reason_code=GateReasonCode.SPATIAL_RECOVERY_FAILED,
+                action=SafetyGateAction.TOOL_INVOCATION,
+                sequence_number=1,
+                subsystem_snapshots=(),
+                evaluated_at_utc=now_utc,
+            )
         return self._latest_decisions.get(session_id)
 
     def evict_session(self, session_id: str, capability: Optional[Any] = None) -> bool:
@@ -331,6 +363,8 @@ class SafetyGateService(IService):
         if session_id in self._persisted_states:
             del self._persisted_states[session_id]
             evicted = True
+        # M47: Clear spatial recovery interlock on session eviction
+        self._spatial_recovery_interlocks.discard(session_id)
         return evicted
 
     def handle_session_purged_event(self, event_envelope: MessageEnvelope) -> None:
@@ -339,10 +373,42 @@ class SafetyGateService(IService):
         if session_id:
             self.evict_session(session_id)
 
+    def handle_recovery_failed_event(self, event_envelope: MessageEnvelope) -> None:
+        """M47: Handle recovery.failed — activate session-level spatial recovery interlock.
+
+        1. Invalidate any stale permissive action-level cached decision.
+        2. Set an explicit session-level spatial recovery interlock so that
+           get_gate_status returns DENIED_INTERLOCKED / SPATIAL_RECOVERY_FAILED.
+        3. Idempotent: repeated events for the same session are safe.
+        """
+        session_id = event_envelope.payload.get("session_id")
+        if not session_id:
+            return
+        # Invalidate stale action-level cached decisions
+        self._latest_decisions.pop(session_id, None)
+        self._persisted_states.pop(session_id, None)
+        # Activate session-level spatial interlock
+        self._spatial_recovery_interlocks.add(session_id)
+
+    def handle_recovery_activated_event(self, event_envelope: MessageEnvelope) -> None:
+        """M47: Handle recovery.spatial.activated — clear spatial recovery interlock.
+
+        The interlock is cleared only after the authoritative recovery state
+        indicates a successful completion (RecoveryState.ACTIVATED) which
+        means M13, M16, M15, and M14 have all been coherently updated.
+        Idempotent: clearing a non-existent interlock is safe.
+        """
+        session_id = event_envelope.payload.get("session_id")
+        if not session_id:
+            return
+        self._spatial_recovery_interlocks.discard(session_id)
+
     def clear(self) -> None:
         """Clear transient session tracking cache."""
         self._latest_decisions.clear()
         self._persisted_states.clear()
+        # M47: Clear all spatial recovery interlocks
+        self._spatial_recovery_interlocks.clear()
 
 
     # -------------------------------------------------------------------------
