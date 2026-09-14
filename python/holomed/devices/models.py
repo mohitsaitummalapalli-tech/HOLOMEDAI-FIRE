@@ -80,7 +80,7 @@ class DeviceState(str, enum.Enum):
 
 class EndpointSafetyState(str, enum.Enum):
     """M48 Physical safety state of an endpoint."""
-    
+
     SAFE_STOPPED = "SAFE_STOPPED"
     ACTIVE = "ACTIVE"
     HARDWARE_INTERLOCKED = "HARDWARE_INTERLOCKED"
@@ -89,7 +89,7 @@ class EndpointSafetyState(str, enum.Enum):
 @dataclass(frozen=True)
 class EndpointLease:
     """M48 Lease identity representing an authorized physical execution context."""
-    
+
     endpoint_id: str
     device_id: str
     session_id: str
@@ -97,7 +97,7 @@ class EndpointLease:
     endpoint_lease_generation: int
     execution_id: str
     capability_scope: frozenset[str]
-    
+
     def __post_init__(self) -> None:
         if not isinstance(self.endpoint_id, str) or not self.endpoint_id:
             raise DeviceValidationError("endpoint_id must be a non-empty string")
@@ -113,6 +113,62 @@ class EndpointLease:
             raise DeviceValidationError("execution_id must be a non-empty string")
         if not isinstance(self.capability_scope, frozenset):
             raise DeviceValidationError("capability_scope must be a frozenset of strings")
+
+
+@dataclass(frozen=True)
+class PhysicalCommand:
+    """M49 Canonical physical authorization and execution context."""
+
+    endpoint_id: str
+    session_id: str
+    lifecycle_generation: int
+    endpoint_lease_generation: int
+    execution_id: str
+    capability_scope: frozenset[str]
+    command_sequence: int
+    operation: str
+    parameters: Mapping[str, Any]
+
+    def __post_init__(self) -> None:
+        if type(self.endpoint_id) is not str or not self.endpoint_id.strip():
+            raise DeviceValidationError("endpoint_id must be a non-empty string")
+        if type(self.session_id) is not str or not self.session_id.strip():
+            raise DeviceValidationError("session_id must be a non-empty string")
+        if type(self.lifecycle_generation) is not int or self.lifecycle_generation < 1:
+            raise DeviceValidationError("lifecycle_generation must be an int >= 1")
+        if type(self.endpoint_lease_generation) is not int or self.endpoint_lease_generation < 1:
+            raise DeviceValidationError("endpoint_lease_generation must be an int >= 1")
+        if type(self.execution_id) is not str or not self.execution_id.strip():
+            raise DeviceValidationError("execution_id must be a non-empty string")
+        if not isinstance(self.capability_scope, frozenset):
+            raise DeviceValidationError("capability_scope must be a frozenset")
+        if any(type(x) is not str for x in self.capability_scope):
+            raise DeviceValidationError("capability_scope must contain only strings")
+        if type(self.command_sequence) is not int or self.command_sequence < 1:
+            raise DeviceValidationError("command_sequence must be an int >= 1")
+        if type(self.operation) is not str or not self.operation.strip():
+            raise DeviceValidationError("operation must be a non-empty string")
+        if not isinstance(self.parameters, (dict, MappingProxyType)):
+            raise DeviceValidationError(f"Parameters must be a mapping, got {type(self.parameters).__name__}")
+
+        frozen = deep_freeze_parameter(self.parameters)
+        object.__setattr__(self, "parameters", frozen)
+
+    def __reduce__(self) -> Any:
+        return (
+            self.__class__,
+            (
+                self.endpoint_id,
+                self.session_id,
+                self.lifecycle_generation,
+                self.endpoint_lease_generation,
+                self.execution_id,
+                self.capability_scope,
+                self.command_sequence,
+                self.operation,
+                dict(self.parameters),
+            )
+        )
 
 
 

@@ -25,6 +25,7 @@ from holomed.devices.control.models import (
     MAX_REGISTERED_QUERIES,
     QueryHandler,
 )
+from holomed.devices.models import PhysicalCommand
 from holomed.devices.control.lease import EndpointLeaseRegistry
 from holomed.devices.control.verifier import CommandVerifier
 from holomed.devices.interfaces import IDevice, IDeviceEventSink, NullDeviceEventSink
@@ -307,9 +308,9 @@ class DeviceControlManager(IService):
                         error_code="ERR_VALIDATION_ERROR",
                         error_message="Payload must contain 'session_id', 'execution_id', and 'session_lifecycle_generation' for physical actuation",
                     )
-                
+
                 capability_scope = frozenset([req_cap.capability_id])
-                
+
                 print(f"DEBUG: validator is {self._session_validator}")
                 if self._session_validator is not None:
                     print(f"DEBUG: session_id={session_id}, gen={lifecycle_generation}")
@@ -322,13 +323,13 @@ class DeviceControlManager(IService):
                             error_code="ERR_CAPABILITYUNAUTHORIZEDERROR",
                             error_message="Session is revoked or lifecycle generation is stale",
                         )
-                
+
                 for endpoint in device.endpoints:
                     if req_cap.target_endpoint_id is not None and endpoint.endpoint_id != req_cap.target_endpoint_id:
                         continue
-                        
+
                     try:
-                        self._lease_registry.issue_lease(
+                        lease = self._lease_registry.issue_lease(
                             endpoint=endpoint,
                             session_id=session_id,
                             lifecycle_generation=lifecycle_generation,
@@ -337,6 +338,20 @@ class DeviceControlManager(IService):
                         )
                         seq = self._lease_registry.next_command_sequence(endpoint.endpoint_id)
                         canonical_params[f"_command_sequence_{endpoint.endpoint_id}"] = seq
+
+                        # M49.1: Build Canonical Physical Command Context
+                        physical_cmd = PhysicalCommand(
+                            endpoint_id=endpoint.endpoint_id,
+                            session_id=session_id,
+                            lifecycle_generation=lifecycle_generation,
+                            endpoint_lease_generation=lease.endpoint_lease_generation,
+                            execution_id=execution_id,
+                            capability_scope=capability_scope,
+                            command_sequence=seq,
+                            operation=command_name,
+                            parameters=canonical_params,
+                        )
+                        canonical_params[f"_physical_command_context_{endpoint.endpoint_id}"] = physical_cmd
                     except Exception as e:
                         return create_error_response(
                             request=envelope,
@@ -468,7 +483,7 @@ class DeviceControlManager(IService):
                         endpoint.emergency_stop()
                     except Exception as e:
                         self._logger.error("Failed to emergency stop endpoint", extra={"endpoint_id": endpoint.endpoint_id, "error": str(e)})
-                    
+
                     # Free from lease registry
                     self._lease_registry.release_lease(endpoint, session_id)
 
