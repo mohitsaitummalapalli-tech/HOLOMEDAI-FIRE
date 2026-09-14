@@ -84,6 +84,10 @@ class DummyCoordinationDevice(IDevice):
     def stop(self, accessor: DeviceResourceAccessor) -> None:
         self._state = DeviceState.STOPPED
 
+
+    @property
+    def endpoints(self) -> tuple:
+        return ()
     def health(self) -> DeviceHealth:
         if self._health_raise_exc is not None:
             raise self._health_raise_exc

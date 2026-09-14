@@ -13,6 +13,8 @@ from holomed.devices.models import (
     DeviceHealth,
     DeviceState,
     DeviceType,
+    EndpointLease,
+    EndpointSafetyState,
     MAX_RECORDED_EVENTS,
 )
 from holomed.protocol.models import MessageEnvelope
@@ -67,6 +69,42 @@ class DeviceResourceAccessor:
         return self._authority.is_device_clean(self._device_id)
 
 
+class IPhysicalEndpoint(abc.ABC):
+    """Abstract interface for a controllable physical hardware actuator/channel."""
+
+    @property
+    @abc.abstractmethod
+    def endpoint_id(self) -> str:
+        """Unique identifier for this specific physical channel/actuator."""
+
+    @property
+    @abc.abstractmethod
+    def device_id(self) -> str:
+        """The identifier of the device owning this endpoint."""
+
+    @property
+    @abc.abstractmethod
+    def safety_state(self) -> EndpointSafetyState:
+        """Current physical safety state of the endpoint."""
+
+    @abc.abstractmethod
+    def emergency_stop(self) -> EndpointSafetyState:
+        """Asynchronously halt physical output and return terminal safe state."""
+
+    @property
+    @abc.abstractmethod
+    def active_lease(self) -> Optional[EndpointLease]:
+        """The currently active lease for this physical endpoint, if any."""
+
+    @abc.abstractmethod
+    def acquire_lease(self, lease: EndpointLease) -> None:
+        """Bind this endpoint to a specific session/execution context."""
+
+    @abc.abstractmethod
+    def release_lease(self, session_id: str) -> None:
+        """Release the active lease for the given session."""
+
+
 class IDevice(abc.ABC):
     """Abstract interface for all hardware devices and simulated test doubles."""
 
@@ -94,6 +132,11 @@ class IDevice(abc.ABC):
     @abc.abstractmethod
     def capabilities(self) -> Tuple[DeviceCapability, ...]:
         """Exact declared capabilities of this device."""
+
+    @property
+    @abc.abstractmethod
+    def endpoints(self) -> Tuple[IPhysicalEndpoint, ...]:
+        """Physical endpoints exposed by this device, if any."""
 
     @abc.abstractmethod
     def initialize(self, accessor: DeviceResourceAccessor) -> None:

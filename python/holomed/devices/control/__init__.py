@@ -20,6 +20,7 @@ from holomed.devices.control.idempotency import (
     IdempotencyTracker,
     compute_payload_hash,
 )
+from holomed.devices.control.lease import EndpointLeaseRegistry
 from holomed.devices.control.manager import DeviceControlManager
 from holomed.devices.control.models import (
     CommandHandler,
@@ -52,6 +53,7 @@ __all__ = [
     "IdempotencyTracker",
     "compute_payload_hash",
     "CommandVerifier",
+    "EndpointLeaseRegistry",
     # Constants
     "MAX_REGISTERED_COMMANDS",
     "MAX_REGISTERED_QUERIES",

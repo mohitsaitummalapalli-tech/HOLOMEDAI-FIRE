@@ -98,6 +98,10 @@ class DummyOpticalCamera(IDevice):
     def teardown(self) -> None:
         self._state = DeviceState.STOPPED
 
+
+    @property
+    def endpoints(self) -> tuple:
+        return ()
     def health(self) -> DeviceHealth:
         from holomed.runtime.models import HealthStatus
         return DeviceHealth(

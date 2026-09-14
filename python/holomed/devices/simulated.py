@@ -12,8 +12,59 @@ from holomed.devices.models import (
     DeviceHealth,
     DeviceState,
     DeviceType,
+    EndpointLease,
+    EndpointSafetyState,
 )
 from holomed.runtime.models import HealthStatus
+from holomed.devices.interfaces import IPhysicalEndpoint
+
+
+class SimulatedPhysicalEndpoint(IPhysicalEndpoint):
+    """M48 Fully functional simulated physical endpoint for testing physical actuation bounds."""
+
+    def __init__(self, endpoint_id: str, device_id: str) -> None:
+        self._endpoint_id = endpoint_id
+        self._device_id = device_id
+        self._safety_state = EndpointSafetyState.SAFE_STOPPED
+        self._active_lease: Optional[EndpointLease] = None
+
+    @property
+    def endpoint_id(self) -> str:
+        return self._endpoint_id
+
+    @property
+    def device_id(self) -> str:
+        return self._device_id
+
+    @property
+    def safety_state(self) -> EndpointSafetyState:
+        return self._safety_state
+
+    def emergency_stop(self) -> EndpointSafetyState:
+        if self._safety_state == EndpointSafetyState.HARDWARE_INTERLOCKED:
+            return self._safety_state
+        self._safety_state = EndpointSafetyState.SAFE_STOPPED
+        return self._safety_state
+
+    def acquire_lease(self, lease: EndpointLease) -> None:
+        if self._safety_state == EndpointSafetyState.HARDWARE_INTERLOCKED:
+            raise RuntimeError("Hardware is interlocked, cannot acquire lease")
+        self._active_lease = lease
+        self._safety_state = EndpointSafetyState.ACTIVE
+
+    def release_lease(self, session_id: str) -> None:
+        if self._active_lease and self._active_lease.session_id == session_id:
+            self._active_lease = None
+            if self._safety_state != EndpointSafetyState.HARDWARE_INTERLOCKED:
+                self._safety_state = EndpointSafetyState.SAFE_STOPPED
+
+    # Test configuration hooks
+    def inject_hardware_interlock(self) -> None:
+        self._safety_state = EndpointSafetyState.HARDWARE_INTERLOCKED
+
+    @property
+    def active_lease(self) -> Optional[EndpointLease]:
+        return self._active_lease
 
 
 class SimulatedDevice(IDevice):
@@ -37,6 +88,7 @@ class SimulatedDevice(IDevice):
         self._fail_on_stop: Optional[Exception] = None
         self._fail_on_health: Optional[Exception] = None
         self._custom_health: Optional[DeviceHealth] = None
+        self._endpoints: Tuple[IPhysicalEndpoint, ...] = ()
 
     @property
     def device_id(self) -> str:
@@ -57,6 +109,10 @@ class SimulatedDevice(IDevice):
     @property
     def capabilities(self) -> Tuple[DeviceCapability, ...]:
         return self._capabilities
+
+    @property
+    def endpoints(self) -> Tuple[IPhysicalEndpoint, ...]:
+        return self._endpoints
 
     def initialize(self, accessor: DeviceResourceAccessor) -> None:
         if self._fail_on_initialize is not None:
@@ -107,3 +163,6 @@ class SimulatedDevice(IDevice):
 
     def set_custom_health(self, health: Optional[DeviceHealth]) -> None:
         self._custom_health = health
+
+    def set_endpoints(self, endpoints: Tuple[IPhysicalEndpoint, ...]) -> None:
+        self._endpoints = endpoints

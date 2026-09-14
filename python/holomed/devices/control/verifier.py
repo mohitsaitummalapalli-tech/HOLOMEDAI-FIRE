@@ -53,6 +53,13 @@ class CommandVerifier:
                     f"Device '{device.device_id}' lacks required capability '{command_def.required_capability_id}' for command '{command_def.command_name}'"
                 )
 
+            req_cap = next((c for c in device.capabilities if c.capability_id == command_def.required_capability_id), None)
+            if req_cap and req_cap.requires_physical_endpoint:
+                if not device.endpoints:
+                    raise CapabilityUnauthorizedError(
+                        f"Capability '{req_cap.capability_id}' requires a physical endpoint but device '{device.device_id}' exposes none."
+                    )
+
     @staticmethod
     def verify_query_authorization(device: IDevice, query_def: DeviceQueryDefinition) -> None:
         """Enforce lifecycle state for a query."""

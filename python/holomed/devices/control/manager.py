@@ -25,6 +25,7 @@ from holomed.devices.control.models import (
     MAX_REGISTERED_QUERIES,
     QueryHandler,
 )
+from holomed.devices.control.lease import EndpointLeaseRegistry
 from holomed.devices.control.verifier import CommandVerifier
 from holomed.devices.interfaces import IDevice, IDeviceEventSink, NullDeviceEventSink
 from holomed.devices.registry import DeviceRegistry
@@ -61,17 +62,20 @@ class DeviceControlManager(IService):
         event_sink: Optional[IDeviceEventSink] = None,
         logger: Optional[StructuredLogger] = None,
         secret_filter: Optional[SecretFilter] = None,
+        session_validator: Optional[Callable[[str, int], bool]] = None,
     ) -> None:
         self._registry = registry
         self._event_sink: IDeviceEventSink = event_sink or NullDeviceEventSink()
         self._logger = logger or StructuredLogger("holomed.devices.control")
         self._secret_filter = secret_filter or SecretFilter()
+        self._session_validator = session_validator
         self._state: ServiceState = ServiceState.UNINITIALIZED
 
         # Resources & Subsystems
         self._resources: Optional[OwnedResourceSet] = None
         self._idempotency = IdempotencyTracker()
         self._verifier = CommandVerifier()
+        self._lease_registry = EndpointLeaseRegistry()
 
         # Command & Query Registries
         self._commands: Dict[str, DeviceCommandDefinition] = {}
@@ -126,6 +130,7 @@ class DeviceControlManager(IService):
             return
 
         self._idempotency.clear()
+        self._lease_registry.clear()
         if self._resources is not None:
             for h in list(self._resources.outstanding_handles):
                 self._resources.release(h.resource_id)
@@ -280,7 +285,7 @@ class DeviceControlManager(IService):
         # 5. Authorize State and Capability
         try:
             self._verifier.verify_command_authorization(device, cmd_def)
-            canonical_params = self._verifier.validate_and_canonicalize_parameters(raw_params)
+            canonical_params = dict(self._verifier.validate_and_canonicalize_parameters(raw_params))
         except Exception as e:
             return create_error_response(
                 request=envelope,
@@ -288,6 +293,57 @@ class DeviceControlManager(IService):
                 error_code=f"ERR_{type(e).__name__.upper()}",
                 error_message=self._secret_filter.redact(str(e)),
             )
+
+        if cmd_def.required_capability_id is not None:
+            req_cap = next((c for c in device.capabilities if c.capability_id == cmd_def.required_capability_id), None)
+            if req_cap and req_cap.requires_physical_endpoint:
+                session_id = payload.get("session_id")
+                lifecycle_generation = payload.get("session_lifecycle_generation")
+                execution_id = payload.get("execution_id")
+                if not session_id or not execution_id or lifecycle_generation is None:
+                    return create_error_response(
+                        request=envelope,
+                        responder_source=self.name,
+                        error_code="ERR_VALIDATION_ERROR",
+                        error_message="Payload must contain 'session_id', 'execution_id', and 'session_lifecycle_generation' for physical actuation",
+                    )
+                
+                capability_scope = frozenset([req_cap.capability_id])
+                
+                print(f"DEBUG: validator is {self._session_validator}")
+                if self._session_validator is not None:
+                    print(f"DEBUG: session_id={session_id}, gen={lifecycle_generation}")
+                    is_valid = self._session_validator(session_id, lifecycle_generation)
+                    print(f"DEBUG: is_valid={is_valid}")
+                    if not is_valid:
+                        return create_error_response(
+                            request=envelope,
+                            responder_source=self.name,
+                            error_code="ERR_CAPABILITYUNAUTHORIZEDERROR",
+                            error_message="Session is revoked or lifecycle generation is stale",
+                        )
+                
+                for endpoint in device.endpoints:
+                    if req_cap.target_endpoint_id is not None and endpoint.endpoint_id != req_cap.target_endpoint_id:
+                        continue
+                        
+                    try:
+                        self._lease_registry.issue_lease(
+                            endpoint=endpoint,
+                            session_id=session_id,
+                            lifecycle_generation=lifecycle_generation,
+                            execution_id=execution_id,
+                            capability_scope=capability_scope,
+                        )
+                        seq = self._lease_registry.next_command_sequence(endpoint.endpoint_id)
+                        canonical_params[f"_command_sequence_{endpoint.endpoint_id}"] = seq
+                    except Exception as e:
+                        return create_error_response(
+                            request=envelope,
+                            responder_source=self.name,
+                            error_code=f"ERR_{type(e).__name__.upper()}",
+                            error_message=self._secret_filter.redact(str(e)),
+                        )
 
         # 6. Execute Command Handler
         self._in_transaction = True
@@ -401,6 +457,20 @@ class DeviceControlManager(IService):
             responder_source=self.name,
             payload=dict(canonical_result),
         )
+
+    def emergency_stop(self, session_id: str) -> None:
+        """Revokes physical endpoint leases and halts actuation immediately."""
+        for device in self._registry.all_devices:
+            for endpoint in device.endpoints:
+                if endpoint.active_lease and endpoint.active_lease.session_id == session_id:
+                    # Transition to interlocked safely
+                    try:
+                        endpoint.emergency_stop()
+                    except Exception as e:
+                        self._logger.error("Failed to emergency stop endpoint", extra={"endpoint_id": endpoint.endpoint_id, "error": str(e)})
+                    
+                    # Free from lease registry
+                    self._lease_registry.release_lease(endpoint, session_id)
 
     # --------------------------------------------------------------------------
     # Private Helpers

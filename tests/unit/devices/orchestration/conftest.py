@@ -85,6 +85,10 @@ class DummyOrchestrationDevice(IDevice):
     def stop(self, accessor: DeviceResourceAccessor) -> None:
         self._state = DeviceState.STOPPED
 
+
+    @property
+    def endpoints(self) -> tuple:
+        return ()
     def health(self) -> DeviceHealth:
         return DeviceHealth(
             device_id=self._device_id,

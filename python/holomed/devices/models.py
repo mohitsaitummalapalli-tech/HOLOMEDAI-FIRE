@@ -78,6 +78,44 @@ class DeviceState(str, enum.Enum):
     FAILED = "FAILED"
 
 
+class EndpointSafetyState(str, enum.Enum):
+    """M48 Physical safety state of an endpoint."""
+    
+    SAFE_STOPPED = "SAFE_STOPPED"
+    ACTIVE = "ACTIVE"
+    HARDWARE_INTERLOCKED = "HARDWARE_INTERLOCKED"
+
+
+@dataclass(frozen=True)
+class EndpointLease:
+    """M48 Lease identity representing an authorized physical execution context."""
+    
+    endpoint_id: str
+    device_id: str
+    session_id: str
+    lifecycle_generation: int
+    endpoint_lease_generation: int
+    execution_id: str
+    capability_scope: frozenset[str]
+    
+    def __post_init__(self) -> None:
+        if not isinstance(self.endpoint_id, str) or not self.endpoint_id:
+            raise DeviceValidationError("endpoint_id must be a non-empty string")
+        if not isinstance(self.device_id, str) or not self.device_id:
+            raise DeviceValidationError("device_id must be a non-empty string")
+        if not isinstance(self.session_id, str) or not self.session_id:
+            raise DeviceValidationError("session_id must be a non-empty string")
+        if type(self.lifecycle_generation) is not int or self.lifecycle_generation < 1:
+            raise DeviceValidationError("lifecycle_generation must be an int >= 1")
+        if type(self.endpoint_lease_generation) is not int or self.endpoint_lease_generation < 1:
+            raise DeviceValidationError("endpoint_lease_generation must be an int >= 1")
+        if not isinstance(self.execution_id, str) or not self.execution_id:
+            raise DeviceValidationError("execution_id must be a non-empty string")
+        if not isinstance(self.capability_scope, frozenset):
+            raise DeviceValidationError("capability_scope must be a frozenset of strings")
+
+
+
 def deep_freeze_parameter(
     val: Any,
     depth: int = 0,
@@ -217,6 +255,8 @@ class DeviceCapability:
     capability_id: str
     category: CapabilityCategory
     parameters: Mapping[str, Any]
+    requires_physical_endpoint: bool = False
+    target_endpoint_id: Optional[str] = None
 
     def __post_init__(self) -> None:
         if type(self.capability_id) is not str or not CAPABILITY_ID_REGEX.match(self.capability_id) or not (1 <= len(self.capability_id) <= 128):
@@ -225,6 +265,10 @@ class DeviceCapability:
             raise DeviceValidationError(f"Invalid capability category: {self.category}")
         if not isinstance(self.parameters, (dict, MappingProxyType)):
             raise DeviceValidationError(f"Capability parameters must be a mapping, got {type(self.parameters).__name__}")
+        if type(self.requires_physical_endpoint) is not bool:
+            raise DeviceValidationError("requires_physical_endpoint must be a bool")
+        if self.target_endpoint_id is not None and type(self.target_endpoint_id) is not str:
+            raise DeviceValidationError("target_endpoint_id must be a string or None")
 
         frozen = deep_freeze_parameter(self.parameters)
         object.__setattr__(self, "parameters", frozen)
