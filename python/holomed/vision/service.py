@@ -310,13 +310,18 @@ class VisionService(IService):
         if stamped_desc.epoch_id != self._epoch_id:
             raise VisionEpochMismatchError(f'Descriptor epoch {stamped_desc.epoch_id} does not match service epoch {self._epoch_id}')
         self._verify_device_identity(stamped_desc)
+
+        session_manager = getattr(self, "_session_manager", None)
+        gate = session_manager.get_lifecycle_gate(effective_session_id) if session_manager else None
+        captured_generation = gate.capture_active_generation() if gate else None
+
         seq_key = (effective_session_id, stamped_desc.device_id, stamped_desc.physical_id, stamped_desc.epoch_id)
         if seq_key in self._session_sequences:
             last_seq = self._session_sequences[seq_key]
             if stamped_desc.sequence_number <= last_seq:
                 self._dropped_frames += 1
                 raise VisionSequenceError(f'Non-monotonic sequence number {stamped_desc.sequence_number} (last was {last_seq}) for session {seq_key}')
-        self._session_sequences[seq_key] = stamped_desc.sequence_number
+
         store, tracker, pipeline = self._get_session_components(effective_session_id)
         handle_id: Optional[str] = None
         try:
@@ -329,11 +334,25 @@ class VisionService(IService):
         try:
             view = store.get_readonly_view(handle_id)
             result = pipeline.process(stamped_desc, view)
-            self._processed_frames += 1
-            if result.budget_exceeded:
-                self._budget_overages += 1
-                if self._dispatcher is not None:
-                    self._emit_event('vision.pipeline.budget_exceeded', {'device_id': stamped_desc.device_id, 'frame_id': stamped_desc.frame_id, 'session_id': effective_session_id, 'execution_time_ms': result.execution_time_ms})
+
+            def _commit():
+                events = []
+                self._session_sequences[seq_key] = stamped_desc.sequence_number
+                self._processed_frames += 1
+                if result.budget_exceeded:
+                    self._budget_overages += 1
+                    events.append(('vision.pipeline.budget_exceeded', {'device_id': stamped_desc.device_id, 'frame_id': stamped_desc.frame_id, 'session_id': effective_session_id, 'execution_time_ms': result.execution_time_ms}))
+                return events
+
+            if gate and captured_generation is not None:
+                events_to_emit = gate.execute_commit(captured_generation, _commit)
+            else:
+                events_to_emit = _commit()
+
+            if self._dispatcher is not None:
+                for topic, payload in events_to_emit:
+                    self._emit_event(topic, payload)
+
             return result
         finally:
             if handle_id is not None:

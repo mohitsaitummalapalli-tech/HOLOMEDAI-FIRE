@@ -331,6 +331,11 @@ class AudioService(IService):
                 self._emit_event('audio.chunk.rejected', {'chunk_id': stamped_chunk.chunk_id, 'device_id': stamped_chunk.device_id, 'session_id': effective_session_id, 'error_code': 'ERR_EPOCH_MISMATCH', 'reason': f'Chunk epoch {stamped_chunk.epoch_id} != context epoch {self._context.epoch_id}'})
                 raise AudioEpochMismatchError(f'Chunk epoch_id {stamped_chunk.epoch_id} does not match active epoch {self._context.epoch_id}')
             self._verify_device_identity(stamped_chunk)
+
+            session_manager = getattr(self, "_session_manager", None)
+            gate = session_manager.get_lifecycle_gate(effective_session_id) if session_manager else None
+            captured_generation = gate.capture_active_generation() if gate else None
+
             session_key = (effective_session_id, stamped_chunk.device_id, stamped_chunk.physical_id, stamped_chunk.epoch_id)
             if session_key in self._session_sequences:
                 last_seq = self._session_sequences[session_key]
@@ -338,35 +343,52 @@ class AudioService(IService):
                     self._dropped_chunks += 1
                     self._emit_event('audio.chunk.rejected', {'chunk_id': stamped_chunk.chunk_id, 'device_id': stamped_chunk.device_id, 'session_id': effective_session_id, 'error_code': 'ERR_SEQUENCE_ERROR', 'reason': f'Sequence {stamped_chunk.sequence_number} <= previous {last_seq}'})
                     raise AudioSequenceError(f'Non-monotonic sequence number {stamped_chunk.sequence_number} (last was {last_seq}) for session {session_key}')
-            self._session_sequences[session_key] = stamped_chunk.sequence_number
+
             store, pipeline = self._get_session_components(effective_session_id)
             handle_id = store.allocate_slot(stamped_chunk, raw_pcm)
-            self._emit_event('audio.chunk.accepted', {'chunk_id': stamped_chunk.chunk_id, 'device_id': stamped_chunk.device_id, 'session_id': effective_session_id, 'sequence_number': stamped_chunk.sequence_number, 'frame_count': stamped_chunk.frame_count, 'channels': stamped_chunk.channels})
             try:
                 store.mark_processing(handle_id)
                 view = store.get_readonly_view(handle_id)
                 result, tracks = pipeline.process(stamped_chunk, view)
             finally:
                 store.release_slot(handle_id)
-            self._processed_chunks += 1
-            self._total_latency_ms += result.processing_latency_ms
-            if result.budget_exceeded:
-                self._budget_overruns += 1
-                self._emit_event('audio.pipeline.budget_exceeded', {'chunk_id': stamped_chunk.chunk_id, 'device_id': stamped_chunk.device_id, 'session_id': effective_session_id, 'latency_ms': result.processing_latency_ms})
-            if result.quality == AudioQuality.FAILED:
-                self._emit_event('audio.pipeline.failed', {'chunk_id': stamped_chunk.chunk_id, 'device_id': stamped_chunk.device_id, 'session_id': effective_session_id, 'error_code': result.error_code, 'error_message': result.error_message})
+
+            def _commit():
+                events = []
+                self._session_sequences[session_key] = stamped_chunk.sequence_number
+                self._processed_chunks += 1
+                self._total_latency_ms += result.processing_latency_ms
+
+                events.append(('audio.chunk.accepted', {'chunk_id': stamped_chunk.chunk_id, 'device_id': stamped_chunk.device_id, 'session_id': effective_session_id, 'sequence_number': stamped_chunk.sequence_number, 'frame_count': stamped_chunk.frame_count, 'channels': stamped_chunk.channels}))
+
+                if result.budget_exceeded:
+                    self._budget_overruns += 1
+                    events.append(('audio.pipeline.budget_exceeded', {'chunk_id': stamped_chunk.chunk_id, 'device_id': stamped_chunk.device_id, 'session_id': effective_session_id, 'latency_ms': result.processing_latency_ms}))
+                if result.quality == AudioQuality.FAILED:
+                    events.append(('audio.pipeline.failed', {'chunk_id': stamped_chunk.chunk_id, 'device_id': stamped_chunk.device_id, 'session_id': effective_session_id, 'error_code': result.error_code, 'error_message': result.error_message}))
+                else:
+                    events.append(('audio.pipeline.processed', {'chunk_id': stamped_chunk.chunk_id, 'device_id': stamped_chunk.device_id, 'session_id': effective_session_id, 'rms_energy': result.features.rms_energy, 'peak_frequency_hz': result.features.peak_frequency_hz, 'quality': result.quality.value}))
+
+                current_states = {t.track_id: t.state.value for t in tracks}
+                session_prev_states = self._previous_track_states.setdefault(effective_session_id, {})
+                for t in tracks:
+                    prev = session_prev_states.get(t.track_id)
+                    if prev != 'CONFIRMED' and t.state.value == 'CONFIRMED':
+                        events.append(('audio.track.confirmed', {'track_id': t.track_id, 'session_id': effective_session_id, 'azimuth_deg': t.direction.azimuth_deg, 'elevation_deg': t.direction.elevation_deg}))
+                for old_id, old_st in session_prev_states.items():
+                    if old_st in ('CONFIRMED', 'COASTING') and old_id not in current_states:
+                        events.append(('audio.track.lost', {'track_id': old_id, 'session_id': effective_session_id}))
+                self._previous_track_states[effective_session_id] = current_states
+                return events
+
+            if gate and captured_generation is not None:
+                events_to_emit = gate.execute_commit(captured_generation, _commit)
             else:
-                self._emit_event('audio.pipeline.processed', {'chunk_id': stamped_chunk.chunk_id, 'device_id': stamped_chunk.device_id, 'session_id': effective_session_id, 'rms_energy': result.features.rms_energy, 'peak_frequency_hz': result.features.peak_frequency_hz, 'quality': result.quality.value})
-            current_states = {t.track_id: t.state.value for t in tracks}
-            session_prev_states = self._previous_track_states.setdefault(effective_session_id, {})
-            for t in tracks:
-                prev = session_prev_states.get(t.track_id)
-                if prev != 'CONFIRMED' and t.state.value == 'CONFIRMED':
-                    self._emit_event('audio.track.confirmed', {'track_id': t.track_id, 'session_id': effective_session_id, 'azimuth_deg': t.direction.azimuth_deg, 'elevation_deg': t.direction.elevation_deg})
-            for old_id, old_st in session_prev_states.items():
-                if old_st in ('CONFIRMED', 'COASTING') and old_id not in current_states:
-                    self._emit_event('audio.track.lost', {'track_id': old_id, 'session_id': effective_session_id})
-            self._previous_track_states[effective_session_id] = current_states
+                events_to_emit = _commit()
+
+            for topic, payload in events_to_emit:
+                self._emit_event(topic, payload)
+
             return result
         finally:
             self._in_transaction = False

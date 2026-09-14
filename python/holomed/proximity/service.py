@@ -433,6 +433,10 @@ class ProximityService(IService):
             instrument_id = tool_geom.instrument_id
             key = (session_id, instrument_id)
 
+            session_manager = getattr(self, "_session_manager", None)
+            gate = session_manager.get_lifecycle_gate(session_id) if session_manager else None
+            captured_generation = gate.capture_active_generation() if gate else None
+
             # Validate session exists
             if session_id not in self._session_states:
                 raise ProximityLifecycleError(
@@ -440,17 +444,23 @@ class ProximityService(IService):
                 )
 
             # Sequence monotonicity check
-            last_seq = self._latest_sequences.get(key)
-            if last_seq is not None and tool_geom.sequence_number <= last_seq:
-                raise ProximitySequenceError(
-                    f"Non-monotonic sequence number {tool_geom.sequence_number} <= previous {last_seq} "
-                    f"for instrument {instrument_id!r}"
-                )
 
-            # Store validated geometry
-            self._latest_geometries[key] = tool_geom
-            self._latest_sequences[key] = tool_geom.sequence_number
-            self._active_instruments[session_id] = instrument_id
+            def _commit():
+                last_seq = self._latest_sequences.get(key)
+                if last_seq is not None and tool_geom.sequence_number <= last_seq:
+                    raise ProximitySequenceError(
+                        f"Non-monotonic sequence number {tool_geom.sequence_number} <= previous {last_seq} "
+                        f"for instrument {instrument_id!r}"
+                    )
+                self._latest_geometries[key] = tool_geom
+                self._latest_sequences[key] = tool_geom.sequence_number
+                self._active_instruments[session_id] = instrument_id
+                return []
+
+            if gate and captured_generation is not None:
+                gate.execute_commit(captured_generation, _commit)
+            else:
+                _commit()
         finally:
             self._in_transaction = False
 
@@ -468,6 +478,10 @@ class ProximityService(IService):
 
         self._in_transaction = True
         try:
+            session_manager = getattr(self, "_session_manager", None)
+            gate = session_manager.get_lifecycle_gate(session_id) if session_manager else None
+            captured_generation = gate.capture_active_generation() if gate else None
+
             # Verify session
             if session_id not in self._session_states:
                 raise ProximityLifecycleError(f"No proximity zones bound for session {session_id!r}")
@@ -533,22 +547,32 @@ class ProximityService(IService):
                 now_utc=now_utc,
             )
 
-            # Update clearance history for next rate calculation
-            for zr in evaluation.zone_results:
-                self._clearance_history[(session_id, zr.zone_id)] = (
-                    zr.effective_clearance_mm,
-                    evaluation.evaluated_at_utc,
-                )
+            def _commit():
+                # Update clearance history for next rate calculation
+                for zr in evaluation.zone_results:
+                    self._clearance_history[(session_id, zr.zone_id)] = (
+                        zr.effective_clearance_mm,
+                        evaluation.evaluated_at_utc,
+                    )
 
-            # Track previous state for transition event detection
-            prev_state = self._session_states.get(session_id, ProximityState.CLEAR)
+                # Track previous state for transition event detection
+                prev_state = self._session_states.get(session_id, ProximityState.CLEAR)
 
-            # Update session state
-            self._session_states[session_id] = evaluation.worst_state
-            self._latest_evaluations[session_id] = evaluation
+                # Update session state
+                self._session_states[session_id] = evaluation.worst_state
+                self._latest_evaluations[session_id] = evaluation
 
-            # Emit state-transition events (low-frequency only)
-            self._emit_transition_events(session_id, prev_state, evaluation)
+                # Return state-transition events (low-frequency only)
+                return self._build_transition_events(session_id, prev_state, evaluation)
+
+            if gate and captured_generation is not None:
+                events_to_emit = gate.execute_commit(captured_generation, _commit)
+            else:
+                events_to_emit = _commit()
+
+            if self._dispatcher is not None:
+                for topic, payload in events_to_emit:
+                    self._emit_event(topic, payload)
 
             return evaluation
         finally:
@@ -649,13 +673,13 @@ class ProximityService(IService):
     # State-Transition Event Emission (Low-Frequency Only)
     # -------------------------------------------------------------------------
 
-    def _emit_transition_events(
+    def _build_transition_events(
         self,
         session_id: str,
         prev_state: ProximityState,
         evaluation: ProximityEvaluationRecord,
-    ) -> None:
-        """Emit state-transition events only — never per-frame telemetry.
+    ) -> list[tuple[str, dict[str, Any]]]:
+        """Build state-transition events only — never per-frame telemetry.
 
         Transitions:
             CLEAR -> WARNING:       proximity.warning.entered
@@ -664,9 +688,10 @@ class ProximityService(IService):
             BREACHED -> CLEAR:      proximity.zone.cleared
             ANY -> INTERLOCKED:     proximity.interlock.triggered
         """
+        events = []
         new_state = evaluation.worst_state
         if new_state == prev_state:
-            return  # No transition
+            return events  # No transition
 
         base_payload: Dict[str, Any] = {
             "session_id": session_id,
@@ -677,19 +702,19 @@ class ProximityService(IService):
         }
 
         if prev_state == ProximityState.CLEAR and new_state == ProximityState.WARNING:
-            self._emit_event("proximity.warning.entered", base_payload)
+            events.append(("proximity.warning.entered", base_payload))
 
         elif prev_state == ProximityState.WARNING and new_state == ProximityState.CLEAR:
-            self._emit_event("proximity.warning.cleared", base_payload)
+            events.append(("proximity.warning.cleared", base_payload))
 
         elif new_state == ProximityState.BREACHED:
             # ANY -> BREACHED
             breach_zones = [zr.zone_id for zr in evaluation.zone_results if zr.state == ProximityState.BREACHED]
             payload = {**base_payload, "breached_zones": breach_zones}
-            self._emit_event("proximity.zone.breached", payload)
+            events.append(("proximity.zone.breached", payload))
 
         elif prev_state == ProximityState.BREACHED and new_state == ProximityState.CLEAR:
-            self._emit_event("proximity.zone.cleared", base_payload)
+            events.append(("proximity.zone.cleared", base_payload))
 
         elif new_state == ProximityState.INTERLOCKED:
             # ANY -> INTERLOCKED
@@ -699,7 +724,9 @@ class ProximityService(IService):
                 "interlock_id": interlock.interlock_id if interlock else "unknown",
                 "severity": interlock.severity.value if interlock else "BLOCKING",
             }
-            self._emit_event("proximity.interlock.triggered", interlock_payload)
+            events.append(("proximity.interlock.triggered", interlock_payload))
+
+        return events
 
     # -------------------------------------------------------------------------
     # Helper & Protocol Handlers

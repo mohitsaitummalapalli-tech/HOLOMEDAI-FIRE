@@ -20,6 +20,7 @@ from holomed.platform.models import (
     SessionContext,
     SessionStatus,
 )
+from holomed.platform.barrier import SessionLifecycleGate
 
 
 class SessionManager:
@@ -29,6 +30,7 @@ class SessionManager:
         self._epoch_id = epoch_id
         self._dispatcher = dispatcher
         self._sessions: dict[str, SessionContext] = {}
+        self._gates: dict[str, SessionLifecycleGate] = {}
 
     @property
     def session_count(self) -> int:
@@ -65,6 +67,7 @@ class SessionManager:
             created_timestamp_utc=now_utc,
         )
         self._sessions[session_id] = ctx
+        self._gates[session_id] = SessionLifecycleGate(session_id)
 
         if self._dispatcher is not None:
             capability = _PlatformCapability(
@@ -86,6 +89,10 @@ class SessionManager:
         """Mark an active session as stopped."""
         if session_id not in self._sessions:
             raise PlatformValidationError(f"Unknown session_id: {session_id!r}")
+
+        gate = self._gates.get(session_id)
+        if gate:
+            gate.mark_terminated()
 
         cur = self._sessions[session_id]
         stopped = SessionContext(
@@ -159,6 +166,11 @@ class SessionManager:
     def evict_session(self, session_id: str) -> bool:
         """Evict a session context from memory, releasing capacity (M25)."""
         if session_id in self._sessions:
+            gate = self._gates.get(session_id)
+            if gate:
+                gate.mark_terminated()
+                del self._gates[session_id]
+
             cur = self._sessions[session_id]
             del self._sessions[session_id]
 
@@ -186,4 +198,11 @@ class SessionManager:
 
     def clear(self) -> None:
         """Clear all registered sessions."""
+        for gate in self._gates.values():
+            gate.mark_terminated()
+        self._gates.clear()
         self._sessions.clear()
+
+    def get_lifecycle_gate(self, session_id: str) -> Optional[SessionLifecycleGate]:
+        """Returns the lifecycle gate for the given session_id, or None if not found."""
+        return self._gates.get(session_id)
