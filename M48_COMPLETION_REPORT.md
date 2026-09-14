@@ -8,7 +8,7 @@ We have successfully implemented, hardened, and verified the zero-trust physical
 
 ## Final Verification & Regression Status
 - **Baseline Alignment**: Verified against M47 (`b30bb6e78fc301368eeb60368b992a97f1035ce5`).
-- **M48 Final Commit**: `20d2f88ffc8fb7a16e05e976208a0dffdec02727`
+- **M48 Final Commit**: `fd0eaca62904d234350bc9cb14810d8488e5da8d`
 - **Unit Tests**: 1909 passed (0 failures).
 - **Type Safety**: `uv run pyright python`: 84 errors, 1 warning — unchanged from the M47 baseline; no M48 regression introduced.
 - **Working Tree**: Clean (all changes are tracked correctly for the M48 commit).
@@ -28,7 +28,7 @@ We have formalized the invariants across the `Session -> Hardware` path. We have
 - **I8-I12 - ADMISSION ATOMICITY & LIFECYCLE SYNC**: The synchronization mechanisms built in M42-M47 guarantee that state tearing cannot occur during the lease acquisition.
 
 ### HARDWARE CONTRACT REQUIRED
-The software guarantees drop at the driver edge. The following invariants **must** be enforced by the controller/firmware hardware to maintain true zero-trust:
+The software guarantees drop at the driver edge. The following invariants **must** be enforced by the controller/firmware hardware to maintain true zero-trust. The software does NOT claim physical de-energization or mechanical interlock guarantees:
 - **I13 - ATOMIC SEQUENCE EVALUATION**: The hardware firmware *must* evaluate the attached Authorization Tuple (sequence) against its internal active lease register at the exact moment of physical output actuation.
 - **I14 - FAIL-SAFE DE-ENERGIZATION**: If a session is revoked or the heartbeat fails, the hardware *must* guarantee the physical actuator is placed in a mathematically guaranteed safe state (e.g. motors de-energized).
 - **I15 - INTERLOCK LATCHING**: Physical emergency interlocks (e.g. E-Stop buttons) must latch in hardware and disconnect power mechanically. Software recovery must be physically gated until hardware permits.
@@ -39,4 +39,4 @@ M48 is formally complete. The architecture guarantees the `session_id` + `lifecy
 - **State**: Committed and Pushed
 - **Remote Aligned**: `HEAD == origin/main`
 - **Working Tree**: Clean
-- **Final Hash**: `20d2f88ffc8fb7a16e05e976208a0dffdec02727`
+- **Final Hash**: `fd0eaca62904d234350bc9cb14810d8488e5da8d`
