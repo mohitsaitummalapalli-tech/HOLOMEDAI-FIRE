@@ -11,7 +11,7 @@ from holomed.gateway.framing import encode_frame
 from holomed.gateway.models import ClientRole
 from holomed.gateway.service import GatewayService
 from holomed.gateway.transports import create_memory_transport_pair
-from holomed.protocol.builders import create_command, create_event, create_query
+from holomed.protocol.builders import create_command, create_event, create_query, create_response
 from holomed.protocol.codec import deserialize_envelope, serialize_envelope_bytes
 from holomed.runtime.context import RuntimeContext
 from holomed.runtime.logging import SecretFilter
@@ -234,4 +234,95 @@ def test_capacity_max_connections_per_session(
     with pytest.raises(GatewayCapacityError):
         srv.process_client_ingress(c5)
 
+    srv.stop()
+
+
+def test_m45_event_cleanup(
+    runtime_context: RuntimeContext,
+    message_dispatcher: MessageDispatcher,
+    secret_filter: SecretFilter,
+) -> None:
+    """Verify M45 Event Cleanup for evicted and stopped platform sessions."""
+    srv = GatewayService(dispatcher=message_dispatcher, secret_filter=secret_filter)
+    srv.initialize(runtime_context)
+    message_dispatcher.start()
+    srv.start()
+
+    # Connect client A to sess_a
+    gw_a, cl_a = create_memory_transport_pair()
+    c_a = srv.register_client_transport(gw_a)
+    hs_a = create_command("gateway.handshake", "client_a", payload={"client_id": "client_a", "client_role": "XR_DISPLAY", "session_id": "sess_a", "auth_token": "tok"})
+    cl_a.send(encode_frame(serialize_envelope_bytes(hs_a)))
+    srv.process_client_ingress(c_a)
+
+    # Connect client B to sess_b
+    gw_b, cl_b = create_memory_transport_pair()
+    c_b = srv.register_client_transport(gw_b)
+    hs_b = create_command("gateway.handshake", "client_b", payload={"client_id": "client_b", "client_role": "XR_DISPLAY", "session_id": "sess_b", "auth_token": "tok"})
+    cl_b.send(encode_frame(serialize_envelope_bytes(hs_b)))
+    srv.process_client_ingress(c_b)
+
+    assert srv.active_connections_count == 2
+
+    # Emit platform.session.evicted for sess_a
+    evict_env = create_event("platform.session.evicted", "platform", payload={"session_id": "sess_a"})
+    message_dispatcher.dispatch(evict_env)
+
+    # Client A should be disconnected, Client B untouched
+    assert srv.active_connections_count == 1
+    assert c_a.state.value == "CLOSED"
+    assert c_b.state.value == "ACTIVE"
+
+    # Emit platform.session.stopped for sess_b
+    stop_env = create_event("platform.session.stopped", "platform", payload={"session_id": "sess_b"})
+    message_dispatcher.dispatch(stop_env)
+
+    assert srv.active_connections_count == 0
+    assert c_b.state.value == "CLOSED"
+
+    srv.stop()
+
+
+def test_m45_synchronous_ingress_safety(
+    runtime_context: RuntimeContext,
+    message_dispatcher: MessageDispatcher,
+    secret_filter: SecretFilter,
+) -> None:
+    """Verify M45 Synchronous Ingress Safety blocks non-ACTIVE sessions before cleanup."""
+    srv = GatewayService(dispatcher=message_dispatcher, secret_filter=secret_filter)
+    srv.initialize(runtime_context)
+    message_dispatcher.start()
+    srv.start()
+
+    gw, cl = create_memory_transport_pair()
+    c = srv.register_client_transport(gw)
+    
+    # Handshake with a session name that trigger 'ACTIVE' first, then we'll change our mind?
+    # Wait, if we use 'stop_sess_c' it will fail the handshake!
+    # So we must handshake with 'sess_c', then change the connection.session in the test to 'stop_sess_c'!
+    hs = create_command("gateway.handshake", "client_c", payload={"client_id": "client_c", "client_role": "XR_DISPLAY", "session_id": "sess_c", "auth_token": "tok"})
+    cl.send(encode_frame(serialize_envelope_bytes(hs)))
+    srv.process_client_ingress(c)
+
+    cl.receive() # drain handshake response
+
+    # Simulate persistence returning non-ACTIVE (e.g. STOPPED)
+    # Since we use conftest patch, we can just alter the session ID internally:
+    import dataclasses
+    c._session = dataclasses.replace(c.session, session_id="stop_sess_c")
+
+    # Send a query
+    q = create_query("gateway.status", "client_c", payload={})
+    cl.send(encode_frame(serialize_envelope_bytes(q)))
+    srv.process_client_ingress(c)
+
+    raw_resp = cl.receive()
+    from holomed.gateway.framing import FrameParser
+    parser = FrameParser()
+    resp = deserialize_envelope(parser.feed(raw_resp)[0])
+    
+    assert resp.message_type.value == "ERROR"
+    assert "error_code" in resp.payload
+    assert resp.payload["error_code"] == "ERR_SESSION_INVALID"
+    
     srv.stop()
