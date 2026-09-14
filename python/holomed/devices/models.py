@@ -116,6 +116,14 @@ class SubmissionStatus(str, enum.Enum):
     DUPLICATE_REJECTED = "DUPLICATE_REJECTED"
 
 
+class EventSourceAuthority(str, enum.Enum):
+    """Authoritative source of a physical telemetry event."""
+
+    HARDWARE_DRIVER = "HARDWARE_DRIVER"
+    ENDPOINT_ADAPTER = "ENDPOINT_ADAPTER"
+    CONTROL_PLANE_TIMEOUT = "CONTROL_PLANE_TIMEOUT"
+
+
 
 @dataclass(frozen=True)
 class EndpointLease:
@@ -226,6 +234,168 @@ class PhysicalCommandResult:
                 dict(self.details),
             )
         )
+
+
+@dataclass(frozen=True)
+class ExecutionTelemetryEvent:
+    """Immutable physical execution telemetry event."""
+
+    event_id: str
+    endpoint_id: str
+    session_id: str
+    lifecycle_generation: int
+    endpoint_lease_generation: int
+    execution_id: str
+    command_sequence: int
+    event_sequence: int
+    event_type: str
+    observed_state: CommandState
+    source_authority: EventSourceAuthority
+    source_origin: str
+    timestamp_utc: str
+    payload: Mapping[str, Any]
+
+    def __post_init__(self) -> None:
+        if type(self.event_id) is not str or not self.event_id.strip():
+            raise DeviceValidationError("event_id must be a non-empty string")
+        if type(self.endpoint_id) is not str or not self.endpoint_id.strip():
+            raise DeviceValidationError("endpoint_id must be a non-empty string")
+        if type(self.session_id) is not str or not self.session_id.strip():
+            raise DeviceValidationError("session_id must be a non-empty string")
+        if type(self.lifecycle_generation) is not int or self.lifecycle_generation < 1:
+            raise DeviceValidationError("lifecycle_generation must be an int >= 1")
+        if type(self.endpoint_lease_generation) is not int or self.endpoint_lease_generation < 1:
+            raise DeviceValidationError("endpoint_lease_generation must be an int >= 1")
+        if type(self.execution_id) is not str or not self.execution_id.strip():
+            raise DeviceValidationError("execution_id must be a non-empty string")
+        if type(self.command_sequence) is not int or self.command_sequence < 1:
+            raise DeviceValidationError("command_sequence must be an int >= 1")
+        if type(self.event_sequence) is not int or self.event_sequence < 1:
+            raise DeviceValidationError("event_sequence must be an int >= 1")
+        if type(self.event_type) is not str or not self.event_type.strip():
+            raise DeviceValidationError("event_type must be a non-empty string")
+        if not isinstance(self.observed_state, CommandState):
+            raise DeviceValidationError("observed_state must be CommandState")
+        if not isinstance(self.source_authority, EventSourceAuthority):
+            raise DeviceValidationError("source_authority must be EventSourceAuthority")
+        if type(self.source_origin) is not str or not self.source_origin.strip():
+            raise DeviceValidationError("source_origin must be a non-empty string")
+        if type(self.timestamp_utc) is not str or not self.timestamp_utc.strip():
+            raise DeviceValidationError("timestamp_utc must be a non-empty string")
+        if not isinstance(self.payload, (dict, MappingProxyType)):
+            raise DeviceValidationError(f"payload must be a mapping, got {type(self.payload).__name__}")
+
+        if self.source_authority == EventSourceAuthority.HARDWARE_DRIVER:
+            if "SimulatedPhysicalEndpoint" in self.source_origin:
+                raise DeviceValidationError(
+                    f"Illegal authority combination: {self.source_authority.name} cannot originate from {self.source_origin}"
+                )
+
+        frozen = deep_freeze_parameter(self.payload)
+        object.__setattr__(self, "payload", frozen)
+
+    def __reduce__(self) -> Any:
+        return (
+            self.__class__,
+            (
+                self.event_id,
+                self.endpoint_id,
+                self.session_id,
+                self.lifecycle_generation,
+                self.endpoint_lease_generation,
+                self.execution_id,
+                self.command_sequence,
+                self.event_sequence,
+                self.event_type,
+                self.observed_state,
+                self.source_authority,
+                self.source_origin,
+                self.timestamp_utc,
+                dict(self.payload),
+            )
+        )
+
+
+class AuthoritativeExecutionRecord:
+    """Authoritative state record owned exclusively by the resolution gate."""
+
+    def __init__(
+        self,
+        execution_id: str,
+        current_state: CommandState,
+        latest_accepted_sequence: int,
+        terminal_resolution_status: bool,
+        terminal_event_id: Optional[str],
+        source_authority: Optional[EventSourceAuthority],
+        lifecycle_generation: int,
+        timeout_status: bool,
+        quarantine_consequence: bool,
+    ) -> None:
+        if type(execution_id) is not str or not execution_id.strip():
+            raise DeviceValidationError("execution_id must be a non-empty string")
+        if not isinstance(current_state, CommandState):
+            raise DeviceValidationError("current_state must be CommandState")
+        if type(latest_accepted_sequence) is not int or latest_accepted_sequence < 0:
+            raise DeviceValidationError("latest_accepted_sequence must be an int >= 0")
+        if type(terminal_resolution_status) is not bool:
+            raise DeviceValidationError("terminal_resolution_status must be a bool")
+        if terminal_event_id is not None and type(terminal_event_id) is not str:
+            raise DeviceValidationError("terminal_event_id must be a string or None")
+        if source_authority is not None and not isinstance(source_authority, EventSourceAuthority):
+            raise DeviceValidationError("source_authority must be EventSourceAuthority or None")
+        if type(lifecycle_generation) is not int or lifecycle_generation < 1:
+            raise DeviceValidationError("lifecycle_generation must be an int >= 1")
+        if type(timeout_status) is not bool:
+            raise DeviceValidationError("timeout_status must be a bool")
+        if type(quarantine_consequence) is not bool:
+            raise DeviceValidationError("quarantine_consequence must be a bool")
+
+        self._execution_id = execution_id
+        self._current_state = current_state
+        self._latest_accepted_sequence = latest_accepted_sequence
+        self._terminal_resolution_status = terminal_resolution_status
+        self._terminal_event_id = terminal_event_id
+        self._source_authority = source_authority
+        self._lifecycle_generation = lifecycle_generation
+        self._timeout_status = timeout_status
+        self._quarantine_consequence = quarantine_consequence
+
+    @property
+    def execution_id(self) -> str:
+        return self._execution_id
+
+    @property
+    def current_state(self) -> CommandState:
+        return self._current_state
+
+    @property
+    def latest_accepted_sequence(self) -> int:
+        return self._latest_accepted_sequence
+
+    @property
+    def terminal_resolution_status(self) -> bool:
+        return self._terminal_resolution_status
+
+    @property
+    def terminal_event_id(self) -> Optional[str]:
+        return self._terminal_event_id
+
+    @property
+    def source_authority(self) -> Optional[EventSourceAuthority]:
+        return self._source_authority
+
+    @property
+    def lifecycle_generation(self) -> int:
+        return self._lifecycle_generation
+
+    @property
+    def timeout_status(self) -> bool:
+        return self._timeout_status
+
+    @property
+    def quarantine_consequence(self) -> bool:
+        return self._quarantine_consequence
+
 
 
 def deep_freeze_parameter(
