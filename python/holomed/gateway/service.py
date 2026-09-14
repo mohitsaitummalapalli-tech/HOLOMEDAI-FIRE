@@ -29,6 +29,7 @@ from holomed.gateway.transports import ITransport
 from holomed.protocol.builders import (
     create_error_response,
     create_event,
+    create_query,
     create_response,
 )
 from holomed.protocol.codec import deserialize_envelope
@@ -134,6 +135,10 @@ class GatewayService(IService):
             self._dispatcher.subscribe_event("workflow.confirmation.requested", self.handle_workflow_broadcast_event, self.name)
             self._dispatcher.subscribe_event("workflow.aborted", self.handle_workflow_abort_event, self.name)
             self._dispatcher.subscribe_event("workflow.interlock.tripped", self.handle_workflow_broadcast_event, self.name)
+
+            # M45: Canonical Event Cleanup Boundaries
+            self._dispatcher.subscribe_event("platform.session.stopped", self.handle_session_purged_event, self.name)
+            self._dispatcher.subscribe_event("platform.session.evicted", self.handle_session_purged_event, self.name)
 
         self._state = ServiceState.INITIALIZED
 
@@ -323,6 +328,17 @@ class GatewayService(IService):
         # 1. Enforce Authorization Policy & Medical Safety (D284, D286, D288)
         GatewayAuthorizationPolicy.authorize_message(session, envelope)
 
+        # 1b. M45: Synchronous Canonical Session Validation
+        if not self._is_session_active(session.session_id):
+            err = create_error_response(
+                envelope,
+                self.name,
+                "ERR_SESSION_INVALID",
+                f"Session {session.session_id!r} is not ACTIVE",
+            )
+            connection.enqueue_envelope(err)
+            return
+
         # 2. Dispatch Envelope Synchronously via MessageDispatcher
         if self._dispatcher is not None:
             resp = self._dispatcher.dispatch(envelope)
@@ -428,9 +444,33 @@ class GatewayService(IService):
                 if conn and conn.session and conn.session.session_id == session_id:
                     self.disconnect_client(cid, reason="Workflow session aborted")
 
+    def handle_session_purged_event(self, envelope: MessageEnvelope) -> None:
+        """Gracefully disconnect all clients bound to an evicted/stopped platform session (M45)."""
+        session_id = envelope.payload.get("session_id") if isinstance(envelope.payload, dict) else None
+        if not session_id:
+            return
+            
+        for cid in list(self._connections.keys()):
+            conn = self._connections.get(cid)
+            if conn and conn.session and conn.session.session_id == session_id:
+                self.disconnect_client(cid, reason="Session evicted by platform")
+
     # -------------------------------------------------------------------------
     # Dispatcher Handlers
     # -------------------------------------------------------------------------
+
+    def _is_session_active(self, session_id: str) -> bool:
+        """Synchronously verify session status with the authoritative source (M45)."""
+        if self._dispatcher is None:
+            return False
+        env = create_query("platform.session.status.get", source=self.name, payload={"session_id": session_id})
+        try:
+            resp = self._dispatcher.dispatch(env)
+            if resp and resp.payload:
+                return resp.payload.get("status") == "ACTIVE"
+        except Exception:
+            return False
+        return False
 
     def handle_status_query(self, query_envelope: MessageEnvelope) -> MessageEnvelope:
         h = self.health()
