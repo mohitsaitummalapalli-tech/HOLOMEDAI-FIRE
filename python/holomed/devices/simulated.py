@@ -15,6 +15,7 @@ from holomed.devices.models import (
     DeviceType,
     EndpointLease,
     EndpointSafetyState,
+    EndpointState,
     PhysicalCommand,
     PhysicalCommandResult,
 )
@@ -49,6 +50,15 @@ class SimulatedPhysicalEndpoint(IPhysicalEndpoint):
     @property
     def safety_state(self) -> EndpointSafetyState:
         return self._safety_state
+
+    @property
+    def endpoint_state(self) -> EndpointState:
+        # Stub for M49.3.1 - physical execution behavior is unchanged
+        return EndpointState.READY
+
+    def recover(self) -> None:
+        # Stub for M49.3.1 - physical execution behavior is unchanged
+        pass
 
     def emergency_stop(self) -> EndpointSafetyState:
         if self._safety_state == EndpointSafetyState.HARDWARE_INTERLOCKED:

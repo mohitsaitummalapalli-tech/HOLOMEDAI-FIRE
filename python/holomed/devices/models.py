@@ -86,6 +86,37 @@ class EndpointSafetyState(str, enum.Enum):
     HARDWARE_INTERLOCKED = "HARDWARE_INTERLOCKED"
 
 
+class CommandState(str, enum.Enum):
+    """Strict formal state machine for physical execution."""
+
+    ACCEPTED = "ACCEPTED"
+    RUNNING = "RUNNING"
+    PREEMPT_REQUESTED = "PREEMPT_REQUESTED"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+    PREEMPTED = "PREEMPTED"
+    INTERLOCKED = "INTERLOCKED"
+    FAULTED_UNKNOWN = "FAULTED_UNKNOWN"
+
+
+class EndpointState(str, enum.Enum):
+    """Authoritative lifecycle condition of a physical endpoint."""
+
+    READY = "READY"
+    QUARANTINED = "QUARANTINED"
+
+
+class SubmissionStatus(str, enum.Enum):
+    """Strict deterministic admission result for non-blocking submission."""
+
+    ACCEPTED = "ACCEPTED"
+    QUEUE_FULL = "QUEUE_FULL"
+    WORKER_UNAVAILABLE = "WORKER_UNAVAILABLE"
+    SHUTTING_DOWN = "SHUTTING_DOWN"
+    DUPLICATE_REJECTED = "DUPLICATE_REJECTED"
+
+
+
 @dataclass(frozen=True)
 class EndpointLease:
     """M48 Lease identity representing an authorized physical execution context."""
@@ -175,11 +206,13 @@ class PhysicalCommand:
 class PhysicalCommandResult:
     """Strongly typed result of a physical command actuation."""
 
-    status: str
+    status: "SubmissionStatus | str"
     details: Mapping[str, Any] = field(default_factory=lambda: MappingProxyType({}))
 
     def __post_init__(self) -> None:
-        if type(self.status) is not str or not self.status.strip():
+        if type(self.status) is not str and not isinstance(self.status, SubmissionStatus):
+            raise DeviceValidationError("status must be a non-empty string or SubmissionStatus")
+        if type(self.status) is str and not self.status.strip():
             raise DeviceValidationError("status must be a non-empty string")
         if not isinstance(self.details, (dict, MappingProxyType)):
             raise DeviceValidationError(f"details must be a mapping, got {type(self.details).__name__}")

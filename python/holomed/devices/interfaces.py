@@ -15,6 +15,7 @@ from holomed.devices.models import (
     DeviceType,
     EndpointLease,
     EndpointSafetyState,
+    EndpointState,
     MAX_RECORDED_EVENTS,
     PhysicalCommand,
     PhysicalCommandResult,
@@ -88,6 +89,15 @@ class IPhysicalEndpoint(abc.ABC):
     @abc.abstractmethod
     def safety_state(self) -> EndpointSafetyState:
         """Current physical safety state of the endpoint."""
+
+    @property
+    @abc.abstractmethod
+    def endpoint_state(self) -> EndpointState:
+        """Current execution plane state of the endpoint (e.g., READY, QUARANTINED)."""
+
+    @abc.abstractmethod
+    def recover(self) -> None:
+        """Explicitly recover the endpoint from QUARANTINED state."""
 
     @abc.abstractmethod
     def emergency_stop(self) -> EndpointSafetyState:
