@@ -335,10 +335,9 @@ def test_15_session_stop_active_command(m48_system, clinical_device):
         # Block simulating long running task
         time.sleep(0.1)
         # Actuation logic here would normally check safety state, but let's test if the endpoint was immediately stopped.
-        from holomed.devices.models import PhysicalCommandResult
+        from holomed.devices.models import PhysicalCommandResult, SubmissionStatus
         return PhysicalCommandResult(
-            command_sequence=cmd.command_sequence,
-            status="done",
+            status=SubmissionStatus.ACCEPTED,
             details={"status": "done"}
         )
         

@@ -206,14 +206,12 @@ class PhysicalCommand:
 class PhysicalCommandResult:
     """Strongly typed result of a physical command actuation."""
 
-    status: "SubmissionStatus | str"
+    status: SubmissionStatus
     details: Mapping[str, Any] = field(default_factory=lambda: MappingProxyType({}))
 
     def __post_init__(self) -> None:
-        if type(self.status) is not str and not isinstance(self.status, SubmissionStatus):
-            raise DeviceValidationError("status must be a non-empty string or SubmissionStatus")
-        if type(self.status) is str and not self.status.strip():
-            raise DeviceValidationError("status must be a non-empty string")
+        if not isinstance(self.status, SubmissionStatus):
+            raise DeviceValidationError("status must be SubmissionStatus")
         if not isinstance(self.details, (dict, MappingProxyType)):
             raise DeviceValidationError(f"details must be a mapping, got {type(self.details).__name__}")
 

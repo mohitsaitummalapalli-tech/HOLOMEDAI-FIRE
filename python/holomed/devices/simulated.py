@@ -18,6 +18,7 @@ from holomed.devices.models import (
     EndpointState,
     PhysicalCommand,
     PhysicalCommandResult,
+    SubmissionStatus,
 )
 from holomed.runtime.models import HealthStatus
 from holomed.devices.interfaces import IPhysicalEndpoint
@@ -57,8 +58,7 @@ class SimulatedPhysicalEndpoint(IPhysicalEndpoint):
         return EndpointState.READY
 
     def recover(self) -> None:
-        # Stub for M49.3.1 - physical execution behavior is unchanged
-        pass
+        raise NotImplementedError("Recovery semantics not yet implemented in M49.3")
 
     def emergency_stop(self) -> EndpointSafetyState:
         if self._safety_state == EndpointSafetyState.HARDWARE_INTERLOCKED:
@@ -106,7 +106,7 @@ class SimulatedPhysicalEndpoint(IPhysicalEndpoint):
             self._last_accepted_sequence = command.command_sequence
 
             return PhysicalCommandResult(
-                status="SUCCESS",
+                status=SubmissionStatus.ACCEPTED,
                 details={
                     "actuated_sequence": self._last_accepted_sequence,
                     "operation": command.operation

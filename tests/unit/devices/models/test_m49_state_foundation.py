@@ -16,7 +16,7 @@ def test_command_state_terminal_immutability():
         CommandState.INTERLOCKED,
         CommandState.FAULTED_UNKNOWN,
     }
-    
+
     # Ensure they are distinct strings and correct Enum values
     assert len(terminals) == 5
     assert CommandState.FAULTED_UNKNOWN.value == "FAULTED_UNKNOWN"
@@ -44,17 +44,10 @@ def test_physical_command_result_admits_submission_status():
     assert result.status == SubmissionStatus.ACCEPTED
     assert result.details["queue"] == 1
 
-def test_physical_command_result_admits_string_fallback():
-    # Ensure M49.2 backwards compatibility string fallback doesn't break
-    result = PhysicalCommandResult(
-        status="SUCCESS",
-        details={}
-    )
-    assert result.status == "SUCCESS"
+def test_physical_command_result_rejects_arbitrary_string():
+    with pytest.raises(DeviceValidationError, match="status must be SubmissionStatus"):
+        PhysicalCommandResult(status="ACCEPTED", details={})  # type: ignore
 
 def test_physical_command_result_rejects_invalid_type():
-    with pytest.raises(DeviceValidationError, match="status must be a non-empty string or SubmissionStatus"):
+    with pytest.raises(DeviceValidationError, match="status must be SubmissionStatus"):
         PhysicalCommandResult(status=123, details={})  # type: ignore
-
-    with pytest.raises(DeviceValidationError, match="status must be a non-empty string"):
-        PhysicalCommandResult(status="   ", details={})
