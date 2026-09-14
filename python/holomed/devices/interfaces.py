@@ -16,6 +16,8 @@ from holomed.devices.models import (
     EndpointLease,
     EndpointSafetyState,
     MAX_RECORDED_EVENTS,
+    PhysicalCommand,
+    PhysicalCommandResult,
 )
 from holomed.protocol.models import MessageEnvelope
 from holomed.runtime.models import ResourceHandle
@@ -103,6 +105,10 @@ class IPhysicalEndpoint(abc.ABC):
     @abc.abstractmethod
     def release_lease(self, session_id: str) -> None:
         """Release the active lease for the given session."""
+
+    @abc.abstractmethod
+    def submit_command(self, command: PhysicalCommand) -> PhysicalCommandResult:
+        """Submit an authoritative, immutable physical command to the hardware/driver."""
 
 
 class IDevice(abc.ABC):

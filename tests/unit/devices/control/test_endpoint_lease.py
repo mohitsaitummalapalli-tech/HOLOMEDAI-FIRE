@@ -129,10 +129,9 @@ def test_successful_lease_issues_sequence_number(manager_and_device):
             "parameters": {},
         }
     )
-    res = manager.handle_command(cmd); print(res.payload)
+    res = manager.handle_command(cmd)
     assert res.message_type == MessageType.RESPONSE
-    assert res.payload["status"] == "ok"
-    assert res.payload["seq"] == 1
+    assert res.payload["actuated_sequence"] == 1
     
     assert endpoint.safety_state == EndpointSafetyState.ACTIVE
     assert endpoint.active_lease is not None
@@ -159,8 +158,8 @@ def test_sequential_commands_increment_sequence(manager_and_device):
     res1 = send_cmd()
     res2 = send_cmd()
     
-    assert res1.payload["seq"] == 1
-    assert res2.payload["seq"] == 2
+    assert res1.payload["actuated_sequence"] == 1
+    assert res2.payload["actuated_sequence"] == 2
     assert endpoint.active_lease.endpoint_lease_generation == 1
 
 

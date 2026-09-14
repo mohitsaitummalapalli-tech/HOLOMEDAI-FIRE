@@ -28,7 +28,7 @@ from holomed.devices.control.models import (
 from holomed.devices.models import PhysicalCommand
 from holomed.devices.control.lease import EndpointLeaseRegistry
 from holomed.devices.control.verifier import CommandVerifier
-from holomed.devices.interfaces import IDevice, IDeviceEventSink, NullDeviceEventSink
+from holomed.devices.interfaces import IDevice, IDeviceEventSink, NullDeviceEventSink, IPhysicalEndpoint
 from holomed.devices.registry import DeviceRegistry
 from holomed.protocol.builders import (
     create_error_response,
@@ -295,85 +295,114 @@ class DeviceControlManager(IService):
                 error_message=self._secret_filter.redact(str(e)),
             )
 
+        req_cap = None
         if cmd_def.required_capability_id is not None:
             req_cap = next((c for c in device.capabilities if c.capability_id == cmd_def.required_capability_id), None)
-            if req_cap and req_cap.requires_physical_endpoint:
-                session_id = payload.get("session_id")
-                lifecycle_generation = payload.get("session_lifecycle_generation")
-                execution_id = payload.get("execution_id")
-                if not session_id or not execution_id or lifecycle_generation is None:
+
+        is_physical = bool(req_cap and req_cap.requires_physical_endpoint)
+
+        if is_physical:
+            session_id = payload.get("session_id")
+            lifecycle_generation = payload.get("session_lifecycle_generation")
+            execution_id = payload.get("execution_id")
+            if not session_id or not execution_id or lifecycle_generation is None:
+                return create_error_response(
+                    request=envelope,
+                    responder_source=self.name,
+                    error_code="ERR_VALIDATION_ERROR",
+                    error_message="Payload must contain 'session_id', 'execution_id', and 'session_lifecycle_generation' for physical actuation",
+                )
+
+            capability_scope = frozenset([req_cap.capability_id])  # type: ignore
+
+            if self._session_validator is not None:
+                is_valid = self._session_validator(session_id, lifecycle_generation)
+                if not is_valid:
                     return create_error_response(
                         request=envelope,
                         responder_source=self.name,
-                        error_code="ERR_VALIDATION_ERROR",
-                        error_message="Payload must contain 'session_id', 'execution_id', and 'session_lifecycle_generation' for physical actuation",
+                        error_code="ERR_CAPABILITYUNAUTHORIZEDERROR",
+                        error_message="Session is revoked or lifecycle generation is stale",
                     )
 
-                capability_scope = frozenset([req_cap.capability_id])
+            if req_cap.target_endpoint_id is None: # type: ignore
+                if len(device.endpoints) > 1:
+                    return create_error_response(
+                        request=envelope,
+                        responder_source=self.name,
+                        error_code="ERR_AMBIGUOUS_ENDPOINT",
+                        error_message="Command requires physical endpoint but does not specify a target, and device has multiple endpoints.",
+                    )
+                target_endpoints = list(device.endpoints)
+            else:
+                target_endpoints = [e for e in device.endpoints if e.endpoint_id == req_cap.target_endpoint_id] # type: ignore
+                if not target_endpoints:
+                    return create_error_response(
+                        request=envelope,
+                        responder_source=self.name,
+                        error_code="ERR_ENDPOINT_NOT_FOUND",
+                        error_message=f"Target endpoint {req_cap.target_endpoint_id} not found on device.", # type: ignore
+                    )
 
-                print(f"DEBUG: validator is {self._session_validator}")
-                if self._session_validator is not None:
-                    print(f"DEBUG: session_id={session_id}, gen={lifecycle_generation}")
-                    is_valid = self._session_validator(session_id, lifecycle_generation)
-                    print(f"DEBUG: is_valid={is_valid}")
-                    if not is_valid:
-                        return create_error_response(
-                            request=envelope,
-                            responder_source=self.name,
-                            error_code="ERR_CAPABILITYUNAUTHORIZEDERROR",
-                            error_message="Session is revoked or lifecycle generation is stale",
-                        )
+            endpoint = target_endpoints[0]
 
-                for endpoint in device.endpoints:
-                    if req_cap.target_endpoint_id is not None and endpoint.endpoint_id != req_cap.target_endpoint_id:
-                        continue
+            try:
+                lease = self._lease_registry.issue_lease(
+                    endpoint=endpoint,
+                    session_id=session_id,
+                    lifecycle_generation=lifecycle_generation,
+                    execution_id=execution_id,
+                    capability_scope=capability_scope,
+                )
+                seq = self._lease_registry.next_command_sequence(endpoint.endpoint_id)
 
-                    try:
-                        lease = self._lease_registry.issue_lease(
-                            endpoint=endpoint,
-                            session_id=session_id,
-                            lifecycle_generation=lifecycle_generation,
-                            execution_id=execution_id,
-                            capability_scope=capability_scope,
-                        )
-                        seq = self._lease_registry.next_command_sequence(endpoint.endpoint_id)
-                        canonical_params[f"_command_sequence_{endpoint.endpoint_id}"] = seq
+                physical_cmd = PhysicalCommand(
+                    endpoint_id=endpoint.endpoint_id,
+                    session_id=session_id,
+                    lifecycle_generation=lifecycle_generation,
+                    endpoint_lease_generation=lease.endpoint_lease_generation,
+                    execution_id=execution_id,
+                    capability_scope=capability_scope,
+                    command_sequence=seq,
+                    operation=command_name,
+                    parameters=canonical_params,
+                )
 
-                        # M49.1: Build Canonical Physical Command Context
-                        physical_cmd = PhysicalCommand(
-                            endpoint_id=endpoint.endpoint_id,
-                            session_id=session_id,
-                            lifecycle_generation=lifecycle_generation,
-                            endpoint_lease_generation=lease.endpoint_lease_generation,
-                            execution_id=execution_id,
-                            capability_scope=capability_scope,
-                            command_sequence=seq,
-                            operation=command_name,
-                            parameters=canonical_params,
-                        )
-                        canonical_params[f"_physical_command_context_{endpoint.endpoint_id}"] = physical_cmd
-                    except Exception as e:
-                        return create_error_response(
-                            request=envelope,
-                            responder_source=self.name,
-                            error_code=f"ERR_{type(e).__name__.upper()}",
-                            error_message=self._secret_filter.redact(str(e)),
-                        )
+                self._in_transaction = True
+                try:
+                    if not isinstance(endpoint, IPhysicalEndpoint):
+                        raise ControlCapacityError(f"Endpoint {endpoint.endpoint_id} does not implement IPhysicalEndpoint")
 
-        # 6. Execute Command Handler
-        self._in_transaction = True
-        try:
-            raw_result = cmd_def.handler(device, canonical_params)
-            canonical_result = self._verifier.validate_and_canonicalize_command_result(raw_result)
-        except Exception as e:
-            return create_error_response(
-                request=envelope,
-                responder_source=self.name,
-                error_code="ERR_EXECUTION_FAILURE",
-                error_message=self._secret_filter.redact(str(e)),
-            )
-        finally:
-            self._in_transaction = False
+                    physical_result = endpoint.submit_command(physical_cmd)
+                    canonical_result = self._verifier.validate_and_canonicalize_command_result(
+                        dict(physical_result.details)
+                    )
+                finally:
+                    self._in_transaction = False
+
+            except Exception as e:
+                return create_error_response(
+                    request=envelope,
+                    responder_source=self.name,
+                    error_code=f"ERR_{type(e).__name__.upper()}",
+                    error_message=self._secret_filter.redact(str(e)),
+                )
+
+        else:
+            # 6. Execute Command Handler
+            self._in_transaction = True
+            try:
+                raw_result = cmd_def.handler(device, canonical_params)
+                canonical_result = self._verifier.validate_and_canonicalize_command_result(raw_result)
+            except Exception as e:
+                return create_error_response(
+                    request=envelope,
+                    responder_source=self.name,
+                    error_code="ERR_EXECUTION_FAILURE",
+                    error_message=self._secret_filter.redact(str(e)),
+                )
+            finally:
+                self._in_transaction = False
 
         # 7. Record in Idempotency Cache
         self._idempotency.record(envelope.message_id, payload, canonical_result)

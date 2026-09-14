@@ -36,15 +36,15 @@ class StrictSimulatedEndpoint(SimulatedPhysicalEndpoint):
         with self.admission_lock:
             if self.safety_state != EndpointSafetyState.ACTIVE:
                 return False
-            if not self.active_lease:
+            if not self._active_lease:
                 return False
-            if self.active_lease.session_id != session_id:
+            if self._active_lease.session_id != session_id:
                 return False
-            if self.active_lease.lifecycle_generation != session_gen:
+            if self._active_lease.lifecycle_generation != session_gen:
                 return False
-            if self.active_lease.execution_id != exec_id:
+            if self._active_lease.execution_id != exec_id:
                 return False
-            if self.active_lease.capability_scope != cap_scope:
+            if self._active_lease.capability_scope != cap_scope:
                 return False
             return True
 
@@ -102,7 +102,7 @@ def clinical_device(m48_system) -> Tuple[SimulatedDevice, StrictSimulatedEndpoin
     registry.register(device, token=registry._token)
     device._state = DeviceState.ACTIVE
     
-    def handler(dev, params): return {"status": "actuated"}
+    def handler(dev, params): raise Exception("GENERIC HANDLER CALLED ILLEGALLY")
     manager.register_command("clin.actuate", handler, required_capability_id="clin.actuate")
     return device, endpoint
 
@@ -136,8 +136,8 @@ def multi_endpoint_device(m48_system) -> Tuple[SimulatedDevice, StrictSimulatedE
     registry.register(device, token=registry._token)
     device._state = DeviceState.ACTIVE
     
-    def handler1(dev, params): return {"status": "ok1"}
-    def handler2(dev, params): return {"status": "ok2"}
+    def handler1(dev, params): raise Exception("GENERIC HANDLER CALLED ILLEGALLY")
+    def handler2(dev, params): raise Exception("GENERIC HANDLER CALLED ILLEGALLY")
         
     manager.register_command("multi.actuate1", handler1, required_capability_id="multi.actuate1")
     manager.register_command("multi.actuate2", handler2, required_capability_id="multi.actuate2")
@@ -156,6 +156,8 @@ def test_01_valid_command_admitted(m48_system, clinical_device):
         payload={"device_id": "sys.clin", "command": "clin.actuate", "session_id": sess_id, "execution_id": "exec_1", "session_lifecycle_generation": gen, "parameters": {}}
     )
     res = manager.handle_command(cmd)
+    if res.message_type == MessageType.ERROR:
+        print("ERROR PAYLOAD:", res.payload)
     assert res.message_type == MessageType.RESPONSE
     assert endpoint.safety_state == EndpointSafetyState.ACTIVE
     assert endpoint.active_lease.session_id == sess_id
@@ -265,19 +267,20 @@ def test_09_cross_session_isolation_under_concurrency(m48_system, clinical_devic
     
     sync_barrier = threading.Barrier(2)
     outcomes = []
-    
-    def blocking_handler(dev, params):
+
+    original_submit = endpoint.submit_command
+
+    def blocking_submit(cmd):
         sync_barrier.wait()
         time.sleep(0.01) # Give thread B time to revoke
-        if not endpoint.check_admission_tuple(sess_a, gen_a, "exec_A", frozenset(["clin.actuate"]), 1):
+        # Instead of check_admission_tuple, we check safety_state to simulate hardware rejection mid-flight
+        if endpoint.safety_state != EndpointSafetyState.ACTIVE:
             outcomes.append("REJECTED_AT_HARDWARE_BOUNDARY")
-            return {"status": "failed"}
+            raise Exception("Actuation rejected by hardware")
         outcomes.append("ACTUATED")
-        return {"status": "actuated"}
+        return original_submit(cmd)
         
-    if "clin.actuate" in manager._commands:
-        del manager._commands["clin.actuate"]
-    manager.register_command("clin.actuate", blocking_handler, required_capability_id="clin.actuate")
+    endpoint.submit_command = blocking_submit
     
     def thread_a():
         manager.handle_command(create_command(
@@ -326,17 +329,20 @@ def test_15_session_stop_active_command(m48_system, clinical_device):
     
     sync_barrier = threading.Barrier(2)
     
-    def blocking_handler(dev, params):
+    def blocking_submit(cmd):
         # Notify B we are executing
         sync_barrier.wait()
         # Block simulating long running task
         time.sleep(0.1)
         # Actuation logic here would normally check safety state, but let's test if the endpoint was immediately stopped.
-        return {"status": "done"}
+        from holomed.devices.models import PhysicalCommandResult
+        return PhysicalCommandResult(
+            command_sequence=cmd.command_sequence,
+            status="done",
+            details={"status": "done"}
+        )
         
-    if "clin.actuate" in manager._commands:
-        del manager._commands["clin.actuate"]
-    manager.register_command("clin.actuate", blocking_handler, required_capability_id="clin.actuate")
+    endpoint.submit_command = blocking_submit
     
     def thread_a():
         manager.handle_command(create_command(

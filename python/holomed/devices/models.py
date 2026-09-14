@@ -6,7 +6,7 @@ import enum
 import math
 import re
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, Callable, Dict, Mapping, Optional, Set, Tuple
 
@@ -170,6 +170,31 @@ class PhysicalCommand:
             )
         )
 
+
+@dataclass(frozen=True)
+class PhysicalCommandResult:
+    """Strongly typed result of a physical command actuation."""
+
+    status: str
+    details: Mapping[str, Any] = field(default_factory=lambda: MappingProxyType({}))
+
+    def __post_init__(self) -> None:
+        if type(self.status) is not str or not self.status.strip():
+            raise DeviceValidationError("status must be a non-empty string")
+        if not isinstance(self.details, (dict, MappingProxyType)):
+            raise DeviceValidationError(f"details must be a mapping, got {type(self.details).__name__}")
+
+        frozen = deep_freeze_parameter(self.details)
+        object.__setattr__(self, "details", frozen)
+
+    def __reduce__(self) -> Any:
+        return (
+            self.__class__,
+            (
+                self.status,
+                dict(self.details),
+            )
+        )
 
 
 def deep_freeze_parameter(
