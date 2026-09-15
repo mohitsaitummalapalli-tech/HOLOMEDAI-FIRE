@@ -25,10 +25,12 @@ from holomed.devices.control.models import (
     MAX_REGISTERED_QUERIES,
     QueryHandler,
 )
-from holomed.devices.models import PhysicalCommand
+from holomed.devices.models import PhysicalCommand, SubmissionStatus
 from holomed.devices.control.lease import EndpointLeaseRegistry
 from holomed.devices.control.verifier import CommandVerifier
-from holomed.devices.interfaces import IDevice, IDeviceEventSink, NullDeviceEventSink, IPhysicalEndpoint
+import time
+import threading
+from holomed.devices.interfaces import IDevice, IDeviceEventSink, NullDeviceEventSink, IPhysicalEndpoint, IExecutionResolutionGate
 from holomed.devices.registry import DeviceRegistry
 from holomed.protocol.builders import (
     create_error_response,
@@ -64,8 +66,14 @@ class DeviceControlManager(IService):
         logger: Optional[StructuredLogger] = None,
         secret_filter: Optional[SecretFilter] = None,
         session_validator: Optional[Callable[[str, int], bool]] = None,
+        resolution_gate: Optional[IExecutionResolutionGate] = None,
     ) -> None:
         self._registry = registry
+        self._resolution_gate = resolution_gate
+        self._deadlines: Dict[str, Tuple[float, int]] = {}
+        self._timeout_thread: Optional[threading.Thread] = None
+        self._timeout_shutdown = threading.Event()
+        self._timeout_lock = threading.Lock()
         self._event_sink: IDeviceEventSink = event_sink or NullDeviceEventSink()
         self._logger = logger or StructuredLogger("holomed.devices.control")
         self._secret_filter = secret_filter or SecretFilter()
@@ -123,12 +131,20 @@ class DeviceControlManager(IService):
         if self._state != ServiceState.INITIALIZED:
             raise ServiceLifecycleError(f"Cannot start DeviceControlManager in state {self._state.name}, expected INITIALIZED")
 
+        self._timeout_shutdown.clear()
+        self._timeout_thread = threading.Thread(target=self._timeout_loop, name="dcm_timeouts", daemon=True)
+        self._timeout_thread.start()
+
         self._state = ServiceState.STARTED
 
     def stop(self) -> None:
         """Tear down all resources and clear in-memory caches."""
         if self._state in (ServiceState.STOPPED, ServiceState.UNINITIALIZED):
             return
+
+        self._timeout_shutdown.set()
+        if self._timeout_thread:
+            self._timeout_thread.join(timeout=1.0)
 
         self._idempotency.clear()
         self._lease_registry.clear()
@@ -374,6 +390,11 @@ class DeviceControlManager(IService):
                         raise ControlCapacityError(f"Endpoint {endpoint.endpoint_id} does not implement IPhysicalEndpoint")
 
                     physical_result = endpoint.submit_command(physical_cmd)
+                    if physical_result.status == SubmissionStatus.ACCEPTED:
+                        # Register deadline. In a real system, timeout is per command. We use 5s here for tests.
+                        with self._timeout_lock:
+                            self._deadlines[execution_id] = (time.time() + 5.0, lifecycle_generation)
+
                     canonical_result = self._verifier.validate_and_canonicalize_command_result(
                         dict(physical_result.details)
                     )
@@ -523,6 +544,30 @@ class DeviceControlManager(IService):
         if self._state != ServiceState.STARTED:
             raise ServiceLifecycleError(f"Cannot perform {operation_name}() while DeviceControlManager is in {self._state.name}, expected STARTED")
 
+
+    def _timeout_loop(self) -> None:
+        while not self._timeout_shutdown.is_set():
+            now = time.time()
+            expired = []
+            with self._timeout_lock:
+                for exec_id, (expiry, gen) in list(self._deadlines.items()):
+                    if now >= expiry:
+                        expired.append((exec_id, gen))
+                        del self._deadlines[exec_id]
+
+            for exec_id, gen in expired:
+                if self._resolution_gate:
+                    self._resolution_gate.resolve_timeout(exec_id, gen)
+
+            self._timeout_shutdown.wait(0.1)
+
+    def trigger_test_timeout(self, execution_id: str) -> None:
+        """Test seam to manually trigger a timeout."""
+        with self._timeout_lock:
+            if execution_id in self._deadlines:
+                _, gen = self._deadlines.pop(execution_id)
+                if self._resolution_gate:
+                    self._resolution_gate.resolve_timeout(execution_id, gen)
     def _emit_audit_event(self, topic: str, payload: Dict[str, Any]) -> None:
         validate_concrete_topic(topic)
         envelope = create_event(

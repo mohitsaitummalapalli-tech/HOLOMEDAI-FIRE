@@ -239,3 +239,11 @@ class IExecutionResolutionGate(abc.ABC):
     @abc.abstractmethod
     def resolve_terminal_event(self, event: ExecutionTelemetryEvent) -> AuthoritativeExecutionRecord:
         """Atomically resolve a physical terminal telemetry event."""
+
+    @abc.abstractmethod
+    def claim_execution_ownership(self, execution_id: str, lifecycle_generation: int) -> bool:
+        """Atomically claim execution ownership to prevent TOCTOU races with timeout.
+
+        Returns True if the worker successfully claimed the execution, or False if the
+        execution has already been authoritatively resolved (e.g., by a timeout).
+        """

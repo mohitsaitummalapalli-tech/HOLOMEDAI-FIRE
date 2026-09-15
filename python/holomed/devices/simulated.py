@@ -23,9 +23,13 @@ from holomed.devices.models import (
     PhysicalCommand,
     PhysicalCommandResult,
     SubmissionStatus,
+    ExecutionTelemetryEvent,
+    CommandState,
+    EventSourceAuthority,
 )
+import uuid
 from holomed.runtime.models import HealthStatus
-from holomed.devices.interfaces import IPhysicalEndpoint
+from holomed.devices.interfaces import IPhysicalEndpoint, IExecutionResolutionGate, IExecutionTelemetryPublisher
 from holomed.devices.control.exceptions import CapabilityUnauthorizedError
 
 
@@ -39,10 +43,22 @@ class WorkerState(Enum):
 class SimulatedPhysicalEndpoint(IPhysicalEndpoint):
     """M49.3.2 Simulated physical endpoint for testing execution boundary."""
 
-    def __init__(self, endpoint_id: str, device_id: str, queue_capacity: int = 10) -> None:
+    def __init__(
+        self,
+        endpoint_id: str,
+        device_id: str,
+        queue_capacity: int = 10,
+        gate: Optional[IExecutionResolutionGate] = None,
+        publisher: Optional[IExecutionTelemetryPublisher] = None,
+    ) -> None:
         self._endpoint_id = endpoint_id
         self._device_id = device_id
+        self._gate = gate
+        self._publisher = publisher
         self._safety_state = EndpointSafetyState.SAFE_STOPPED
+        self._endpoint_state = EndpointState.READY
+        self._force_known_safe_failed = False
+        self._fail_on_publish = False
         self._active_lease: Optional[EndpointLease] = None
         self._last_accepted_sequence = 0
         self._queue_capacity = queue_capacity
@@ -50,15 +66,15 @@ class SimulatedPhysicalEndpoint(IPhysicalEndpoint):
         # Concurrency and execution boundary
         self._submit_lock = threading.Lock()
         self._command_queue: queue.Queue[PhysicalCommand] = queue.Queue(maxsize=self._queue_capacity)
-        
+
         # Worker lifecycle
         self._worker_state = WorkerState.UNAVAILABLE
         self._worker_thread: Optional[threading.Thread] = None
         self._shutdown_event = threading.Event()
-        
+
         # Stop channel
         self._stop_requests: Set[str] = set()
-        
+
         self._start_worker()
 
     def _start_worker(self) -> None:
@@ -66,7 +82,7 @@ class SimulatedPhysicalEndpoint(IPhysicalEndpoint):
             self._worker_state = WorkerState.RUNNING
             self._shutdown_event.clear()
             self._worker_thread = threading.Thread(
-                target=self._execution_loop, 
+                target=self._execution_loop,
                 name=f"sim_worker_{self._endpoint_id}",
                 daemon=True
             )
@@ -77,10 +93,10 @@ class SimulatedPhysicalEndpoint(IPhysicalEndpoint):
         with self._submit_lock:
             self._worker_state = WorkerState.SHUTDOWN_REQUESTED
             self._shutdown_event.set()
-        
+
         if self._worker_thread and self._worker_thread.is_alive():
             self._worker_thread.join(timeout=1.0)
-            
+
         with self._submit_lock:
             self._worker_state = WorkerState.STOPPED
 
@@ -98,10 +114,11 @@ class SimulatedPhysicalEndpoint(IPhysicalEndpoint):
 
     @property
     def endpoint_state(self) -> EndpointState:
-        return EndpointState.READY
+        return self._endpoint_state
 
     def recover(self) -> None:
-        raise NotImplementedError("Recovery semantics not yet implemented in M49.3")
+        with self._submit_lock:
+            self._endpoint_state = EndpointState.READY
 
     def request_stop(self, execution_id: str) -> None:
         """Independently request a stop for a specific active execution."""
@@ -143,6 +160,10 @@ class SimulatedPhysicalEndpoint(IPhysicalEndpoint):
                 return PhysicalCommandResult(status=SubmissionStatus.WORKER_UNAVAILABLE, details={})
 
             # Validity checks
+            if self._endpoint_state == EndpointState.QUARANTINED:
+                raise CapabilityUnauthorizedError(
+                    f"Endpoint {self._endpoint_id} is QUARANTINED"
+                )
             if self._safety_state != EndpointSafetyState.ACTIVE:
                 raise CapabilityUnauthorizedError(
                     f"Endpoint {self._endpoint_id} is not in ACTIVE state (current: {self._safety_state.name})"
@@ -187,6 +208,8 @@ class SimulatedPhysicalEndpoint(IPhysicalEndpoint):
             except queue.Empty:
                 continue
 
+            self._execution_event_seq = 0
+
             # Stale-at-dequeue protection
             with self._submit_lock:
                 is_stale = False
@@ -204,30 +227,96 @@ class SimulatedPhysicalEndpoint(IPhysicalEndpoint):
                 if is_stale:
                     self._command_queue.task_done()
                     continue
-                    
+
                 # Stop requested before execution started?
                 if command.execution_id in self._stop_requests:
                     # We just skip physical execution
                     self._command_queue.task_done()
                     self._stop_requests.discard(command.execution_id)
+                    self._publish_telemetry(command, CommandState.PREEMPTED)
                     continue
-                    
+
+                # Authoritative Pre-Claim Check against Gate
+                if self._gate:
+                    claimed = self._gate.claim_execution_ownership(command.execution_id, command.lifecycle_generation)
+                    if not claimed:
+                        # Timeout committed first
+                        self._command_queue.task_done()
+                        continue
+
+                # Claim commits first
+                self._publish_telemetry(command, CommandState.RUNNING)
+
+            terminal_state = CommandState.FAULTED_UNKNOWN
             try:
                 # Simulated blocking physical execution
+                interlocked = False
                 for _ in range(5):
                     if command.execution_id in self._stop_requests:
                         break
                     if self._shutdown_event.is_set():
                         break
+                    if self._safety_state == EndpointSafetyState.HARDWARE_INTERLOCKED:
+                        interlocked = True
+                        break
                     time.sleep(0.01)  # Simulated blocking step
-                    
-            except Exception:
+
+                with self._submit_lock:
+                    if self._safety_state == EndpointSafetyState.HARDWARE_INTERLOCKED or interlocked:
+                        terminal_state = CommandState.INTERLOCKED
+                    elif command.execution_id in self._stop_requests:
+                        # We assume it's safely stopped
+                        terminal_state = CommandState.PREEMPTED
+                    elif self._shutdown_event.is_set():
+                        terminal_state = CommandState.FAULTED_UNKNOWN
+                    else:
+                        terminal_state = CommandState.COMPLETED
+
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
                 # Expose failure according to rules
-                pass
+                if getattr(self, "_force_known_safe_failed", False):
+                    terminal_state = CommandState.FAILED
+                else:
+                    terminal_state = CommandState.FAULTED_UNKNOWN
             finally:
+                self._publish_telemetry(command, terminal_state)
                 self._command_queue.task_done()
                 with self._submit_lock:
                     self._stop_requests.discard(command.execution_id)
+                    if terminal_state in (CommandState.FAULTED_UNKNOWN, CommandState.FAILED, CommandState.INTERLOCKED):
+                        self._endpoint_state = EndpointState.QUARANTINED
+
+    def _publish_telemetry(self, command: PhysicalCommand, state: CommandState) -> None:
+        """Publish non-blocking physical state observation."""
+        if not self._publisher:
+            return
+        if getattr(self, "_fail_on_publish", False):
+            return
+
+        self._execution_event_seq += 1
+        try:
+            event = ExecutionTelemetryEvent(
+                event_id=str(uuid.uuid4()),
+                endpoint_id=self._endpoint_id,
+                session_id=command.session_id,
+                lifecycle_generation=command.lifecycle_generation,
+                endpoint_lease_generation=command.endpoint_lease_generation,
+                execution_id=command.execution_id,
+                command_sequence=command.command_sequence,
+                event_sequence=self._execution_event_seq,
+                event_type="STATE_OBSERVATION",
+                observed_state=state,
+                source_authority=EventSourceAuthority.ENDPOINT_ADAPTER,
+                source_origin="SimulatedPhysicalEndpoint",
+                timestamp_utc=datetime.now(timezone.utc).isoformat(),
+                payload={},
+            )
+            self._publisher.publish(event)
+        except Exception:
+            # Non-blocking telemetry loss
+            pass
 
     # Test configuration hooks
     def inject_hardware_interlock(self) -> None:

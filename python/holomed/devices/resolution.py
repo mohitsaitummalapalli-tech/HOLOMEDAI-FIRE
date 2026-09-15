@@ -138,3 +138,20 @@ class ExecutionResolutionGate(IExecutionResolutionGate):
             )
             self._records[execution_id] = updated_record
             return updated_record
+
+    def claim_execution_ownership(self, execution_id: str, lifecycle_generation: int) -> bool:
+        """Atomically claim execution ownership to prevent TOCTOU races with timeout."""
+        lock = self._get_lock(execution_id)
+        with lock:
+            record = self._get_or_create_record(execution_id, lifecycle_generation)
+
+            # Prevent cross-generation resolution
+            if record.lifecycle_generation != lifecycle_generation:
+                return False
+
+            # If already terminal (e.g. by timeout), reject the claim
+            if record.terminal_resolution_status:
+                return False
+
+            # Claim succeeds
+            return True
