@@ -16,6 +16,7 @@ from holomed.devices.models import (
     EndpointLease,
     EndpointSafetyState,
     EndpointState,
+    ExecutionTelemetryEvent,
     MAX_RECORDED_EVENTS,
     PhysicalCommand,
     PhysicalCommandResult,
@@ -217,3 +218,11 @@ class DeviceDiscoveryProvider(abc.ABC):
     @abc.abstractmethod
     def discover(self) -> Iterable[DeviceDescriptor]:
         """Discover available devices and return candidate descriptors."""
+
+
+class IExecutionTelemetryPublisher(abc.ABC):
+    """Non-blocking publisher interface exclusively for physical execution telemetry."""
+
+    @abc.abstractmethod
+    def publish(self, event: ExecutionTelemetryEvent) -> None:
+        """Publish an execution telemetry event without blocking the caller."""
