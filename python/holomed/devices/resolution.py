@@ -9,6 +9,7 @@ from holomed.devices.models import (
     CommandState,
     ExecutionTelemetryEvent,
     EventSourceAuthority,
+    StopRouteState,
 )
 
 
@@ -72,6 +73,8 @@ class ExecutionResolutionGate(IExecutionResolutionGate):
                 lifecycle_generation=lifecycle_generation,
                 timeout_status=True,
                 quarantine_consequence=True,
+                execution_claimed=record.execution_claimed,
+                stop_route_state=record.stop_route_state,
             )
             self._records[execution_id] = updated_record
             return updated_record
@@ -116,6 +119,8 @@ class ExecutionResolutionGate(IExecutionResolutionGate):
                             lifecycle_generation=record.lifecycle_generation,
                             timeout_status=record.timeout_status,
                             quarantine_consequence=True,
+                            execution_claimed=record.execution_claimed,
+                            stop_route_state=record.stop_route_state,
                         )
                         self._records[execution_id] = updated_record
                         return updated_record
@@ -135,6 +140,8 @@ class ExecutionResolutionGate(IExecutionResolutionGate):
                 lifecycle_generation=record.lifecycle_generation,
                 timeout_status=False,
                 quarantine_consequence=quarantine,
+                execution_claimed=record.execution_claimed,
+                stop_route_state=record.stop_route_state,
             )
             self._records[execution_id] = updated_record
             return updated_record
@@ -149,9 +156,76 @@ class ExecutionResolutionGate(IExecutionResolutionGate):
             if record.lifecycle_generation != lifecycle_generation:
                 return False
 
-            # If already terminal (e.g. by timeout), reject the claim
+            # If already terminal (e.g. by timeout or pre-claim cancel), reject the claim
             if record.terminal_resolution_status:
                 return False
 
-            # Claim succeeds
+            # If already claimed (shouldn't happen twice in valid flow, but safe)
+            if record.execution_claimed:
+                return True
+
+            updated_record = AuthoritativeExecutionRecord(
+                execution_id=execution_id,
+                current_state=record.current_state,
+                latest_accepted_sequence=record.latest_accepted_sequence,
+                terminal_resolution_status=record.terminal_resolution_status,
+                terminal_event_id=record.terminal_event_id,
+                source_authority=record.source_authority,
+                lifecycle_generation=record.lifecycle_generation,
+                timeout_status=record.timeout_status,
+                quarantine_consequence=record.quarantine_consequence,
+                execution_claimed=True,
+                stop_route_state=record.stop_route_state,
+            )
+            self._records[execution_id] = updated_record
             return True
+
+    def route_stop_request(self, execution_id: str, lifecycle_generation: int) -> StopRouteState:
+        """Atomically record stop-routing acceptance and determine the required preemption path."""
+        lock = self._get_lock(execution_id)
+        with lock:
+            record = self._get_or_create_record(execution_id, lifecycle_generation)
+
+            if record.lifecycle_generation != lifecycle_generation:
+                return StopRouteState.NOT_REQUESTED
+
+            if record.terminal_resolution_status:
+                return record.stop_route_state
+
+            if not record.execution_claimed:
+                # Pre-claim non-started cancellation
+                updated_record = AuthoritativeExecutionRecord(
+                    execution_id=execution_id,
+                    current_state=CommandState.PREEMPTED,
+                    latest_accepted_sequence=record.latest_accepted_sequence,
+                    terminal_resolution_status=True,
+                    terminal_event_id=None,
+                    source_authority=None,
+                    lifecycle_generation=record.lifecycle_generation,
+                    timeout_status=record.timeout_status,
+                    quarantine_consequence=record.quarantine_consequence,
+                    execution_claimed=False,
+                    stop_route_state=StopRouteState.PRE_CLAIM_CANCELLED,
+                )
+                self._records[execution_id] = updated_record
+                return StopRouteState.PRE_CLAIM_CANCELLED
+
+            if record.stop_route_state in (StopRouteState.PHYSICAL_ROUTING_ACCEPTED, StopRouteState.ALREADY_ROUTED):
+                return StopRouteState.ALREADY_ROUTED
+
+            # Claimed but not yet physically routed for stop
+            updated_record = AuthoritativeExecutionRecord(
+                execution_id=execution_id,
+                current_state=record.current_state,
+                latest_accepted_sequence=record.latest_accepted_sequence,
+                terminal_resolution_status=record.terminal_resolution_status,
+                terminal_event_id=record.terminal_event_id,
+                source_authority=record.source_authority,
+                lifecycle_generation=record.lifecycle_generation,
+                timeout_status=record.timeout_status,
+                quarantine_consequence=record.quarantine_consequence,
+                execution_claimed=True,
+                stop_route_state=StopRouteState.PHYSICAL_ROUTING_ACCEPTED,
+            )
+            self._records[execution_id] = updated_record
+            return StopRouteState.PHYSICAL_ROUTING_ACCEPTED

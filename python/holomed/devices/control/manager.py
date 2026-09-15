@@ -537,6 +537,25 @@ class DeviceControlManager(IService):
                     # Free from lease registry
                     self._lease_registry.release_lease(endpoint, session_id)
 
+    def preempt_execution(self, device_id: str, endpoint_id: str, execution_id: str, lifecycle_generation: int) -> None:
+        """Issue an authoritative preemption routing request for a specific execution."""
+        if not self._registry.contains(device_id):
+            raise DeviceNotFoundError(f"Device '{device_id}' not found")
+        device = self._registry.get(device_id)
+
+        target_endpoint = next((e for e in device.endpoints if e.endpoint_id == endpoint_id), None)
+        if not target_endpoint:
+            raise DeviceControlError(f"Endpoint '{endpoint_id}' not found on device '{device_id}'")
+
+        if not self._resolution_gate:
+            return
+
+        from holomed.devices.models import StopRouteState
+        route_state = self._resolution_gate.route_stop_request(execution_id, lifecycle_generation)
+
+        if route_state == StopRouteState.PHYSICAL_ROUTING_ACCEPTED:
+            target_endpoint.request_stop(execution_id)
+
     # --------------------------------------------------------------------------
     # Private Helpers
     # --------------------------------------------------------------------------

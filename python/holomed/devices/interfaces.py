@@ -21,6 +21,7 @@ from holomed.devices.models import (
     PhysicalCommand,
     PhysicalCommandResult,
     AuthoritativeExecutionRecord,
+    StopRouteState,
 )
 from holomed.protocol.models import MessageEnvelope
 from holomed.runtime.models import ResourceHandle
@@ -247,3 +248,7 @@ class IExecutionResolutionGate(abc.ABC):
         Returns True if the worker successfully claimed the execution, or False if the
         execution has already been authoritatively resolved (e.g., by a timeout).
         """
+
+    @abc.abstractmethod
+    def route_stop_request(self, execution_id: str, lifecycle_generation: int) -> StopRouteState:
+        """Atomically record stop-routing acceptance and determine the required preemption path."""

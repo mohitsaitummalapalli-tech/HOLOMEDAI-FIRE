@@ -316,6 +316,15 @@ class ExecutionTelemetryEvent:
         )
 
 
+class StopRouteState(str, enum.Enum):
+    """M49 Preemption routing idempotency state."""
+
+    NOT_REQUESTED = "NOT_REQUESTED"
+    PRE_CLAIM_CANCELLED = "PRE_CLAIM_CANCELLED"
+    PHYSICAL_ROUTING_ACCEPTED = "PHYSICAL_ROUTING_ACCEPTED"
+    ALREADY_ROUTED = "ALREADY_ROUTED"
+
+
 class AuthoritativeExecutionRecord:
     """Authoritative state record owned exclusively by the resolution gate."""
 
@@ -330,6 +339,8 @@ class AuthoritativeExecutionRecord:
         lifecycle_generation: int,
         timeout_status: bool,
         quarantine_consequence: bool,
+        execution_claimed: bool = False,
+        stop_route_state: StopRouteState = StopRouteState.NOT_REQUESTED,
     ) -> None:
         if type(execution_id) is not str or not execution_id.strip():
             raise DeviceValidationError("execution_id must be a non-empty string")
@@ -349,6 +360,10 @@ class AuthoritativeExecutionRecord:
             raise DeviceValidationError("timeout_status must be a bool")
         if type(quarantine_consequence) is not bool:
             raise DeviceValidationError("quarantine_consequence must be a bool")
+        if type(execution_claimed) is not bool:
+            raise DeviceValidationError("execution_claimed must be a bool")
+        if not isinstance(stop_route_state, StopRouteState):
+            raise DeviceValidationError("stop_route_state must be StopRouteState")
 
         self._execution_id = execution_id
         self._current_state = current_state
@@ -359,6 +374,8 @@ class AuthoritativeExecutionRecord:
         self._lifecycle_generation = lifecycle_generation
         self._timeout_status = timeout_status
         self._quarantine_consequence = quarantine_consequence
+        self._execution_claimed = execution_claimed
+        self._stop_route_state = stop_route_state
 
     @property
     def execution_id(self) -> str:
@@ -395,6 +412,14 @@ class AuthoritativeExecutionRecord:
     @property
     def quarantine_consequence(self) -> bool:
         return self._quarantine_consequence
+
+    @property
+    def execution_claimed(self) -> bool:
+        return self._execution_claimed
+
+    @property
+    def stop_route_state(self) -> StopRouteState:
+        return self._stop_route_state
 
 
 

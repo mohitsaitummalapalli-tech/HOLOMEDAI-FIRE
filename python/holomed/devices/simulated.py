@@ -228,14 +228,6 @@ class SimulatedPhysicalEndpoint(IPhysicalEndpoint):
                     self._command_queue.task_done()
                     continue
 
-                # Stop requested before execution started?
-                if command.execution_id in self._stop_requests:
-                    # We just skip physical execution
-                    self._command_queue.task_done()
-                    self._stop_requests.discard(command.execution_id)
-                    self._publish_telemetry(command, CommandState.PREEMPTED)
-                    continue
-
                 # Authoritative Pre-Claim Check against Gate
                 if self._gate:
                     claimed = self._gate.claim_execution_ownership(command.execution_id, command.lifecycle_generation)
