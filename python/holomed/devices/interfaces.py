@@ -20,6 +20,7 @@ from holomed.devices.models import (
     MAX_RECORDED_EVENTS,
     PhysicalCommand,
     PhysicalCommandResult,
+    AuthoritativeExecutionRecord,
 )
 from holomed.protocol.models import MessageEnvelope
 from holomed.runtime.models import ResourceHandle
@@ -226,3 +227,15 @@ class IExecutionTelemetryPublisher(abc.ABC):
     @abc.abstractmethod
     def publish(self, event: ExecutionTelemetryEvent) -> None:
         """Publish an execution telemetry event without blocking the caller."""
+
+
+class IExecutionResolutionGate(abc.ABC):
+    """Atomic synchronization boundary for resolving terminal execution states."""
+
+    @abc.abstractmethod
+    def resolve_timeout(self, execution_id: str, lifecycle_generation: int) -> AuthoritativeExecutionRecord:
+        """Atomically resolve a control-plane timeout."""
+
+    @abc.abstractmethod
+    def resolve_terminal_event(self, event: ExecutionTelemetryEvent) -> AuthoritativeExecutionRecord:
+        """Atomically resolve a physical terminal telemetry event."""
