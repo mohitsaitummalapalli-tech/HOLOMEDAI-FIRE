@@ -285,7 +285,7 @@ class SimulatedPhysicalEndpoint(IPhysicalEndpoint):
                 self._command_queue.task_done()
                 with self._submit_lock:
                     self._stop_requests.discard(command.execution_id)
-                    if terminal_state in (CommandState.FAULTED_UNKNOWN, CommandState.FAILED, CommandState.INTERLOCKED):
+                    if terminal_state in (CommandState.FAULTED_UNKNOWN, CommandState.INTERLOCKED):
                         self._endpoint_state = EndpointState.QUARANTINED
 
     def _publish_telemetry(self, command: PhysicalCommand, state: CommandState) -> None:

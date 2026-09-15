@@ -78,7 +78,11 @@ def test_endpoint_quarantine_consequence_is_returned():
     gate = ExecutionResolutionGate()
     evt = create_event("exec-4", 1, CommandState.FAILED)
     rec = gate.resolve_terminal_event(evt)
-    assert rec.quarantine_consequence is True
+    assert rec.quarantine_consequence is False
+
+    evt2 = create_event("exec-4-2", 1, CommandState.FAULTED_UNKNOWN)
+    rec2 = gate.resolve_terminal_event(evt2)
+    assert rec2.quarantine_consequence is True
 
 
 def test_same_execution_cannot_regress_event_sequence():

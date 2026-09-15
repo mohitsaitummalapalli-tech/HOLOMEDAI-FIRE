@@ -123,7 +123,7 @@ class ExecutionResolutionGate(IExecutionResolutionGate):
 
             # Not terminal yet
             # Determine quarantine consequence
-            quarantine = event.observed_state in (CommandState.FAULTED_UNKNOWN, CommandState.FAILED, CommandState.INTERLOCKED)
+            quarantine = event.observed_state in (CommandState.FAULTED_UNKNOWN, CommandState.INTERLOCKED)
 
             updated_record = AuthoritativeExecutionRecord(
                 execution_id=execution_id,
