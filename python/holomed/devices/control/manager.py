@@ -5,6 +5,7 @@ from __future__ import annotations
 import weakref
 from datetime import datetime, timezone
 from types import MappingProxyType
+import uuid
 from typing import Any, Callable, Dict, Mapping, Optional, Tuple
 
 from holomed.core.subscription import validate_concrete_topic
@@ -373,7 +374,11 @@ class DeviceControlManager(IService):
                 seq = self._lease_registry.next_command_sequence(endpoint.endpoint_id)
 
                 physical_cmd = PhysicalCommand(
-                    endpoint_id=endpoint.endpoint_id,
+                    device_epoch=0,
+                    controller_epoch=0,
+                    physical_operation_id=str(uuid.uuid4()),
+                    command_nonce=str(uuid.uuid4()),
+        endpoint_id=endpoint.endpoint_id,
                     session_id=session_id,
                     lifecycle_generation=lifecycle_generation,
                     endpoint_lease_generation=lease.endpoint_lease_generation,

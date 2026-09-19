@@ -14,6 +14,9 @@ from holomed.devices.models import (
 def test_valid_telemetry_event_construction():
     """Test 1 & 7 & 9: valid telemetry event construction and execution identity."""
     event = ExecutionTelemetryEvent(
+        evidence_generation=1,
+        cryptographic_signature=None,
+        fencing_challenge=None,
         event_id="evt_123",
         endpoint_id="ep_01",
         session_id="sess_01",
@@ -39,6 +42,9 @@ def test_valid_telemetry_event_construction():
 def test_event_immutability():
     """Test 2: event immutability."""
     event = ExecutionTelemetryEvent(
+        evidence_generation=1,
+        cryptographic_signature=None,
+        fencing_challenge=None,
         event_id="evt_123",
         endpoint_id="ep_01",
         session_id="sess_01",
@@ -65,6 +71,9 @@ def test_nested_payload_integrity():
     mutable_dict = {"progress": 50, "nested": {"a": 1}}
 
     event = ExecutionTelemetryEvent(
+        evidence_generation=1,
+        cryptographic_signature=None,
+        fencing_challenge=None,
         event_id="evt_123",
         endpoint_id="ep_01",
         session_id="sess_01",
@@ -94,6 +103,9 @@ def test_valid_source_authority():
     """Test 4: valid source authority."""
     # Control Plane Timeout authority
     event = ExecutionTelemetryEvent(
+        evidence_generation=1,
+        cryptographic_signature=None,
+        fencing_challenge=None,
         event_id="evt_123",
         endpoint_id="ep_01",
         session_id="sess_01",
@@ -116,7 +128,10 @@ def test_simulated_adapter_cannot_claim_hardware_authority():
     """Test 5 & 6: simulated adapter cannot claim hardware authority (rejected)."""
     with pytest.raises(DeviceValidationError, match="Illegal authority combination"):
         ExecutionTelemetryEvent(
-            event_id="evt_123",
+        evidence_generation=1,
+        cryptographic_signature=None,
+        fencing_challenge=None,
+        event_id="evt_123",
             endpoint_id="ep_01",
             session_id="sess_01",
             lifecycle_generation=1,
@@ -137,7 +152,10 @@ def test_malformed_execution_identity_rejected():
     """Test 8: malformed execution identity rejected."""
     with pytest.raises(DeviceValidationError, match="execution_id must be a non-empty string"):
         ExecutionTelemetryEvent(
-            event_id="evt_123",
+        evidence_generation=1,
+        cryptographic_signature=None,
+        fencing_challenge=None,
+        event_id="evt_123",
             endpoint_id="ep_01",
             session_id="sess_01",
             lifecycle_generation=1,
@@ -158,7 +176,10 @@ def test_invalid_event_sequence_rejected():
     """Test 10: invalid event sequence rejected."""
     with pytest.raises(DeviceValidationError, match="event_sequence must be an int >= 1"):
         ExecutionTelemetryEvent(
-            event_id="evt_123",
+        evidence_generation=1,
+        cryptographic_signature=None,
+        fencing_challenge=None,
+        event_id="evt_123",
             endpoint_id="ep_01",
             session_id="sess_01",
             lifecycle_generation=1,

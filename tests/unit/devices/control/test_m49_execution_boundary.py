@@ -14,6 +14,8 @@ from holomed.devices.simulated import SimulatedPhysicalEndpoint, WorkerState
 def active_endpoint() -> SimulatedPhysicalEndpoint:
     ep = SimulatedPhysicalEndpoint("ep_1", "dev_1", queue_capacity=2)
     lease = EndpointLease(
+            device_epoch=1,
+            controller_epoch=1,
         session_id="session_1",
         lifecycle_generation=1,
         endpoint_lease_generation=1,
@@ -28,6 +30,10 @@ def active_endpoint() -> SimulatedPhysicalEndpoint:
 
 def _make_command(seq: int, exec_id: str) -> PhysicalCommand:
     return PhysicalCommand(
+        device_epoch=1,
+        controller_epoch=1,
+        physical_operation_id="op_123",
+        command_nonce="nonce_abc",
         session_id="session_1",
         lifecycle_generation=1,
         endpoint_lease_generation=1,

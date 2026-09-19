@@ -42,6 +42,8 @@ def endpoint_and_device(gate, publisher, registry):
     registry.register(dev, "test_token")
     
     lease = EndpointLease(
+        device_epoch=1,
+        controller_epoch=1,
         endpoint_id="ep_1",
         device_id="dev_1",
         session_id="session_1",
@@ -58,6 +60,10 @@ def endpoint_and_device(gate, publisher, registry):
 def create_cmd(exec_id: str, seq: int = 1):
     from holomed.devices.models import PhysicalCommand
     return PhysicalCommand(
+        device_epoch=1,
+        controller_epoch=1,
+        physical_operation_id="op_123",
+        command_nonce="nonce_abc",
         endpoint_id="ep_1",
         session_id="session_1",
         lifecycle_generation=1,
@@ -175,6 +181,8 @@ def test_preclaim_gate_authority_deterministic(gate, transport, publisher, regis
     registry.register(dev, "test_token")
 
     lease = EndpointLease(
+        device_epoch=1,
+        controller_epoch=1,
         endpoint_id="ep_det_1", device_id="dev_det_1", session_id="s1",
         lifecycle_generation=1, endpoint_lease_generation=1,
         execution_id="exec_det_1", capability_scope=frozenset(["cap"]),
@@ -218,6 +226,8 @@ def test_preclaim_no_worker_local_preempted_bypass(gate, transport, publisher, r
     registry.register(dev, "test_token")
 
     lease = EndpointLease(
+        device_epoch=1,
+        controller_epoch=1,
         endpoint_id="ep_det_2", device_id="dev_det_2", session_id="s2",
         lifecycle_generation=1, endpoint_lease_generation=1,
         execution_id="exec_det_2", capability_scope=frozenset(["cap"]),
@@ -271,6 +281,8 @@ def test_preclaim_gate_then_worker_dequeue_integration(gate, transport, publishe
     registry.register(dev, "test_token")
 
     lease = EndpointLease(
+        device_epoch=1,
+        controller_epoch=1,
         endpoint_id="ep_det_3", device_id="dev_det_3", session_id="s3",
         lifecycle_generation=1, endpoint_lease_generation=1,
         execution_id="exec_det_3", capability_scope=frozenset(["cap"]),
@@ -280,6 +292,10 @@ def test_preclaim_gate_then_worker_dequeue_integration(gate, transport, publishe
     exec_id = "exec_det_integ"
     from holomed.devices.models import PhysicalCommand
     cmd = PhysicalCommand(
+        device_epoch=1,
+        controller_epoch=1,
+        physical_operation_id="op_123",
+        command_nonce="nonce_abc",
         endpoint_id="ep_det_3", session_id="s3",
         lifecycle_generation=1, endpoint_lease_generation=1,
         execution_id=exec_id, capability_scope=frozenset(["cap"]),
@@ -352,6 +368,8 @@ def test_exactly_once_physical_delivery_via_manager(gate, transport, publisher, 
     registry.register(dev, "test_token")
 
     lease = EndpointLease(
+        device_epoch=1,
+        controller_epoch=1,
         endpoint_id="ep_once_1", device_id="dev_once_1", session_id="s_once",
         lifecycle_generation=1, endpoint_lease_generation=1,
         execution_id="exec_once_1", capability_scope=frozenset(["cap"]),
@@ -361,6 +379,10 @@ def test_exactly_once_physical_delivery_via_manager(gate, transport, publisher, 
     exec_id = "exec_once_phys"
     from holomed.devices.models import PhysicalCommand
     cmd = PhysicalCommand(
+        device_epoch=1,
+        controller_epoch=1,
+        physical_operation_id="op_123",
+        command_nonce="nonce_abc",
         endpoint_id="ep_once_1", session_id="s_once",
         lifecycle_generation=1, endpoint_lease_generation=1,
         execution_id=exec_id, capability_scope=frozenset(["cap"]),

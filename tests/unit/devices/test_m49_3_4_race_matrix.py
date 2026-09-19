@@ -42,6 +42,8 @@ def endpoint_and_device(gate, publisher, registry):
     registry.register(dev, "test_token")
     
     lease = EndpointLease(
+        device_epoch=1,
+        controller_epoch=1,
         endpoint_id="ep_1",
         device_id="dev_1",
         session_id="session_1",
@@ -58,6 +60,10 @@ def endpoint_and_device(gate, publisher, registry):
 def create_cmd(exec_id: str, seq: int = 1, generation: int = 1):
     from holomed.devices.models import PhysicalCommand
     return PhysicalCommand(
+        device_epoch=1,
+        controller_epoch=1,
+        physical_operation_id="op_123",
+        command_nonce="nonce_abc",
         endpoint_id="ep_1",
         session_id="session_1",
         lifecycle_generation=generation,
@@ -186,6 +192,9 @@ def test_race_23_late_preempt_after_completed(endpoint_and_device, manager, gate
     # Fabricate late PREEMPTED observation
     from holomed.devices.models import ExecutionTelemetryEvent, EventSourceAuthority
     obs = ExecutionTelemetryEvent(
+        evidence_generation=1,
+        cryptographic_signature=None,
+        fencing_challenge=None,
         event_id="evt_1",
         endpoint_id="ep_1",
         session_id="session_1",

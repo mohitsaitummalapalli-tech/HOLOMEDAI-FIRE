@@ -19,6 +19,9 @@ def create_event(
     event_id: str = "evt-1"
 ) -> ExecutionTelemetryEvent:
     return ExecutionTelemetryEvent(
+        evidence_generation=1,
+        cryptographic_signature=None,
+        fencing_challenge=None,
         event_id=event_id,
         endpoint_id="end-1",
         session_id="ses-1",

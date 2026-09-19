@@ -36,6 +36,8 @@ def publisher(transport):
 def endpoint(gate, publisher):
     ep = SimulatedPhysicalEndpoint("ep_1", "dev_1", gate=gate, publisher=publisher)
     lease = EndpointLease(
+        device_epoch=1,
+        controller_epoch=1,
         endpoint_id="ep_1",
         device_id="dev_1",
         session_id="session_1",
@@ -50,6 +52,10 @@ def endpoint(gate, publisher):
 
 def create_cmd(exec_id: str, seq: int = 1):
     return PhysicalCommand(
+        device_epoch=1,
+        controller_epoch=1,
+        physical_operation_id="op_123",
+        command_nonce="nonce_abc",
         endpoint_id="ep_1",
         session_id="session_1",
         lifecycle_generation=1,
@@ -191,6 +197,9 @@ def test_duplicate_event(gate):
     transport = TelemetryTransport()
     reconciler = TelemetryReconciler(transport, gate)
     event = ExecutionTelemetryEvent(
+        evidence_generation=1,
+        cryptographic_signature=None,
+        fencing_challenge=None,
         event_id="e1", execution_id="exec_dup", event_sequence=1,
         observed_state=CommandState.RUNNING, timestamp_utc="2026-09-15T00:00:00Z",
         source_authority=EventSourceAuthority.ENDPOINT_ADAPTER,
@@ -210,6 +219,9 @@ def test_sequence_collision(gate):
     transport = TelemetryTransport()
     reconciler = TelemetryReconciler(transport, gate)
     e1 = ExecutionTelemetryEvent(
+        evidence_generation=1,
+        cryptographic_signature=None,
+        fencing_challenge=None,
         event_id="e1", execution_id="exec_col", event_sequence=1,
         observed_state=CommandState.COMPLETED, timestamp_utc="2026-09-15T00:00:00Z",
         source_authority=EventSourceAuthority.ENDPOINT_ADAPTER,
@@ -219,6 +231,9 @@ def test_sequence_collision(gate):
         payload={}
     )
     e2 = ExecutionTelemetryEvent(
+        evidence_generation=1,
+        cryptographic_signature=None,
+        fencing_challenge=None,
         event_id="e2", execution_id="exec_col", event_sequence=1,
         observed_state=CommandState.FAILED, timestamp_utc="2026-09-15T00:00:00Z",
         source_authority=EventSourceAuthority.ENDPOINT_ADAPTER,

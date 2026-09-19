@@ -26,7 +26,12 @@ def test_endpoint_state_semantics():
     # Ensure EndpointState clearly defines READY and QUARANTINED
     assert EndpointState.READY.value == "READY"
     assert EndpointState.QUARANTINED.value == "QUARANTINED"
-    assert len(EndpointState) == 2
+    expected_members = {
+        'READY', 'QUARANTINED', 'PHYSICALLY_ISOLATED',
+        'REINITIALIZATION_REQUIRED', 'REINITIALIZATION_PREPARE'
+    }
+    assert {e.name for e in EndpointState} == expected_members
+    assert len(EndpointState) == 5
 
 def test_submission_status_strict_values():
     # Ensure SubmissionStatus enforces exact non-blocking values

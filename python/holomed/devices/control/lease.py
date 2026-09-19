@@ -51,7 +51,9 @@ class EndpointLeaseRegistry:
         self._lease_generations[endpoint.endpoint_id] = gen
         
         lease = EndpointLease(
-            endpoint_id=endpoint.endpoint_id,
+            device_epoch=0,
+            controller_epoch=0,
+        endpoint_id=endpoint.endpoint_id,
             device_id=endpoint.device_id,
             session_id=session_id,
             lifecycle_generation=lifecycle_generation,

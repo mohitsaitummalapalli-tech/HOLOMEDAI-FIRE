@@ -66,13 +66,21 @@ class CapabilityCategory(str, enum.Enum):
 
 
 class DeviceState(str, enum.Enum):
-    """Authoritative 8-state machine for device lifecycle."""
+    """Authoritative state machine for device lifecycle."""
 
     UNREGISTERED = "UNREGISTERED"
     REGISTERED = "REGISTERED"
     INITIALIZING = "INITIALIZING"
     READY = "READY"
     ACTIVE = "ACTIVE"
+    DEVICE_READY = "DEVICE_READY"
+    ISOLATION_PREPARE = "ISOLATION_PREPARE"
+    ISOLATION_CONFIRMED = "ISOLATION_CONFIRMED"
+    PHYSICALLY_ISOLATED = "PHYSICALLY_ISOLATED"
+    REINITIALIZATION_REQUIRED = "REINITIALIZATION_REQUIRED"
+    REINITIALIZATION_PREPARE = "REINITIALIZATION_PREPARE"
+    HARDWARE_READY_CONFIRMED = "HARDWARE_READY_CONFIRMED"
+    FENCING_FAILURE = "FENCING_FAILURE"
     STOPPING = "STOPPING"
     STOPPED = "STOPPED"
     FAILED = "FAILED"
@@ -90,10 +98,17 @@ class CommandState(str, enum.Enum):
     """Strict formal state machine for physical execution."""
 
     ACCEPTED = "ACCEPTED"
+    QUEUED = "QUEUED"
+    DISPATCHING = "DISPATCHING"
     RUNNING = "RUNNING"
     PREEMPT_REQUESTED = "PREEMPT_REQUESTED"
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
+    RECOVERY_REQUIRED = "RECOVERY_REQUIRED"
+    QUARANTINED = "QUARANTINED"
+    PHYSICALLY_ISOLATED = "PHYSICALLY_ISOLATED"
+    TERMINATED_AND_PROVEN = "TERMINATED_AND_PROVEN"
+    ABORTED = "ABORTED"
     PREEMPTED = "PREEMPTED"
     INTERLOCKED = "INTERLOCKED"
     FAULTED_UNKNOWN = "FAULTED_UNKNOWN"
@@ -104,6 +119,9 @@ class EndpointState(str, enum.Enum):
 
     READY = "READY"
     QUARANTINED = "QUARANTINED"
+    PHYSICALLY_ISOLATED = "PHYSICALLY_ISOLATED"
+    REINITIALIZATION_REQUIRED = "REINITIALIZATION_REQUIRED"
+    REINITIALIZATION_PREPARE = "REINITIALIZATION_PREPARE"
 
 
 class SubmissionStatus(str, enum.Enum):
@@ -136,6 +154,8 @@ class EndpointLease:
     endpoint_lease_generation: int
     execution_id: str
     capability_scope: frozenset[str]
+    device_epoch: int
+    controller_epoch: int
 
     def __post_init__(self) -> None:
         if not isinstance(self.endpoint_id, str) or not self.endpoint_id:
@@ -152,6 +172,10 @@ class EndpointLease:
             raise DeviceValidationError("execution_id must be a non-empty string")
         if not isinstance(self.capability_scope, frozenset):
             raise DeviceValidationError("capability_scope must be a frozenset of strings")
+        if type(self.device_epoch) is not int or self.device_epoch < 0:
+            raise DeviceValidationError("device_epoch must be an int >= 0")
+        if type(self.controller_epoch) is not int or self.controller_epoch < 0:
+            raise DeviceValidationError("controller_epoch must be an int >= 0")
 
 
 @dataclass(frozen=True)
@@ -164,6 +188,10 @@ class PhysicalCommand:
     endpoint_lease_generation: int
     execution_id: str
     capability_scope: frozenset[str]
+    device_epoch: int
+    controller_epoch: int
+    physical_operation_id: str
+    command_nonce: str
     command_sequence: int
     operation: str
     parameters: Mapping[str, Any]
@@ -183,6 +211,14 @@ class PhysicalCommand:
             raise DeviceValidationError("capability_scope must be a frozenset")
         if any(type(x) is not str for x in self.capability_scope):
             raise DeviceValidationError("capability_scope must contain only strings")
+        if type(self.device_epoch) is not int or self.device_epoch < 0:
+            raise DeviceValidationError("device_epoch must be an int >= 0")
+        if type(self.controller_epoch) is not int or self.controller_epoch < 0:
+            raise DeviceValidationError("controller_epoch must be an int >= 0")
+        if type(self.physical_operation_id) is not str or not self.physical_operation_id.strip():
+            raise DeviceValidationError("physical_operation_id must be a non-empty string")
+        if type(self.command_nonce) is not str or not self.command_nonce.strip():
+            raise DeviceValidationError("command_nonce must be a non-empty string")
         if type(self.command_sequence) is not int or self.command_sequence < 1:
             raise DeviceValidationError("command_sequence must be an int >= 1")
         if type(self.operation) is not str or not self.operation.strip():
@@ -203,6 +239,10 @@ class PhysicalCommand:
                 self.endpoint_lease_generation,
                 self.execution_id,
                 self.capability_scope,
+                self.device_epoch,
+                self.controller_epoch,
+                self.physical_operation_id,
+                self.command_nonce,
                 self.command_sequence,
                 self.operation,
                 dict(self.parameters),
@@ -254,6 +294,9 @@ class ExecutionTelemetryEvent:
     source_origin: str
     timestamp_utc: str
     payload: Mapping[str, Any]
+    evidence_generation: int
+    cryptographic_signature: Optional[str]
+    fencing_challenge: Optional[str]
 
     def __post_init__(self) -> None:
         if type(self.event_id) is not str or not self.event_id.strip():
@@ -284,11 +327,22 @@ class ExecutionTelemetryEvent:
             raise DeviceValidationError("timestamp_utc must be a non-empty string")
         if not isinstance(self.payload, (dict, MappingProxyType)):
             raise DeviceValidationError(f"payload must be a mapping, got {type(self.payload).__name__}")
+        if type(self.evidence_generation) is not int or self.evidence_generation < 1:
+            raise DeviceValidationError("evidence_generation must be an int >= 1")
+        if self.cryptographic_signature is not None and (type(self.cryptographic_signature) is not str or not self.cryptographic_signature.strip()):
+            raise DeviceValidationError("cryptographic_signature must be a non-empty string or None")
+        if self.fencing_challenge is not None and (type(self.fencing_challenge) is not str or not self.fencing_challenge.strip()):
+            raise DeviceValidationError("fencing_challenge must be a non-empty string or None")
 
         if self.source_authority == EventSourceAuthority.HARDWARE_DRIVER:
             if "SimulatedPhysicalEndpoint" in self.source_origin:
                 raise DeviceValidationError(
                     f"Illegal authority combination: {self.source_authority.name} cannot originate from {self.source_origin}"
+                )
+        elif self.source_authority == EventSourceAuthority.ENDPOINT_ADAPTER:
+            if self.observed_state == CommandState.PHYSICALLY_ISOLATED:
+                raise DeviceValidationError(
+                    f"Illegal authority combination: {self.source_authority.name} cannot produce PHYSICALLY_ISOLATED"
                 )
 
         frozen = deep_freeze_parameter(self.payload)
@@ -312,6 +366,9 @@ class ExecutionTelemetryEvent:
                 self.source_origin,
                 self.timestamp_utc,
                 dict(self.payload),
+                self.evidence_generation,
+                self.cryptographic_signature,
+                self.fencing_challenge,
             )
         )
 
@@ -341,6 +398,7 @@ class AuthoritativeExecutionRecord:
         quarantine_consequence: bool,
         execution_claimed: bool = False,
         stop_route_state: StopRouteState = StopRouteState.NOT_REQUESTED,
+        physical_recovery_active: bool = False,
     ) -> None:
         if type(execution_id) is not str or not execution_id.strip():
             raise DeviceValidationError("execution_id must be a non-empty string")
@@ -376,6 +434,7 @@ class AuthoritativeExecutionRecord:
         self._quarantine_consequence = quarantine_consequence
         self._execution_claimed = execution_claimed
         self._stop_route_state = stop_route_state
+        self._physical_recovery_active = physical_recovery_active
 
     @property
     def execution_id(self) -> str:
@@ -420,6 +479,10 @@ class AuthoritativeExecutionRecord:
     @property
     def stop_route_state(self) -> StopRouteState:
         return self._stop_route_state
+
+    @property
+    def physical_recovery_active(self) -> bool:
+        return self._physical_recovery_active
 
 
 

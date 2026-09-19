@@ -11,6 +11,10 @@ from holomed.devices.exceptions import DeviceValidationError
 def test_physical_command_successful_construction():
     """Test valid construction of PhysicalCommand."""
     cmd = PhysicalCommand(
+        device_epoch=1,
+        controller_epoch=1,
+        physical_operation_id="op_123",
+        command_nonce="nonce_abc",
         endpoint_id="ep_1",
         session_id="sess_123",
         lifecycle_generation=5,
@@ -36,6 +40,10 @@ def test_physical_command_successful_construction():
 def test_physical_command_immutability():
     """Test that PhysicalCommand is strictly immutable."""
     cmd = PhysicalCommand(
+        device_epoch=1,
+        controller_epoch=1,
+        physical_operation_id="op_123",
+        command_nonce="nonce_abc",
         endpoint_id="ep_1",
         session_id="sess_123",
         lifecycle_generation=1,
@@ -61,6 +69,10 @@ def test_physical_command_alias_mutation():
     """Test that mutating an alias passed to construction does not mutate the command."""
     original_params = {"speed": 50, "nested": {"list": [1, 2, 3]}}
     cmd = PhysicalCommand(
+        device_epoch=1,
+        controller_epoch=1,
+        physical_operation_id="op_123",
+        command_nonce="nonce_abc",
         endpoint_id="ep_1",
         session_id="sess_123",
         lifecycle_generation=1,
@@ -93,7 +105,11 @@ def test_physical_command_required_fields_enforcement():
         "capability_scope": frozenset(["cap_1"]),
         "command_sequence": 1,
         "operation": "actuate",
-        "parameters": {}
+        "parameters": {},
+        "device_epoch": 1,
+        "controller_epoch": 1,
+        "physical_operation_id": "op_123",
+        "command_nonce": "nonce_abc"
     }
 
     # Missing empty strings
@@ -127,7 +143,11 @@ def test_physical_command_type_shape_validation():
         "capability_scope": frozenset(["cap_1"]),
         "command_sequence": 1,
         "operation": "actuate",
-        "parameters": {}
+        "parameters": {},
+        "device_epoch": 1,
+        "controller_epoch": 1,
+        "physical_operation_id": "op_123",
+        "command_nonce": "nonce_abc"
     }
 
     kwargs = valid_kwargs.copy()
@@ -143,6 +163,10 @@ def test_physical_command_type_shape_validation():
 def test_physical_command_serialization_preservation():
     """Test that copying/serialization preserves all security-critical fields perfectly."""
     cmd = PhysicalCommand(
+        device_epoch=1,
+        controller_epoch=1,
+        physical_operation_id="op_123",
+        command_nonce="nonce_abc",
         endpoint_id="ep_1",
         session_id="sess_123",
         lifecycle_generation=5,

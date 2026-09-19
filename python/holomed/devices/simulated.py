@@ -290,7 +290,10 @@ class SimulatedPhysicalEndpoint(IPhysicalEndpoint):
         self._execution_event_seq += 1
         try:
             event = ExecutionTelemetryEvent(
-                event_id=str(uuid.uuid4()),
+                evidence_generation=1,
+                cryptographic_signature=None,
+                fencing_challenge=None,
+        event_id=str(uuid.uuid4()),
                 endpoint_id=self._endpoint_id,
                 session_id=command.session_id,
                 lifecycle_generation=command.lifecycle_generation,
