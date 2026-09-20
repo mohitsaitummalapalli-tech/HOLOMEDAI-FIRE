@@ -21,6 +21,29 @@ class ExecutionResolutionGate(IExecutionResolutionGate):
     - Preserves monotonic event_sequence per execution.
     - Prevents mutating terminal states once reached.
     """
+    
+    def is_capacity_release_terminal(self, state: str) -> bool:
+        """Returns True if the state represents authoritative evidence for capacity release."""
+        return state in (
+            CommandState.OPERATION_COMPLETED,
+            CommandState.OPERATION_ABORTED_AND_QUIESCENT,
+            CommandState.OPERATION_CONFIRMED_ABSENT,
+            CommandState.PHYSICALLY_ISOLATED,
+        )
+
+    def is_terminal(self, state: str) -> bool:
+        """Check if the given state is any terminal state."""
+        return state in (
+            CommandState.OPERATION_COMPLETED,
+            CommandState.OPERATION_ABORTED_AND_QUIESCENT,
+            CommandState.OPERATION_CONFIRMED_ABSENT,
+            CommandState.COMPLETED,
+            CommandState.FAILED,
+            CommandState.PREEMPTED,
+            CommandState.INTERLOCKED,
+            CommandState.FAULTED_UNKNOWN,
+            CommandState.PHYSICALLY_ISOLATED,
+        )
 
     def __init__(self) -> None:
         self._global_lock = threading.Lock()
@@ -96,11 +119,15 @@ class ExecutionResolutionGate(IExecutionResolutionGate):
                 return record
 
             is_terminal = event.observed_state in (
+                CommandState.OPERATION_COMPLETED,
+                CommandState.OPERATION_ABORTED_AND_QUIESCENT,
+                CommandState.OPERATION_CONFIRMED_ABSENT,
                 CommandState.COMPLETED,
                 CommandState.FAILED,
                 CommandState.PREEMPTED,
                 CommandState.INTERLOCKED,
-                CommandState.FAULTED_UNKNOWN
+                CommandState.FAULTED_UNKNOWN,
+                CommandState.PHYSICALLY_ISOLATED,
             )
 
             # If the record is already terminal

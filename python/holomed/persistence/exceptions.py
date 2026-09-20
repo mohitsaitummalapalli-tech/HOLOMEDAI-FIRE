@@ -30,6 +30,14 @@ class PersistenceValidationError(PersistenceError, PlatformValidationError):
     """Raised when validation of persistence parameters, schemas, or bounds fails."""
 
 
+class PersistenceTerminationConflictError(PersistenceValidationError):
+    """Raised when a termination resolution conflicts with an existing terminal resolution."""
+
+
+class PersistenceIdentityReuseError(PersistenceValidationError):
+    """Raised when a canonical identity is reused incorrectly after termination."""
+
+
 class PersistenceCapacityError(PersistenceError, PlatformCapacityError):
     """Raised when storage bounds, entry counts, or file limits are exceeded."""
 

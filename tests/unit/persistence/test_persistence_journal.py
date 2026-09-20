@@ -117,10 +117,26 @@ def test_broken_hash_chain_fails_closed(temp_storage_root: Path) -> None:
     writer.initialize_storage()
 
     writer.append_entry(JournalEntryType.SESSION_STARTED, -1, "2026-09-01T20:00:00Z", {"action": "START"})
-    # Manually tamper with last entry hash in writer before next append
-    writer._last_entry_hash = "f" * 64
-
-    writer.append_entry(JournalEntryType.CYCLE_COMPLETED, 0, "2026-09-01T20:00:01Z", {"status": "COMPLETED"})
+    
+    # Manually append an entry with a broken previous_entry_hash
+    from holomed.persistence.serialization import compute_entry_hash, serialize_canonical_bytes
+    from holomed.persistence.models import PERSISTENCE_SCHEMA_VERSION
+    
+    e2_dict = {
+        "entry_id": "broken_chain_id",
+        "entry_type": JournalEntryType.CYCLE_COMPLETED.value,
+        "schema_version": PERSISTENCE_SCHEMA_VERSION,
+        "timestamp_utc": "2026-09-01T20:00:01Z",
+        "epoch_id": 1,
+        "session_id": "sess_broken_chain",
+        "sequence_number": 0,
+        "payload": {"status": "COMPLETED"},
+        "previous_entry_hash": "f" * 64,
+    }
+    e2_dict["sha256_hash"] = compute_entry_hash(e2_dict)
+    
+    with open(writer.journal_path, "ab") as f:
+        f.write(serialize_canonical_bytes(e2_dict) + b"\n")
 
     with pytest.raises(PersistenceCorruptionError):
         JournalReader.read_and_recover_journal(writer.journal_path)

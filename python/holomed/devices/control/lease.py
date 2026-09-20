@@ -39,12 +39,15 @@ class EndpointLeaseRegistry:
             if (existing_lease.session_id == session_id and
                 existing_lease.execution_id == execution_id and
                 existing_lease.lifecycle_generation == lifecycle_generation):
-                # Optionally extend capability scope? Actually, capabilities are fixed per command.
                 # In this zero-trust model, lease is tied to the physical actuation.
                 return existing_lease
             
-            # If different session/execution, release old lease first.
-            endpoint.release_lease(existing_lease.session_id)
+            # If different session/execution, reject.
+            from holomed.devices.control.exceptions import ControlCapacityError
+            raise ControlCapacityError(
+                f"Endpoint {endpoint.endpoint_id} is currently leased to session {existing_lease.session_id} "
+                f"(execution {existing_lease.execution_id}). Cannot issue new lease until gracefully released."
+            )
 
         # Generate new lease generation
         gen = self._lease_generations.get(endpoint.endpoint_id, 0) + 1

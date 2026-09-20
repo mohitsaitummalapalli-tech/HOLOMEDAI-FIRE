@@ -217,14 +217,14 @@ def test_06_stale_endpoint_lease_rejected(m48_system, clinical_device):
     ))
     lease_gen_1 = endpoint.active_lease.endpoint_lease_generation
     
-    manager.handle_command(create_command(
+    response = manager.handle_command(create_command(
         message_name="device.command", source="test",
         payload={"device_id": "sys.clin", "command": "clin.actuate", "session_id": sess_id, "execution_id": "exec_2", "session_lifecycle_generation": gen, "parameters": {}}
     ))
-    lease_gen_2 = endpoint.active_lease.endpoint_lease_generation
     
-    assert lease_gen_2 > lease_gen_1
-    assert endpoint.active_lease.execution_id == "exec_2"
+    assert response.message_name == "device.command.error"
+    assert response.payload.get("error_code") == "ERR_CONTROLCAPACITYERROR"
+    assert endpoint.active_lease.execution_id == "exec_1"
 
 def test_08_session_a_to_b_reassignment_isolation(m48_system, clinical_device):
     manager, _, sess_manager, _ = m48_system

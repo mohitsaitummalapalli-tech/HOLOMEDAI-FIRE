@@ -24,6 +24,7 @@ from holomed.devices.control.models import (
     DeviceQueryDefinition,
     MAX_REGISTERED_COMMANDS,
     MAX_REGISTERED_QUERIES,
+    GLOBAL_PHYSICAL_OPERATION_CAPACITY,
     QueryHandler,
 )
 from holomed.devices.models import PhysicalCommand, SubmissionStatus
@@ -68,10 +69,14 @@ class DeviceControlManager(IService):
         secret_filter: Optional[SecretFilter] = None,
         session_validator: Optional[Callable[[str, int], bool]] = None,
         resolution_gate: Optional[IExecutionResolutionGate] = None,
+        capacity_checker: Optional[Callable[[str], int]] = None,
+        capacity_releaser: Optional[Callable[[str, str, int, int, str, str, str], None]] = None,
+        capacity_admitter: Optional[Callable[[str, str, str, int, int, str, str, str, str], None]] = None,
     ) -> None:
         self._registry = registry
         self._resolution_gate = resolution_gate
         self._deadlines: Dict[str, Tuple[float, int]] = {}
+        self._active_commands: Dict[str, PhysicalCommand] = {}
         self._timeout_thread: Optional[threading.Thread] = None
         self._timeout_shutdown = threading.Event()
         self._timeout_lock = threading.Lock()
@@ -79,6 +84,9 @@ class DeviceControlManager(IService):
         self._logger = logger or StructuredLogger("holomed.devices.control")
         self._secret_filter = secret_filter or SecretFilter()
         self._session_validator = session_validator
+        self._capacity_checker = capacity_checker
+        self._capacity_releaser = capacity_releaser
+        self._capacity_admitter = capacity_admitter
         self._state: ServiceState = ServiceState.UNINITIALIZED
 
         # Resources & Subsystems
@@ -96,6 +104,30 @@ class DeviceControlManager(IService):
         self._executed_commands_count: int = 0
         self._executed_queries_count: int = 0
         self._sink_errors_count: int = 0
+
+    def release_capacity_for_execution(self, execution_id: str, terminal_state: str) -> None:
+        """Explicitly release physical capacity when a terminal state is proven."""
+        for device in self._registry.all_devices:
+            for endpoint in device.endpoints:
+                lease = endpoint.active_lease
+                if lease and lease.execution_id == execution_id:
+                    session_id = lease.session_id
+                    # 1. Hardware-level release
+                    self._lease_registry.release_lease(endpoint, session_id)
+                    # 2. Durable journal append
+                    with self._timeout_lock:
+                        cmd = self._active_commands.pop(execution_id, None)
+                    if cmd and self._capacity_releaser:
+                        self._capacity_releaser(
+                            session_id,
+                            device.device_id,
+                            cmd.device_epoch,
+                            cmd.controller_epoch,
+                            cmd.physical_operation_id,
+                            cmd.command_nonce,
+                            terminal_state
+                        )
+                    return
 
     # --------------------------------------------------------------------------
     # IService Properties & Lifecycle Implementation
@@ -363,6 +395,16 @@ class DeviceControlManager(IService):
 
             endpoint = target_endpoints[0]
 
+            if self._capacity_checker is not None:
+                active_ops = self._capacity_checker(session_id)
+                if active_ops >= GLOBAL_PHYSICAL_OPERATION_CAPACITY:
+                    return create_error_response(
+                        request=envelope,
+                        responder_source=self.name,
+                        error_code="ERR_CONTROLCAPACITYERROR",
+                        error_message=f"Global physical capacity exceeded: {active_ops} >= {GLOBAL_PHYSICAL_OPERATION_CAPACITY} active operations",
+                    )
+
             try:
                 lease = self._lease_registry.issue_lease(
                     endpoint=endpoint,
@@ -399,6 +441,21 @@ class DeviceControlManager(IService):
                         # Register deadline. In a real system, timeout is per command. We use 5s here for tests.
                         with self._timeout_lock:
                             self._deadlines[execution_id] = (time.time() + 5.0, lifecycle_generation)
+                            self._active_commands[execution_id] = physical_cmd
+                            
+                        # Record admission in durable journal
+                        if self._capacity_admitter:
+                            self._capacity_admitter(
+                                session_id,
+                                endpoint.endpoint_id,
+                                device.device_id,
+                                physical_cmd.device_epoch,
+                                physical_cmd.controller_epoch,
+                                physical_cmd.physical_operation_id,
+                                physical_cmd.command_nonce,
+                                execution_id,
+                                command_name
+                            )
 
                     canonical_result = self._verifier.validate_and_canonicalize_command_result(
                         dict(physical_result.details)
@@ -581,7 +638,9 @@ class DeviceControlManager(IService):
 
             for exec_id, gen in expired:
                 if self._resolution_gate:
-                    self._resolution_gate.resolve_timeout(exec_id, gen)
+                    record = self._resolution_gate.resolve_timeout(exec_id, gen)
+                    if record.terminal_resolution_status and self._resolution_gate.is_capacity_release_terminal(record.current_state):
+                        self.release_capacity_for_execution(exec_id, record.current_state)
 
             self._timeout_shutdown.wait(0.1)
 

@@ -163,7 +163,7 @@ class TestAllForbiddenTransitions:
             "services": dict(engine.services),
             "service_states": dict(engine.service_states),
             "outstanding_resources": engine.outstanding_resources,
-            "next_epoch_id": engine._next_epoch_id,
+            "next_epoch_id": engine._authority_store.read_current_epoch() + 1,
         }
 
     def _assert_unchanged(self, before: dict, engine: RuntimeEngine) -> None:
@@ -502,7 +502,7 @@ class TestCandidateTransactionIsolation:
             "active_epoch": e.active_epoch,
             "services": dict(e.services),
             "service_states": dict(e.service_states),
-            "next_epoch_id": e._next_epoch_id,
+            "next_epoch_id": e._authority_store.read_current_epoch() + 1,
             "last_retired_diagnostic": e.last_retired_diagnostic,
             "is_resource_clean": e.is_resource_clean,
         }
@@ -513,7 +513,7 @@ class TestCandidateTransactionIsolation:
         assert e.active_epoch == snap["active_epoch"]
         assert dict(e.services) == snap["services"]
         assert dict(e.service_states) == snap["service_states"]
-        assert e._next_epoch_id == snap["next_epoch_id"]
+        assert e._authority_store.read_current_epoch() + 1 == snap["next_epoch_id"]
         assert e.last_retired_diagnostic == snap["last_retired_diagnostic"]
         assert e.is_resource_clean == snap["is_resource_clean"]
 
@@ -563,7 +563,7 @@ class TestCandidateTransactionIsolation:
         snap = {
             "state": e.state,
             "active_epoch": e.active_epoch,
-            "next_epoch_id": e._next_epoch_id,
+            "next_epoch_id": e._authority_store.read_current_epoch() + 1,
         }
 
         # Try recycling the original instance
@@ -573,7 +573,7 @@ class TestCandidateTransactionIsolation:
 
         assert e.state == snap["state"]
         assert e.active_epoch == snap["active_epoch"]
-        assert e._next_epoch_id == snap["next_epoch_id"]
+        assert e._authority_store.read_current_epoch() + 1 == snap["next_epoch_id"]
 
     def test_secret_filter_not_polluted_on_phase1_failure(self) -> None:
         """Phase 1 failure must NOT leave new secrets in the engine's secret filter."""
@@ -855,7 +855,7 @@ class TestCumulativeFreshness:
             engine.initialize(_cfg())
 
         # Counter not consumed
-        assert engine._next_epoch_id == 4  # 3 successful epochs consumed IDs 1,2,3
+        assert engine._authority_store.read_current_epoch() + 1 == 4  # 3 successful epochs consumed IDs 1,2,3
 
     def test_fresh_instance_accepted(self) -> None:
         """New instance is accepted even after 3 retired epochs."""
@@ -873,7 +873,7 @@ class TestCumulativeFreshness:
             engine.initialize(_cfg())
             engine.stop()
 
-        assert engine._next_epoch_id == 5
+        assert engine._authority_store.read_current_epoch() + 1 == 5
         assert len(engine._previous_epoch_instances) == 4
 
 
@@ -1159,7 +1159,7 @@ class TestHiddenScenarios:
             e.stop()
             assert e.state == RuntimeState.STOPPED
 
-        assert e._next_epoch_id == 11
+        assert e._authority_store.read_current_epoch() + 1 == 11
         assert len(e._previous_epoch_instances) == 10
 
     def test_single_service_registry(self) -> None:

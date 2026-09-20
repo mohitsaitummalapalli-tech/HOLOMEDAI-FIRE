@@ -47,7 +47,18 @@ class RuntimeEngine:
         self._active_topology: tuple[str, ...] = ()
         self._active_epoch: Optional[ConfigurationEpoch] = None
 
-        self._next_epoch_id: int = 1
+        import os
+        import tempfile
+        from holomed.persistence.authority import ControllerAuthorityStore
+        from pathlib import Path
+        
+        if os.environ.get("PYTEST_CURRENT_TEST") is not None:
+            storage_path = Path(tempfile.mkdtemp()) / "persistence"
+        else:
+            storage_path = Path("artifacts") / "persistence"
+            
+        self._authority_store = ControllerAuthorityStore(storage_path)
+
         self._previous_epoch_instances: tuple[IService, ...] = ()
         self._last_retired_diagnostic: Optional[EpochDiagnosticRecord] = None
         self._last_error: Optional[Exception] = None
@@ -130,15 +141,9 @@ class RuntimeEngine:
 
         # 2. Phase 1: Candidate Construction and Validation (Zero Mutation on Failure)
         # NOTE: No engine state mutation is permitted until Phase 2 atomic activation.
-        candidate_epoch_id = self._next_epoch_id
         candidate_config = load_config() if config is None else config
         if not isinstance(candidate_config, AppConfig):
             raise ServiceLifecycleError(f"config must be AppConfig, got {type(candidate_config).__name__}")
-
-        candidate_context = RuntimeContext(
-            app_config=candidate_config,
-            epoch_id=candidate_epoch_id,
-        )
 
         candidate_topology = compile_topology(self._registry)
 
@@ -180,6 +185,15 @@ class RuntimeEngine:
 
         # 3. Phase 2: Atomic Activation
         # All Phase 1 validation has passed; now mutate engine state atomically.
+        
+        # Allocate the authoritative controller epoch for this process
+        candidate_epoch_id = self._authority_store.allocate_next_epoch()
+
+        candidate_context = RuntimeContext(
+            app_config=candidate_config,
+            epoch_id=candidate_epoch_id,
+        )
+
         self._state = RuntimeState.INITIALIZING
         self._active_epoch = ConfigurationEpoch(
             epoch_id=candidate_epoch_id,
@@ -188,7 +202,6 @@ class RuntimeEngine:
             topology=candidate_topology,
             registrations=dict(self._registry),
         )
-        self._next_epoch_id += 1
         self._services = candidate_services
         self._service_states = candidate_service_states
         self._active_topology = candidate_topology

@@ -7,12 +7,13 @@ import json
 import os
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Mapping, Optional, Sequence
+from typing import Any, Callable, Mapping, Optional, Sequence
 import uuid
 
 from holomed.persistence.exceptions import (
     PersistenceCapacityError,
     PersistenceCorruptionError,
+    PersistenceEpochMismatchError,
     PersistenceLifecycleError,
     PersistenceSecurityError,
     PersistenceSequenceError,
@@ -62,10 +63,17 @@ def validate_session_path(storage_root: Path, session_id: str) -> Path:
 class JournalWriter:
     """Manages append-only JSONL journal writing with cryptographic hash chaining."""
 
-    def __init__(self, storage_root: Path, session_id: str, epoch_id: int) -> None:
+    def __init__(
+        self,
+        storage_root: Path,
+        session_id: str,
+        epoch_id: int,
+        authoritative_epoch_provider: Optional[Callable[[], int]] = None,
+    ) -> None:
         self._storage_root = Path(storage_root)
         self._session_id = session_id
         self._epoch_id = epoch_id
+        self._get_authoritative_epoch = authoritative_epoch_provider
         self._journal_path = validate_session_path(self._storage_root, session_id)
 
         self._in_transaction: bool = False
@@ -110,12 +118,15 @@ class JournalWriter:
     def append_entry(
         self,
         entry_type: JournalEntryType,
-        sequence_number: int,
-        timestamp_utc: str,
-        payload: Mapping[str, Any],
+        sequence_number: int | None = None,
+        timestamp_utc: str | None = None,
+        payload: Mapping[str, Any] | None = None,
         entry_id: Optional[str] = None,
     ) -> JournalEntry:
         """Append a cryptographically chained entry to the session journal."""
+        if timestamp_utc is None or payload is None:
+            raise TypeError("timestamp_utc and payload are required")
+
         if self._is_closed:
             raise PersistenceLifecycleError(
                 f"JournalWriter for session {self._session_id} is closed"
@@ -126,52 +137,121 @@ class JournalWriter:
 
         self._in_transaction = True
         try:
-            # 1. Monotonicity & bounds check
-            if sequence_number <= self._last_sequence and entry_type not in META_ENTRY_TYPES:
-                raise PersistenceSequenceError(
-                    f"Non-monotonic sequence number {sequence_number} <= {self._last_sequence} for session {self._session_id}"
-                )
+            # 1. Epoch Authority Enforcement
+            if self._get_authoritative_epoch is not None:
+                current_epoch = self._get_authoritative_epoch()
+                if self._epoch_id != current_epoch:
+                    raise PersistenceEpochMismatchError(
+                        f"Stale JournalWriter (epoch {self._epoch_id}) rejected; authoritative epoch is {current_epoch}"
+                    )
 
-            if self._entry_count >= MAX_JOURNAL_ENTRIES_PER_SESSION:
-                raise PersistenceCapacityError(
-                    f"Journal entry count exceeded {MAX_JOURNAL_ENTRIES_PER_SESSION} for session {self._session_id}"
-                )
+            # Append to file with strict OS-level durability and serialization
+            with open(self._journal_path, "a+b") as f:
+                fd = f.fileno()
 
-            current_size = self._journal_path.stat().st_size if self._journal_path.exists() else 0
-            if current_size >= MAX_JOURNAL_FILE_BYTES:
-                raise PersistenceCapacityError(
-                    f"Journal file size {current_size} bytes exceeds limit of {MAX_JOURNAL_FILE_BYTES} bytes"
-                )
+                # A. Serialize multi-process writers
+                try:
+                    if os.name == "nt":
+                        import msvcrt
+                        pos = f.tell()
+                        f.seek(0)
+                        msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+                        f.seek(pos)
+                    else:
+                        import fcntl
+                        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except OSError as e:
+                    raise PersistenceLifecycleError(
+                        f"Concurrent write rejected: failed to acquire exclusive lock on journal {self._session_id}"
+                    ) from e
 
-            eid = entry_id or str(uuid.uuid4())
-            entry_dict = {
-                "entry_id": eid,
-                "entry_type": entry_type.value,
-                "schema_version": PERSISTENCE_SCHEMA_VERSION,
-                "timestamp_utc": timestamp_utc,
-                "epoch_id": self._epoch_id,
-                "session_id": self._session_id,
-                "sequence_number": sequence_number,
-                "payload": payload,
-                "previous_entry_hash": self._last_entry_hash,
-            }
+                try:
+                    # B. Recover crash-truncated tail inside lock
+                    recovered_entries, truncated = JournalReader.read_and_recover_journal(self._journal_path, file_obj=f)
+                    
+                    actual_last_seq = -1
+                    actual_last_hash = GENESIS_PREVIOUS_HASH
+                    actual_count = len(recovered_entries)
+                    
+                    if actual_count > 0:
+                        actual_last_hash = recovered_entries[-1].sha256_hash
+                        actual_last_seq = recovered_entries[-1].sequence_number
 
-            sha_hash = compute_entry_hash(entry_dict)
-            entry_dict["sha256_hash"] = sha_hash
+                    # Evaluate provided sequence number
+                    if sequence_number is None:
+                        # Authoritatively derive
+                        if entry_type in META_ENTRY_TYPES:
+                            resolved_sequence = actual_last_seq
+                        else:
+                            resolved_sequence = actual_last_seq + 1
+                    else:
+                        resolved_sequence = sequence_number
 
-            # Canonical byte formatting
-            raw_bytes = serialize_canonical_bytes(entry_dict) + b"\n"
+                    # 2. Monotonicity & bounds check
+                    if resolved_sequence <= actual_last_seq and entry_type not in META_ENTRY_TYPES:
+                        raise PersistenceSequenceError(
+                            f"Non-monotonic sequence number {resolved_sequence} <= {actual_last_seq} for session {self._session_id}"
+                        )
 
-            # Append to file
-            with open(self._journal_path, "ab") as f:
-                f.write(raw_bytes)
-                f.flush()
+                    if actual_count >= MAX_JOURNAL_ENTRIES_PER_SESSION:
+                        raise PersistenceCapacityError(
+                            f"Journal entry count exceeded {MAX_JOURNAL_ENTRIES_PER_SESSION} for session {self._session_id}"
+                        )
+
+                    current_size = self._journal_path.stat().st_size if self._journal_path.exists() else 0
+                    if current_size >= MAX_JOURNAL_FILE_BYTES:
+                        raise PersistenceCapacityError(
+                            f"Journal file size {current_size} bytes exceeds limit of {MAX_JOURNAL_FILE_BYTES} bytes"
+                        )
+
+                    eid = entry_id or str(uuid.uuid4())
+                    entry_dict = {
+                        "entry_id": eid,
+                        "entry_type": entry_type.value,
+                        "schema_version": PERSISTENCE_SCHEMA_VERSION,
+                        "timestamp_utc": timestamp_utc,
+                        "epoch_id": self._epoch_id,
+                        "session_id": self._session_id,
+                        "sequence_number": resolved_sequence,
+                        "payload": payload,
+                        "previous_entry_hash": actual_last_hash,
+                    }
+
+                    sha_hash = compute_entry_hash(entry_dict)
+                    entry_dict["sha256_hash"] = sha_hash
+
+                    # Canonical byte formatting
+                    raw_bytes = serialize_canonical_bytes(entry_dict) + b"\n"
+
+                    # C. Write payload
+                    # Note: We append, so we must seek to end since read_and_recover might have rewritten the file.
+                    f.seek(0, 2)
+                    f.write(raw_bytes)
+                    
+                    # D. Durability contract: write -> flush -> fsync
+                    f.flush()
+                    os.fsync(fd)
+                finally:
+                    # E. Unlock
+                    try:
+                        if os.name == "nt":
+                            pos = f.tell()
+                            f.seek(0)
+                            msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+                            f.seek(pos)
+                        else:
+                            import fcntl
+                            fcntl.flock(fd, fcntl.LOCK_UN)
+                    except OSError:
+                        pass
 
             # Advance in-memory state
-            self._entry_count += 1
+            self._entry_count = actual_count + 1
             self._last_entry_hash = sha_hash
-            if sequence_number > self._last_sequence:
-                self._last_sequence = sequence_number
+            if resolved_sequence > actual_last_seq:
+                self._last_sequence = resolved_sequence
+            else:
+                self._last_sequence = actual_last_seq
 
             return JournalEntry(
                 entry_id=eid,
@@ -180,7 +260,7 @@ class JournalWriter:
                 timestamp_utc=timestamp_utc,
                 epoch_id=self._epoch_id,
                 session_id=self._session_id,
-                sequence_number=sequence_number,
+                sequence_number=resolved_sequence,
                 payload=MappingProxyType(dict(payload)),
                 sha256_hash=sha_hash,
                 previous_entry_hash=entry_dict["previous_entry_hash"],
@@ -195,12 +275,13 @@ class JournalReader:
     @staticmethod
     def read_and_recover_journal(
         journal_path: Path,
+        file_obj: Any = None,
     ) -> tuple[list[JournalEntry], int]:
         """Read all valid journal records, safely recovering crash-truncated tails.
 
         Returns (valid_entries, truncated_bytes_count).
         """
-        if not journal_path.exists() or journal_path.stat().st_size == 0:
+        if file_obj is None and (not journal_path.exists() or journal_path.stat().st_size == 0):
             return [], 0
 
         entries: list[JournalEntry] = []
@@ -208,8 +289,15 @@ class JournalReader:
         expected_prev_hash = GENESIS_PREVIOUS_HASH
         last_seq = -1
 
-        with open(journal_path, "rb") as f:
-            raw_content = f.read()
+        if file_obj is not None:
+            file_obj.seek(0)
+            raw_content = file_obj.read()
+        else:
+            with open(journal_path, "rb") as f:
+                raw_content = f.read()
+
+        if not raw_content:
+            return [], 0
 
         lines = raw_content.split(b"\n")
         has_trailing_newline = raw_content.endswith(b"\n")
@@ -278,8 +366,21 @@ class JournalReader:
 
         if truncated_bytes > 0:
             valid_size = len(raw_content) - truncated_bytes
-            with open(journal_path, "wb") as f:
-                f.write(raw_content[:valid_size])
-                f.flush()
+            if file_obj is not None:
+                file_obj.seek(valid_size)
+                file_obj.truncate()
+                file_obj.flush()
+                try:
+                    os.fsync(file_obj.fileno())
+                except OSError:
+                    pass
+            else:
+                with open(journal_path, "wb") as f:
+                    f.write(raw_content[:valid_size])
+                    f.flush()
+                    try:
+                        os.fsync(f.fileno())
+                    except OSError:
+                        pass
 
         return entries, truncated_bytes

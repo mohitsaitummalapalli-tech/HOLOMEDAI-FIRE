@@ -163,9 +163,9 @@ def test_sequential_commands_increment_sequence(manager_and_device):
     assert endpoint.active_lease.endpoint_lease_generation == 1
 
 
-def test_new_session_execution_releases_old_lease_and_generates_new(manager_and_device):
+def test_new_session_execution_rejected_if_lease_active(manager_and_device):
     manager, _, endpoint = manager_and_device
-    
+
     manager.handle_command(create_command(
         message_name="device.command",
         source="test",
@@ -178,9 +178,9 @@ def test_new_session_execution_releases_old_lease_and_generates_new(manager_and_
             "parameters": {},
         }
     ))
-    
-    # Session 2 takes over
-    manager.handle_command(create_command(
+
+    # Session 2 tries to take over
+    response = manager.handle_command(create_command(
         message_name="device.command",
         source="test",
         payload={
@@ -192,9 +192,10 @@ def test_new_session_execution_releases_old_lease_and_generates_new(manager_and_
             "parameters": {},
         }
     ))
-    
-    assert endpoint.active_lease.session_id == "sess_2"
-    assert endpoint.active_lease.endpoint_lease_generation == 2
+
+    assert response.message_name == "device.command.error"
+    assert response.payload.get("error_code") == "ERR_CONTROLCAPACITYERROR"
+    assert endpoint.active_lease.session_id == "sess_1"
 
 
 def test_emergency_stop_revokes_lease_and_interlocks(manager_and_device):

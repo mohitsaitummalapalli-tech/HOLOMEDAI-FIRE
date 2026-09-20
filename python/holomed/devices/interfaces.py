@@ -252,3 +252,11 @@ class IExecutionResolutionGate(abc.ABC):
     @abc.abstractmethod
     def route_stop_request(self, execution_id: str, lifecycle_generation: int) -> StopRouteState:
         """Atomically record stop-routing acceptance and determine the required preemption path."""
+
+    @abc.abstractmethod
+    def is_capacity_release_terminal(self, state: str) -> bool:
+        """Check if the given state implies capacity release."""
+
+    @abc.abstractmethod
+    def is_terminal(self, state: str) -> bool:
+        """Check if the given state is any terminal state."""

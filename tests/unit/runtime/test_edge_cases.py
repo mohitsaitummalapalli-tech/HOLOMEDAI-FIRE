@@ -144,7 +144,7 @@ def test_candidate_failure_leaves_active_state_observationally_unchanged() -> No
     # Now in STOPPED state with diagnostic record
     diag_before = engine.last_retired_diagnostic
     state_before = engine.state
-    epoch_id_counter_before = engine._next_epoch_id
+    epoch_id_counter_before = engine._authority_store.read_current_epoch() + 1
 
     # Register an invalid service with circular dependency
     engine.register_service(ServiceRegistration("svc.c1", lambda: EdgeCaseService("svc.c1"), ("svc.c2",)))
@@ -155,4 +155,4 @@ def test_candidate_failure_leaves_active_state_observationally_unchanged() -> No
 
     assert engine.state == state_before
     assert engine.last_retired_diagnostic == diag_before
-    assert engine._next_epoch_id == epoch_id_counter_before
+    assert engine._authority_store.read_current_epoch() + 1 == epoch_id_counter_before
