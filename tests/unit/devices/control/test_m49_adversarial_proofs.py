@@ -336,21 +336,71 @@ def test_evidence_identity_generation_mismatch_rejection(shared_store_path):
     from holomed.devices.transport import TelemetryTransport
     from holomed.devices.resolution import ExecutionResolutionGate
     from holomed.devices.reconciler import TelemetryReconciler
+    from holomed.devices.models import ExecutionTelemetryEvent, EventSourceAuthority, CommandState, PhysicalCommand, DeviceType, DeviceState, EndpointLease, EndpointSafetyState, EndpointState
     from holomed.devices.registry import DeviceRegistry, RegistryAuthorityToken
-    from holomed.devices.models import ExecutionTelemetryEvent, EventSourceAuthority, CommandState, PhysicalCommand
+    from holomed.devices.interfaces import IDevice, IPhysicalEndpoint
+    from typing import Tuple, Optional
 
     authority, epoch, session = setup_test_store(shared_store_path)
     store = DurableSessionStore(shared_store_path, epoch_id=epoch)
     store.restore_session_from_disk(session)
-    store.record_operation_admitted(session, "ep_e", "dev_e", 1, 1, "op_e", "nonce_e", "exec_e", "test")
+    store.record_operation_admitted(session, "ep_e", "dev_e", 1, epoch, "op_e", "nonce_e", "exec_e", "test")
     
     # 1. Setup production path components
-    manager = DeviceControlManager(DeviceRegistry(RegistryAuthorityToken()), capacity_releaser=store.record_operation_terminated)
+    token = RegistryAuthorityToken()
+    registry = DeviceRegistry(token)
+    
+    class MockEndpoint(IPhysicalEndpoint):
+        @property
+        def endpoint_id(self): return "ep_e"
+        @property
+        def device_id(self): return "dev_e"
+        @property
+        def safety_state(self): return EndpointSafetyState.SAFE
+        @property
+        def endpoint_state(self): return EndpointState.READY
+        def recover(self): pass
+        def emergency_stop(self): return EndpointSafetyState.SAFE
+        def request_stop(self, execution_id): pass
+        @property
+        def active_lease(self): return EndpointLease("ep_e", "dev_e", session, 1, 1, "exec_e", frozenset(), 1, epoch)
+        def acquire_lease(self, lease): pass
+        def release_lease(self, session_id): pass
+        def submit_command(self, cmd): pass
+
+    class MockDevice(IDevice):
+        def __init__(self):
+            self._state = DeviceState.UNREGISTERED
+        @property
+        def device_id(self): return "dev_e"
+        @property
+        def physical_id(self): return "phys_e"
+        @property
+        def device_type(self): return DeviceType.ACTUATOR
+        @property
+        def state(self): return self._state
+        @state.setter
+        def state(self, val): self._state = val
+        @property
+        def capabilities(self): return tuple()
+        @property
+        def endpoints(self): return (MockEndpoint(),)
+        def initialize(self, acc): pass
+        def start(self): pass
+        def stop(self, acc): pass
+        def health(self): pass
+
+    dev = MockDevice()
+    registry.register(dev, token)
+    
+    manager = DeviceControlManager(
+        registry=registry,
+        capacity_releaser=store.record_operation_terminated
+    )
     transport = TelemetryTransport()
     gate = ExecutionResolutionGate()
     reconciler = TelemetryReconciler(transport, gate)
     
-    # Claim ownership for correct generation
     gate.claim_execution_ownership("exec_e", 1)
 
     def _run_pipeline(event: ExecutionTelemetryEvent, manager_command_override: PhysicalCommand = None):
@@ -364,8 +414,7 @@ def test_evidence_identity_generation_mismatch_rejection(shared_store_path):
             if record.terminal_resolution_status and gate.is_capacity_release_terminal(record.current_state):
                 manager.release_capacity_for_execution(record.execution_id, record.current_state)
 
-    # Base event factory
-    def _make_event(exec_id="exec_e", gen=1, state=CommandState.COMPLETED):
+    def _make_event(exec_id="exec_e", gen=1, state=CommandState.OPERATION_COMPLETED):
         return ExecutionTelemetryEvent(
             event_id="evt_1", endpoint_id="ep_e", session_id=session,
             lifecycle_generation=gen, endpoint_lease_generation=1, execution_id=exec_id,
@@ -375,14 +424,13 @@ def test_evidence_identity_generation_mismatch_rejection(shared_store_path):
             cryptographic_signature=None, fencing_challenge=None
         )
 
-    # 2. Lifecycle generation mismatch -> Rejected at the Gate (never reaches store)
+    # 2. Lifecycle generation mismatch -> Rejected at the Gate
     _run_pipeline(_make_event(gen=999))
-    record_at_gate = gate._records.get("exec_e")
-    assert record_at_gate is not None
-    assert record_at_gate.terminal_resolution_status is False  # Reconciler/Gate ignored it
+    record_at_gate = gate._records["exec_e"]
+    assert record_at_gate.terminal_resolution_status is False
+    assert record_at_gate.current_state == CommandState.ACCEPTED
 
-    # Base command factory to inject into manager for store mismatch proofs
-    def _make_cmd(d_epoch=1, c_epoch=1, op_id="op_e", exec_id="exec_e"):
+    def _make_cmd(d_epoch=1, c_epoch=epoch, op_id="op_e", exec_id="exec_e"):
         return PhysicalCommand(
             device_epoch=d_epoch, controller_epoch=c_epoch, physical_operation_id=op_id,
             command_nonce="nonce_e", endpoint_id="ep_e", session_id=session,
@@ -390,11 +438,12 @@ def test_evidence_identity_generation_mismatch_rejection(shared_store_path):
             capability_scope=frozenset(), command_sequence=1, operation="test", parameters={}
         )
 
-    # 3. Controller epoch mismatch -> Rejected by Store
-    with pytest.raises(PersistenceTerminationConflictError):
-        _run_pipeline(_make_event(), manager_command_override=_make_cmd(c_epoch=2))
+    from holomed.persistence.exceptions import PersistenceEpochMismatchError
+
+    # 3. Controller epoch mismatch -> Rejected by Store (canonical identity check)
+    with pytest.raises(PersistenceEpochMismatchError):
+        _run_pipeline(_make_event(), manager_command_override=_make_cmd(c_epoch=epoch+99))
         
-    # Reset gate for next attempt since we want it to process another terminal event
     gate._records.pop("exec_e", None)
     gate.claim_execution_ownership("exec_e", 1)
 

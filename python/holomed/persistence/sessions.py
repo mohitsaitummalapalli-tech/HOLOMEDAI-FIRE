@@ -281,6 +281,11 @@ class DurableSessionStore:
         if rec.status != SessionStatus.ACTIVE:
             raise PersistenceLifecycleError(f"Cannot record admission for inactive session {session_id!r}")
             
+        if controller_epoch != self._epoch_id:
+            raise PersistenceEpochMismatchError(
+                f"Canonical physical identity controller epoch {controller_epoch} does not match authoritative epoch {self._epoch_id}"
+            )
+            
         canonical_identity = (device_id, device_epoch, controller_epoch, physical_operation_id, command_nonce)
         from holomed.devices.control.models import GLOBAL_PHYSICAL_OPERATION_CAPACITY, ENDPOINT_LOCAL_PHYSICAL_CAPACITY
         
@@ -371,6 +376,15 @@ class DurableSessionStore:
         rec = self._sessions[session_id]
         if rec.status != SessionStatus.ACTIVE:
             raise PersistenceLifecycleError(f"Cannot record termination for inactive session {session_id!r}")
+            
+        if controller_epoch != self._epoch_id:
+            
+            raise PersistenceEpochMismatchError(
+            
+                f'Canonical physical identity controller epoch {controller_epoch} does not match authoritative epoch {self._epoch_id}'
+            
+            )
+
             
         canonical_identity = (device_id, device_epoch, controller_epoch, physical_operation_id, command_nonce)
         

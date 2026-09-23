@@ -16,23 +16,21 @@ def run_epoch_race_worker_a(store_path: str, epoch: int):
             break
         except PermissionError:
             time.sleep(0.01)
+            
+    # Process A: acquires epoch authority lock, signals LOCK_HELD
+    # We monkeypatch ControllerAuthorityStore._acquire_lock
+    original_acquire = ControllerAuthorityStore._acquire_lock
     
-    # Monkeypatch writer.append_entry to signal and wait deterministically
-    writer = store._writers["proof_session"]
-    original_append = writer.append_entry
-    
-    def slow_append(*args, **kwargs):
-        # Signal lock is held
+    def slow_acquire(self, fd):
+        original_acquire(self, fd)
         (path / "lock_held.flag").touch()
-        # Wait for B to tell us to release
-        start = time.time()
-        while not (path / "a_can_release.flag").exists():
+        # Wait for B to attempt acquire
+        while not (path / "acquire_attempted.flag").exists():
             time.sleep(0.01)
-            if time.time() - start > 10.0:
-                break
-        return original_append(*args, **kwargs)
+        # Signal release and then release
+        (path / "a_can_release.flag").touch()
         
-    writer.append_entry = slow_append
+    ControllerAuthorityStore._acquire_lock = slow_acquire
     
     try:
         store.record_operation_admitted(
@@ -49,13 +47,12 @@ def run_epoch_race_worker_b(store_path: str):
     authority = ControllerAuthorityStore(path)
     
     # Wait for A to hold the lock
-    flag = path / "lock_held.flag"
-    while not flag.exists():
+    while not (path / "lock_held.flag").exists():
         time.sleep(0.01)
             
-    # Monkeypatch _acquire_lock to deterministically prove it's locked
     original_acquire = ControllerAuthorityStore._acquire_lock
     def test_acquire(self, fd):
+        # Process B signals ACQUIRE_ATTEMPTED (using non-blocking check)
         try:
             if os.name == "nt":
                 import msvcrt
@@ -73,15 +70,17 @@ def run_epoch_race_worker_b(store_path: str):
         except OSError:
             pass # Proven locked!
             
-        # Signal A to release
-        (path / "a_can_release.flag").touch()
-        # Now do the blocking acquire
+        (path / "acquire_attempted.flag").touch()
+        
+        # remains blocked while A holds lock (conceptually we wait for A to signal release)
+        while not (path / "a_can_release.flag").exists():
+            time.sleep(0.01)
+            
         original_acquire(self, fd)
+        (path / "acquired.flag").touch()
         
     ControllerAuthorityStore._acquire_lock = test_acquire
-    
     authority.allocate_next_epoch()
-    
     print("ADVANCED")
     
 def run_capacity_worker(store_path: str, epoch: int, endpoint_id: str, op_id: str):
