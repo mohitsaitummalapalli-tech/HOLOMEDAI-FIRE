@@ -67,7 +67,17 @@ def run_epoch_race_worker_b(store_path: str):
                 fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 fcntl.flock(fd, fcntl.LOCK_UN)
                 raise RuntimeError("Lock was not held by A!")
-        except OSError:
+        except OSError as e:
+            if os.name == "nt" and e.errno not in (13, 36, 0): # EACCES or EDEADLOCK or EINVAL (sometimes Windows locking)
+                # Actually, Windows msvcrt.locking error errno could be Permission denied (13) or Deadlock (36). 
+                # We can just verify it is an OSError and re-raise if it isn't one of those.
+                import errno
+                if e.errno not in (errno.EACCES, errno.EDEADLK, errno.EINVAL, 0):
+                    raise
+            elif os.name != "nt":
+                import errno
+                if e.errno not in (errno.EWOULDBLOCK, errno.EACCES, errno.EAGAIN):
+                    raise
             pass # Proven locked!
             
         (path / "acquire_attempted.flag").touch()
