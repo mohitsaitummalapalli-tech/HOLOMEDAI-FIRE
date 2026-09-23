@@ -614,3 +614,50 @@ def test_submission_fence_closes_toctou(shared_store_path):
 
     assert len(admissions) == 1
     assert len(terminations) == 0
+
+
+
+
+def test_durable_admission_closes_toctou(shared_store_path):
+    """
+    Test Blocker C: Prove the controller-epoch TOCTOU defense at the durable admission boundary.
+    Process A reads authoritative controller_epoch = E.
+    Process B advances durable authority to E+1.
+    Process A attempts admission using E.
+    Process A MUST be rejected at the durable admission boundary before ADMITTED append.
+    """
+    from holomed.persistence.sessions import DurableSessionStore
+    from holomed.devices.models import EndpointLease, PhysicalCommand
+    import pytest
+    from holomed.persistence.exceptions import PersistenceEpochMismatchError
+
+    authority, epoch, session = setup_test_store(shared_store_path)
+    store = DurableSessionStore(shared_store_path, epoch_id=epoch)
+    store.restore_session_from_disk(session)
+
+    # Process A reads epoch = E (which is `epoch`)
+    
+    # Process B advances durable authority to E+1
+    next_epoch = authority.allocate_next_epoch()
+    
+    # Process A attempts admission using E
+    with pytest.raises(PersistenceEpochMismatchError):
+        store.record_operation_admitted(
+            session_id=session,
+            endpoint_id="ep_admission_fence",
+            device_id="dev_fence",
+            device_epoch=1,
+            controller_epoch=epoch, # STALE EPOCH
+            physical_operation_id="op_123",
+            command_nonce="nonce_123",
+            execution_id="exec_1",
+            command_name="test_actuate"
+        )
+        
+    # Prove NO ADMITTED entry and NO capacity corruption
+    assert store.get_active_physical_operations() == 0
+    
+    from holomed.persistence.journal import JournalReader, JournalEntryType
+    entries, _ = JournalReader.read_and_recover_journal(shared_store_path / f"{session}.jsonl")
+    admissions = [e for e in entries if e.entry_type == JournalEntryType.OPERATION_ADMITTED]
+    assert len(admissions) == 0
