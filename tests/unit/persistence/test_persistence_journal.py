@@ -149,3 +149,25 @@ def test_path_traversal_rejection(temp_storage_root: Path) -> None:
 
     with pytest.raises(PersistenceSecurityError):
         validate_session_path(temp_storage_root, "sess/subfolder")
+
+
+def test_fsync_failure_propagation(temp_storage_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify that fsync OSError propagates and prevents successful write."""
+    from holomed.persistence.journal import JournalWriter, JournalEntryType
+    
+    writer = JournalWriter(temp_storage_root, "sess_fsync_fail", 1)
+    
+    # Mock os.fsync to raise OSError
+    def mock_fsync(fd):
+        raise OSError("Simulated fsync failure")
+        
+    monkeypatch.setattr("os.fsync", mock_fsync)
+    
+    with pytest.raises(OSError, match="Simulated fsync failure"):
+        writer.append_entry(
+            entry_type=JournalEntryType.OPERATION_ADMITTED,
+            sequence_number=None,
+            timestamp_utc="2026-09-01T20:00:00Z",
+            payload={"status": "ADMITTED"},
+            entry_id="op_fsync_fail"
+        )
