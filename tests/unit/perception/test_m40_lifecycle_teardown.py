@@ -95,6 +95,10 @@ class DummyDevice(IDevice):
         return frozenset()
 
     @property
+    def current_epoch(self) -> int:
+        return 1
+
+    @property
     def state(self) -> DeviceState:
         return self._state
 

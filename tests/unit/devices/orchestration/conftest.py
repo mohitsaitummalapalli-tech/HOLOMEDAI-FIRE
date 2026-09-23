@@ -69,6 +69,10 @@ class DummyOrchestrationDevice(IDevice):
         return self._device_type
 
     @property
+    def current_epoch(self) -> int:
+        return 1
+
+    @property
     def state(self) -> DeviceState:
         return self._state
 

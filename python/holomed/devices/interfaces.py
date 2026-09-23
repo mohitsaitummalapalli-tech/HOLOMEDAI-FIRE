@@ -148,6 +148,11 @@ class IDevice(abc.ABC):
 
     @property
     @abc.abstractmethod
+    def current_epoch(self) -> int:
+        """The authoritative current epoch of this hardware device, incremented on hardware reset/reconnection."""
+
+    @property
+    @abc.abstractmethod
     def state(self) -> DeviceState:
         """Current lifecycle state of the device."""
 

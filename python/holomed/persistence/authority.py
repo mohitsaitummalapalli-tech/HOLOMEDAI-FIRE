@@ -100,9 +100,9 @@ class ControllerAuthorityStore:
             finally:
                 self._release_lock(fd)
 
-    def read_current_epoch(self) -> int:
+    def read_current_epoch(self, allow_missing: bool = False) -> int:
         """Read the current authoritative epoch."""
-        return self._read_current_epoch_unlocked(allow_missing=False)
+        return self._read_current_epoch_unlocked(allow_missing=allow_missing)
 
     def assert_authoritative(self, epoch_id: int) -> None:
         """Assert that the provided epoch matches the durable authoritative epoch."""

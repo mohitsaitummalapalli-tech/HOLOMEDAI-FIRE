@@ -72,6 +72,7 @@ class DeviceControlManager(IService):
         capacity_checker: Optional[Callable[[str], int]] = None,
         capacity_releaser: Optional[Callable[[str, str, int, int, str, str, str], None]] = None,
         capacity_admitter: Optional[Callable[[str, str, str, int, int, str, str, str, str], None]] = None,
+        authoritative_epoch_provider: Optional[Callable[[], int]] = None,
     ) -> None:
         self._registry = registry
         self._resolution_gate = resolution_gate
@@ -87,6 +88,7 @@ class DeviceControlManager(IService):
         self._capacity_checker = capacity_checker
         self._capacity_releaser = capacity_releaser
         self._capacity_admitter = capacity_admitter
+        self._authoritative_epoch_provider = authoritative_epoch_provider
         self._state: ServiceState = ServiceState.UNINITIALIZED
 
         # Resources & Subsystems
@@ -154,6 +156,7 @@ class DeviceControlManager(IService):
         self._resources = OwnedResourceSet(self.name, context.epoch_id)
         self._resources.acquire("control.registry")
         self._resources.acquire("control.idempotency")
+        self._epoch_id = context.epoch_id
 
         self._state = ServiceState.INITIALIZED
 
@@ -415,12 +418,15 @@ class DeviceControlManager(IService):
                 )
                 seq = self._lease_registry.next_command_sequence(endpoint.endpoint_id)
 
+                c_epoch = self._authoritative_epoch_provider() if self._authoritative_epoch_provider else self._epoch_id
+                d_epoch = device.current_epoch
+
                 physical_cmd = PhysicalCommand(
-                    device_epoch=0,
-                    controller_epoch=0,
+                    device_epoch=d_epoch,
+                    controller_epoch=c_epoch,
                     physical_operation_id=str(uuid.uuid4()),
                     command_nonce=str(uuid.uuid4()),
-        endpoint_id=endpoint.endpoint_id,
+                    endpoint_id=endpoint.endpoint_id,
                     session_id=session_id,
                     lifecycle_generation=lifecycle_generation,
                     endpoint_lease_generation=lease.endpoint_lease_generation,
@@ -436,25 +442,43 @@ class DeviceControlManager(IService):
                     if not isinstance(endpoint, IPhysicalEndpoint):
                         raise ControlCapacityError(f"Endpoint {endpoint.endpoint_id} does not implement IPhysicalEndpoint")
 
+                    # 1. Durable Admission (Acquires persistence locks internally and releases them)
+                    if self._capacity_admitter:
+                        self._capacity_admitter(
+                            session_id,
+                            endpoint.endpoint_id,
+                            device.device_id,
+                            physical_cmd.device_epoch,
+                            physical_cmd.controller_epoch,
+                            physical_cmd.physical_operation_id,
+                            physical_cmd.command_nonce,
+                            execution_id,
+                            command_name
+                        )
+
+                    # 2. Setup endpoint fence if supported (driver injection)
+                    if hasattr(endpoint, "set_epoch_fence") and self._authoritative_epoch_provider:
+                        endpoint.set_epoch_fence(self._authoritative_epoch_provider) # type: ignore
+
+                    # 3. Physical Submission
                     physical_result = endpoint.submit_command(physical_cmd)
+
                     if physical_result.status == SubmissionStatus.ACCEPTED:
-                        # Register deadline. In a real system, timeout is per command. We use 5s here for tests.
+                        # Register deadline
                         with self._timeout_lock:
                             self._deadlines[execution_id] = (time.time() + 5.0, lifecycle_generation)
                             self._active_commands[execution_id] = physical_cmd
-                            
-                        # Record admission in durable journal
-                        if self._capacity_admitter:
-                            self._capacity_admitter(
+                    else:
+                        # Failure Rollback (Case A: Confirmed Absent)
+                        if self._capacity_releaser:
+                            self._capacity_releaser(
                                 session_id,
-                                endpoint.endpoint_id,
                                 device.device_id,
                                 physical_cmd.device_epoch,
                                 physical_cmd.controller_epoch,
                                 physical_cmd.physical_operation_id,
                                 physical_cmd.command_nonce,
-                                execution_id,
-                                command_name
+                                "OPERATION_CONFIRMED_ABSENT"
                             )
 
                     canonical_result = self._verifier.validate_and_canonicalize_command_result(

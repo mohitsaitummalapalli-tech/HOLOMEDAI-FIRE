@@ -163,7 +163,7 @@ class TestAllForbiddenTransitions:
             "services": dict(engine.services),
             "service_states": dict(engine.service_states),
             "outstanding_resources": engine.outstanding_resources,
-            "next_epoch_id": engine._authority_store.read_current_epoch() + 1,
+            "next_epoch_id": engine._authority_store.read_current_epoch(allow_missing=True) + 1,
         }
 
     def _assert_unchanged(self, before: dict, engine: RuntimeEngine) -> None:

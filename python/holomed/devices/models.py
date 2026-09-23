@@ -137,6 +137,7 @@ class SubmissionStatus(str, enum.Enum):
     WORKER_UNAVAILABLE = "WORKER_UNAVAILABLE"
     SHUTTING_DOWN = "SHUTTING_DOWN"
     DUPLICATE_REJECTED = "DUPLICATE_REJECTED"
+    REJECTED = "REJECTED"
 
 
 class EventSourceAuthority(str, enum.Enum):

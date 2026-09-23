@@ -147,6 +147,10 @@ class SimulatedPhysicalEndpoint(IPhysicalEndpoint):
                 if self._safety_state != EndpointSafetyState.HARDWARE_INTERLOCKED:
                     self._safety_state = EndpointSafetyState.SAFE_STOPPED
 
+    def set_epoch_fence(self, epoch_provider: Callable[[], int]) -> None:
+        """Driver boundary hook to read current epoch atomically at submission."""
+        self._epoch_provider = epoch_provider
+
     def submit_command(self, command: PhysicalCommand) -> PhysicalCommandResult:
         with self._submit_lock:
             # Lifecycle checks
@@ -183,6 +187,15 @@ class SimulatedPhysicalEndpoint(IPhysicalEndpoint):
                     status=SubmissionStatus.DUPLICATE_REJECTED,
                     details={"actuated_sequence": self._last_accepted_sequence}
                 )
+
+            # Atomic physical fence boundary
+            if getattr(self, "_epoch_provider", None):
+                current = self._epoch_provider()
+                if current != command.controller_epoch:
+                    return PhysicalCommandResult(
+                        status=SubmissionStatus.REJECTED,
+                        details={"error": f"Stale controller epoch: command={command.controller_epoch}, current={current}"}
+                    )
 
             self._last_accepted_sequence = command.command_sequence
 
@@ -233,6 +246,12 @@ class SimulatedPhysicalEndpoint(IPhysicalEndpoint):
                     claimed = self._gate.claim_execution_ownership(command.execution_id, command.lifecycle_generation)
                     if not claimed:
                         # Timeout committed first
+                        self._command_queue.task_done()
+                        continue
+
+                # Check fence again upon actuation to simulate internal driver validation
+                if getattr(self, "_epoch_provider", None):
+                    if self._epoch_provider() != command.controller_epoch:
                         self._command_queue.task_done()
                         continue
 
@@ -356,6 +375,10 @@ class SimulatedDevice(IDevice):
     @property
     def device_type(self) -> DeviceType:
         return self._device_type
+
+    @property
+    def current_epoch(self) -> int:
+        return 1
 
     @property
     def state(self) -> DeviceState:

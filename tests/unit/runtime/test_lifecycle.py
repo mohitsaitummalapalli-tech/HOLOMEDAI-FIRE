@@ -504,7 +504,7 @@ def test_failed_candidate_does_not_consume_epoch_id() -> None:
     with pytest.raises(ServiceLifecycleError):
         engine.initialize(_make_config())
 
-    assert engine._authority_store.read_current_epoch() + 1 == 1
+    assert engine._authority_store.read_current_epoch(allow_missing=True) + 1 == 1
 
     engine._registry.clear()
     engine.register_service(ServiceRegistration("svc.good", lambda: MockService("svc.good"), ()))

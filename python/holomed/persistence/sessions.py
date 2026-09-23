@@ -281,15 +281,10 @@ class DurableSessionStore:
         if rec.status != SessionStatus.ACTIVE:
             raise PersistenceLifecycleError(f"Cannot record admission for inactive session {session_id!r}")
             
-        if controller_epoch != self._epoch_id:
-            raise PersistenceEpochMismatchError(
-                f"Canonical physical identity controller epoch {controller_epoch} does not match authoritative epoch {self._epoch_id}"
-            )
-            
         canonical_identity = (device_id, device_epoch, controller_epoch, physical_operation_id, command_nonce)
         from holomed.devices.control.models import GLOBAL_PHYSICAL_OPERATION_CAPACITY, ENDPOINT_LOCAL_PHYSICAL_CAPACITY
         
-        with self._authority.hold_authority(self._epoch_id):
+        with self._authority.hold_authority(controller_epoch):
             fd = self._acquire_global_lock()
             try:
                 active, terminated = self._reconstruct_reservations_locked()
@@ -377,18 +372,9 @@ class DurableSessionStore:
         if rec.status != SessionStatus.ACTIVE:
             raise PersistenceLifecycleError(f"Cannot record termination for inactive session {session_id!r}")
             
-        if controller_epoch != self._epoch_id:
-            
-            raise PersistenceEpochMismatchError(
-            
-                f'Canonical physical identity controller epoch {controller_epoch} does not match authoritative epoch {self._epoch_id}'
-            
-            )
-
-            
         canonical_identity = (device_id, device_epoch, controller_epoch, physical_operation_id, command_nonce)
         
-        with self._authority.hold_authority(self._epoch_id):
+        with self._authority.hold_authority(controller_epoch):
             fd = self._acquire_global_lock()
             try:
                 active, terminated = self._reconstruct_reservations_locked()
