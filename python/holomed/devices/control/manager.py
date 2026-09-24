@@ -45,7 +45,17 @@ from holomed.runtime.exceptions import ServiceLifecycleError
 from holomed.runtime.logging import SecretFilter, StructuredLogger
 from holomed.runtime.models import HealthStatus, OwnedResourceSet, ServiceHealth
 from holomed.runtime.service import IService, ServiceState
+import enum
+from typing import TYPE_CHECKING
 
+if TYPE_CHECKING:
+    from holomed.devices.control.recovery import StateRehydrationEngine
+
+class AdmissionState(enum.Enum):
+    INITIALIZING = "INITIALIZING"
+    REHYDRATING = "REHYDRATING"
+    READY = "READY"
+    FAILED = "FAILED"
 
 class DeviceControlManager(IService):
     """Central controller and mediator for device commands and queries.
@@ -73,6 +83,7 @@ class DeviceControlManager(IService):
         capacity_releaser: Optional[Callable[[str, str, int, int, str, str, str], None]] = None,
         capacity_admitter: Optional[Callable[[str, str, str, int, int, str, str, str, str], None]] = None,
         authoritative_epoch_provider: Optional[Callable[[], int]] = None,
+        rehydration_engine: Optional["StateRehydrationEngine"] = None,
     ) -> None:
         self._registry = registry
         self._resolution_gate = resolution_gate
@@ -90,6 +101,8 @@ class DeviceControlManager(IService):
         self._capacity_admitter = capacity_admitter
         self._authoritative_epoch_provider = authoritative_epoch_provider
         self._state: ServiceState = ServiceState.UNINITIALIZED
+        self._admission_state = AdmissionState.INITIALIZING
+        self._rehydration_engine = rehydration_engine
 
         # Resources & Subsystems
         self._resources: Optional[OwnedResourceSet] = None
@@ -167,11 +180,28 @@ class DeviceControlManager(IService):
         if self._state != ServiceState.INITIALIZED:
             raise ServiceLifecycleError(f"Cannot start DeviceControlManager in state {self._state.name}, expected INITIALIZED")
 
-        self._timeout_shutdown.clear()
-        self._timeout_thread = threading.Thread(target=self._timeout_loop, name="dcm_timeouts", daemon=True)
-        self._timeout_thread.start()
-
+        self._admission_state = AdmissionState.REHYDRATING
         self._state = ServiceState.STARTED
+        
+        try:
+            if self._rehydration_engine:
+                if not self._authoritative_epoch_provider:
+                    raise ServiceLifecycleError("Rehydration requires authoritative_epoch_provider")
+                auth_epoch = self._authoritative_epoch_provider()
+                if auth_epoch is None:
+                    raise ServiceLifecycleError("Authoritative epoch missing during startup")
+                
+                self._rehydration_engine.rehydrate_controller_state(current_session_id="system_boot")
+
+            self._timeout_shutdown.clear()
+            self._timeout_thread = threading.Thread(target=self._timeout_loop, name="dcm_timeouts", daemon=True)
+            self._timeout_thread.start()
+
+            self._admission_state = AdmissionState.READY
+        except Exception as e:
+            self._admission_state = AdmissionState.FAILED
+            self._state = ServiceState.FAILED
+            raise ServiceLifecycleError(f"Startup rehydration failed: {e}") from e
 
     def stop(self) -> None:
         """Tear down all resources and clear in-memory caches."""
@@ -354,6 +384,14 @@ class DeviceControlManager(IService):
         is_physical = bool(req_cap and req_cap.requires_physical_endpoint)
 
         if is_physical:
+            if self._admission_state != AdmissionState.READY:
+                return create_error_response(
+                    request=envelope,
+                    responder_source=self.name,
+                    error_code="ERR_CONTROL_NOT_READY",
+                    error_message=f"Physical admission forbidden: control plane is {self._admission_state.value}",
+                )
+
             session_id = payload.get("session_id")
             lifecycle_generation = payload.get("session_lifecycle_generation")
             execution_id = payload.get("execution_id")
@@ -622,6 +660,21 @@ class DeviceControlManager(IService):
 
                     # Free from lease registry
                     self._lease_registry.release_lease(endpoint, session_id)
+
+    def handle_device_restart(self, device_id: str, new_device_epoch: int) -> None:
+        """Handles explicit device restarts and epoch changes."""
+        if not self._rehydration_engine:
+            return
+            
+        try:
+            self._rehydration_engine.rehydrate_device_state(
+                current_session_id="device_restart", 
+                device_id=device_id, 
+                new_device_epoch=new_device_epoch
+            )
+        except Exception as e:
+            self._logger.error("Device rehydration failed", extra={"device_id": device_id, "error": str(e)})
+            raise DeviceControlError(f"Device rehydration failed for {device_id}: {e}") from e
 
     def preempt_execution(self, device_id: str, endpoint_id: str, execution_id: str, lifecycle_generation: int) -> None:
         """Issue an authoritative preemption routing request for a specific execution."""
