@@ -320,7 +320,7 @@ def test_end_to_end_recovery_engine(tmp_path):
     epoch2 = auth.read_current_epoch()
     store2 = DurableSessionStore(store_dir, epoch2)
     session2 = store2.start_session("sess2", epoch2)
-    store2.restore_session_from_disk(session1.session_id)
+    # Intentionally do not manually restore session1 - engine should handle it.
 
     # The active ops snapshot should show the old operation
     assert store2.get_active_physical_operations() == 1
@@ -337,8 +337,8 @@ def test_end_to_end_recovery_engine(tmp_path):
     canonical = ("dev1", 1, epoch1, "op_e2e", "nonce_e2e")
     assert active[canonical]["resolution"] == "FAULTED_UNKNOWN"
 
-    # Check journal
-    journal_file = store_dir / f"{session2.session_id}.jsonl"
+    # Check journal (MUST be routed to the ORIGINAL session)
+    journal_file = store_dir / f"{session1.session_id}.jsonl"
     with open(journal_file, "r") as f:
         lines = f.readlines()
 
@@ -346,3 +346,5 @@ def test_end_to_end_recovery_engine(tmp_path):
     assert last_line["entry_type"] == "OPERATION_TERMINATED"
     assert last_line["payload"]["resolution"] == "FAULTED_UNKNOWN"
     assert last_line["payload"]["controller_epoch"] == epoch1
+    assert last_line["epoch_id"] == epoch2  # Written with recovery authority
+    assert last_line["session_id"] == session1.session_id

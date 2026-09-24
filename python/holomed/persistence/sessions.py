@@ -235,7 +235,9 @@ class DurableSessionStore:
                         payload.get("physical_operation_id"),
                         payload.get("command_nonce")
                     )
-                    active_reservations[canon] = dict(payload)
+                    payload_with_session = dict(payload)
+                    payload_with_session["_original_session_id"] = session_id
+                    active_reservations[canon] = payload_with_session
                 elif entry.entry_type == JournalEntryType.OPERATION_TERMINATED:
                     payload = entry.payload
                     canon = (

@@ -41,8 +41,13 @@ class StateRehydrationEngine:
             if resolution in {"FAULTED_UNKNOWN", "QUARANTINED"}:
                 continue
                 
+            original_session_id = payload.get("_original_session_id", current_session_id)
+            
+            # Ensure the original session is available in the store
+            self._session_store.restore_session_from_disk(original_session_id)
+            
             self._session_store.record_operation_terminated(
-                session_id=current_session_id,
+                session_id=original_session_id,
                 device_id=device_id,
                 device_epoch=device_epoch,
                 controller_epoch=controller_epoch,
@@ -74,8 +79,11 @@ class StateRehydrationEngine:
                 if resolution in {"FAULTED_UNKNOWN", "QUARANTINED"}:
                     continue
                     
+                original_session_id = payload.get("_original_session_id", current_session_id)
+                self._session_store.restore_session_from_disk(original_session_id)
+                
                 self._session_store.record_operation_terminated(
-                    session_id=current_session_id,
+                    session_id=original_session_id,
                     device_id=op_device_id,
                     device_epoch=op_device_epoch,
                     controller_epoch=op_controller_epoch,
