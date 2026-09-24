@@ -532,9 +532,9 @@ def test_faulted_unknown_capacity_preserved(components):
     assert record.terminal_resolution_status is True
     assert record.current_state == CommandState.FAULTED_UNKNOWN
 
-    # 3. Daemon cycle — FAULTED_UNKNOWN is in daemon's invalid_terminations set
-    # So it should NOT be written to session store as a termination.
-    # Instead, capacity remains held.
+    # 3. Daemon cycle — FAULTED_UNKNOWN is written to the durable journal
+    # because it is a valid terminal resolution. However, DurableSessionStore
+    # preserves physical capacity for it during reconstruction.
     daemon.run_reconciliation_cycle()
 
     # Capacity still held (FAULTED_UNKNOWN preserves capacity)
@@ -571,3 +571,35 @@ def test_operation_completed_releases_exactly_once(components):
     daemon.run_reconciliation_cycle()
     assert session_store.get_active_physical_operations() == 0
 
+def test_evidence_identity_mismatch_rejection(components):
+    """E2E proof: Mismatched evidence identity (device_id, operation_id) is rejected."""
+    transport, gate, daemon, session_store = components
+    
+    epoch = session_store._epoch_id
+    session_id = session_store.start_session("evidence-mismatch", epoch).session_id
+    execution_id = "exec-evidence"
+    
+    session_store.record_operation_admitted(
+        endpoint_id="end-1", session_id=session_id, device_id="dev-ev",
+        device_epoch=1, controller_epoch=epoch, physical_operation_id="op-ev",
+        command_nonce="nonce-ev", execution_id=execution_id, command_name="cmd"
+    )
+    
+    from holomed.persistence.exceptions import PersistenceTerminationConflictError
+    import pytest
+    
+    # Try to terminate with wrong device_id
+    with pytest.raises(PersistenceTerminationConflictError, match="not currently admitted"):
+        session_store.record_operation_terminated(
+            session_id=session_id, device_id="WRONG_DEVICE", device_epoch=1,
+            controller_epoch=epoch, physical_operation_id="op-ev", command_nonce="nonce-ev",
+            resolution="OPERATION_COMPLETED"
+        )
+        
+    # Try to terminate with wrong physical_operation_id
+    with pytest.raises(PersistenceTerminationConflictError, match="not currently admitted"):
+        session_store.record_operation_terminated(
+            session_id=session_id, device_id="dev-ev", device_epoch=1,
+            controller_epoch=epoch, physical_operation_id="WRONG_OP", command_nonce="nonce-ev",
+            resolution="OPERATION_COMPLETED"
+        )
