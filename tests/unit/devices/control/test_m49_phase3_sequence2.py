@@ -5,7 +5,8 @@ import time
 from typing import Optional
 
 from holomed.devices.control.manager import DeviceControlManager, AdmissionState
-from holomed.devices.registry import DeviceRegistry
+from holomed.configuration.models import AppConfig, EnvironmentProfile, LogLevel
+from holomed.devices.registry import DeviceRegistry, RegistryAuthorityToken
 from holomed.runtime.context import RuntimeContext
 from holomed.runtime.service import ServiceState
 from holomed.runtime.exceptions import ServiceLifecycleError
@@ -42,7 +43,7 @@ class MockRehydrationEngine:
 
 def test_startup_rehydration_success():
     """Verify DeviceControlManager properly establishes readiness gates on successful start."""
-    registry = DeviceRegistry("token")
+    registry = DeviceRegistry(RegistryAuthorityToken())
     engine = MockRehydrationEngine()
     
     manager = DeviceControlManager(
@@ -51,7 +52,16 @@ def test_startup_rehydration_success():
         rehydration_engine=engine  # type: ignore
     )
     
-    context = RuntimeContext(app_config={}, epoch_id=42)
+    config = AppConfig(
+        app_name="Test",
+        environment=EnvironmentProfile.TESTING,
+        host="127.0.0.1",
+        port=8090,
+        log_level=LogLevel.DEBUG,
+        gemini_api_key=None,
+        protocol_version="1.0"
+    )
+    context = RuntimeContext(app_config=config, epoch_id=42)
     manager.initialize(context)
     assert manager._state == ServiceState.INITIALIZED
     
@@ -63,7 +73,7 @@ def test_startup_rehydration_success():
 
 def test_startup_rehydration_failure():
     """Verify DeviceControlManager fails closed if rehydration fails."""
-    registry = DeviceRegistry("token")
+    registry = DeviceRegistry(RegistryAuthorityToken())
     engine = MockRehydrationEngine(should_fail=True)
     
     manager = DeviceControlManager(
@@ -72,7 +82,16 @@ def test_startup_rehydration_failure():
         rehydration_engine=engine  # type: ignore
     )
     
-    context = RuntimeContext(app_config={}, epoch_id=42)
+    config = AppConfig(
+        app_name="Test",
+        environment=EnvironmentProfile.TESTING,
+        host="127.0.0.1",
+        port=8090,
+        log_level=LogLevel.DEBUG,
+        gemini_api_key=None,
+        protocol_version="1.0"
+    )
+    context = RuntimeContext(app_config=config, epoch_id=42)
     manager.initialize(context)
     
     with pytest.raises(ServiceLifecycleError, match="Startup rehydration failed"):
@@ -83,16 +102,25 @@ def test_startup_rehydration_failure():
 
 def test_startup_rehydration_missing_epoch():
     """Verify DeviceControlManager fails closed if authoritative epoch is missing."""
-    registry = DeviceRegistry("token")
+    registry = DeviceRegistry(RegistryAuthorityToken())
     engine = MockRehydrationEngine()
     
     manager = DeviceControlManager(
         registry=registry,
-        authoritative_epoch_provider=lambda: None,
+        authoritative_epoch_provider=lambda: None, # type: ignore
         rehydration_engine=engine  # type: ignore
     )
     
-    context = RuntimeContext(app_config={}, epoch_id=42)
+    config = AppConfig(
+        app_name="Test",
+        environment=EnvironmentProfile.TESTING,
+        host="127.0.0.1",
+        port=8090,
+        log_level=LogLevel.DEBUG,
+        gemini_api_key=None,
+        protocol_version="1.0"
+    )
+    context = RuntimeContext(app_config=config, epoch_id=42)
     manager.initialize(context)
     
     with pytest.raises(ServiceLifecycleError, match="Authoritative epoch missing"):
@@ -103,7 +131,7 @@ def test_startup_rehydration_missing_epoch():
 
 def test_concurrent_admission_race():
     """Verify physical commands are rejected while rehydration is in progress."""
-    registry = DeviceRegistry("token")
+    registry = DeviceRegistry(RegistryAuthorityToken())
     entry_event = threading.Event()
     exit_event = threading.Event()
     engine = MockRehydrationEngine(entry_event=entry_event, exit_event=exit_event)
@@ -114,7 +142,16 @@ def test_concurrent_admission_race():
         rehydration_engine=engine  # type: ignore
     )
     
-    context = RuntimeContext(app_config={}, epoch_id=42)
+    config = AppConfig(
+        app_name="Test",
+        environment=EnvironmentProfile.TESTING,
+        host="127.0.0.1",
+        port=8090,
+        log_level=LogLevel.DEBUG,
+        gemini_api_key=None,
+        protocol_version="1.0"
+    )
+    context = RuntimeContext(app_config=config, epoch_id=42)
     manager.initialize(context)
     
     # We will start the manager in a background thread and attempt to admit a command while it is rehydrating
@@ -187,7 +224,7 @@ def test_concurrent_admission_race():
 
 def test_device_restart_quarantine():
     """Verify handle_device_restart invokes the rehydration engine for the device."""
-    registry = DeviceRegistry("token")
+    registry = DeviceRegistry(RegistryAuthorityToken())
     engine = MockRehydrationEngine()
     
     manager = DeviceControlManager(

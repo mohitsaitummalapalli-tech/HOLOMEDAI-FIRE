@@ -50,6 +50,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from holomed.devices.control.recovery import StateRehydrationEngine
+    from holomed.devices.control.daemon import ReconciliationDaemon
 
 class AdmissionState(enum.Enum):
     INITIALIZING = "INITIALIZING"
@@ -84,6 +85,7 @@ class DeviceControlManager(IService):
         capacity_admitter: Optional[Callable[[str, str, str, int, int, str, str, str, str], None]] = None,
         authoritative_epoch_provider: Optional[Callable[[], int]] = None,
         rehydration_engine: Optional["StateRehydrationEngine"] = None,
+        reconciliation_daemon: Optional["ReconciliationDaemon"] = None,
     ) -> None:
         self._registry = registry
         self._resolution_gate = resolution_gate
@@ -103,6 +105,7 @@ class DeviceControlManager(IService):
         self._state: ServiceState = ServiceState.UNINITIALIZED
         self._admission_state = AdmissionState.INITIALIZING
         self._rehydration_engine = rehydration_engine
+        self._reconciliation_daemon = reconciliation_daemon
 
         # Resources & Subsystems
         self._resources: Optional[OwnedResourceSet] = None
@@ -198,6 +201,9 @@ class DeviceControlManager(IService):
             self._timeout_thread = threading.Thread(target=self._timeout_loop, name="dcm_timeouts", daemon=True)
             self._timeout_thread.start()
 
+            if self._reconciliation_daemon:
+                self._reconciliation_daemon.start()
+
             self._admission_state = AdmissionState.READY
         except Exception as e:
             self._admission_state = AdmissionState.FAILED
@@ -208,6 +214,9 @@ class DeviceControlManager(IService):
         """Tear down all resources and clear in-memory caches."""
         if self._state in (ServiceState.STOPPED, ServiceState.UNINITIALIZED):
             return
+
+        if self._reconciliation_daemon:
+            self._reconciliation_daemon.stop()
 
         self._timeout_shutdown.set()
         if self._timeout_thread:
