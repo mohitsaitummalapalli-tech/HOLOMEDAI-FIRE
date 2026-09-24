@@ -138,6 +138,17 @@ Resolve orphaned operations -> FAULTED_UNKNOWN / QUARANTINE
 - **Capacity Effect:** Decrements global and endpoint physical capacity by 1.
 - **Evidence Requirement:** `DRIVER_ASSERTED_SOFTWARE_EVIDENCE`.
 
+### G. FAULTED_UNKNOWN Lifecycle
+- **Definition:** Represents a state where the control plane has lost track of the physical operation's actual state (e.g. timeout, controller crash, device epoch rollover) and cannot safely assume it has terminated.
+- **Persisted/Transient:** Strictly persisted as a terminal resolution in the session journal.
+- **Terminality:** It is technically a terminal software state (the operation tracking is ended), BUT it implies an unknown physical state.
+- **Capacity-Holding:** Retains physical capacity globally and locally on the endpoint. Does NOT release capacity.
+- **Ownership:** Control Plane (Wait/Timeout) -> Manual Operator / Quarantine System.
+- **Legal Transitions:** 
+  - `RUNNING` / `ADMITTED` -> `FAULTED_UNKNOWN`
+  - `FAULTED_UNKNOWN` -> `QUARANTINED` -> `MANUAL_RECOVERY_REQUIRED`
+- **Evidence Requirements:** Control plane timeout, epoch mismatch, or controller crash (process-level evidence), rather than device telemetry.
+
 ## 10. Failure Matrix Implementation Contracts
 
 | Trigger | Detection Boundary | Current State | Required Next State | Durable Evidence | Capacity Effect | Physical Ownership Effect | Recovery Action | Retry/Idempotency | Test |

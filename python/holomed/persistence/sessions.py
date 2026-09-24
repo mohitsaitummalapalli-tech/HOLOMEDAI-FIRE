@@ -246,7 +246,11 @@ class DurableSessionStore:
                         payload.get("command_nonce")
                     )
                     if canon in active_reservations:
-                        del active_reservations[canon]
+                        res = payload.get("resolution")
+                        if res in {"FAULTED_UNKNOWN", "QUARANTINED"}:
+                            active_reservations[canon]["resolution"] = res
+                        else:
+                            del active_reservations[canon]
                     terminated_identities[canon] = payload.get("resolution")
         return active_reservations, terminated_identities
 
@@ -258,6 +262,18 @@ class DurableSessionStore:
         try:
             active, _ = self._reconstruct_reservations_locked()
             return len(active)
+        finally:
+            self._release_global_lock(fd)
+
+    def get_active_operations_snapshot(self) -> dict[tuple, dict]:
+        """Returns a snapshot of all currently active physical operations.
+        
+        Returns a dictionary mapping canonical_identity tuples to their full admission payload.
+        """
+        fd = self._acquire_global_lock()
+        try:
+            active, _ = self._reconstruct_reservations_locked()
+            return dict(active)
         finally:
             self._release_global_lock(fd)
 
@@ -356,7 +372,8 @@ class DurableSessionStore:
         controller_epoch: int,
         physical_operation_id: str,
         command_nonce: str,
-        resolution: str
+        resolution: str,
+        authoritative_epoch: Optional[int] = None
     ) -> None:
         """Atomically record physical operation termination in the durable journal with global lock."""
         invalid_resolutions = {
@@ -373,8 +390,9 @@ class DurableSessionStore:
             raise PersistenceLifecycleError(f"Cannot record termination for inactive session {session_id!r}")
             
         canonical_identity = (device_id, device_epoch, controller_epoch, physical_operation_id, command_nonce)
+        auth_epoch = authoritative_epoch if authoritative_epoch is not None else controller_epoch
         
-        with self._authority.hold_authority(controller_epoch):
+        with self._authority.hold_authority(auth_epoch):
             fd = self._acquire_global_lock()
             try:
                 active, terminated = self._reconstruct_reservations_locked()
@@ -504,7 +522,7 @@ class DurableSessionStore:
         writer = JournalWriter(
             self._storage_root,
             session_id,
-            first_entry.epoch_id,
+            self._epoch_id,
             authoritative_epoch_provider=lambda: self._epoch_id,
         )
         writer._entry_count = len(entries)
