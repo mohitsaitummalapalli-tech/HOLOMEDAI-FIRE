@@ -202,12 +202,14 @@ def test_dispatcher_routes_query_and_invoke_removed(
     # Query tools.status
     q_status = create_query("tools.status", "test_client")
     resp_status = message_dispatcher.dispatch(q_status)
+    assert resp_status is not None
     assert resp_status.message_type.value == "RESPONSE"
     assert resp_status.payload["tool_count"] == 1
 
     # Query tools.registry
     q_reg = create_query("tools.registry", "test_client")
     resp_reg = message_dispatcher.dispatch(q_reg)
+    assert resp_reg is not None
     assert resp_reg.message_type.value == "RESPONSE"
     assert len(resp_reg.payload["tools"]) == 1
 

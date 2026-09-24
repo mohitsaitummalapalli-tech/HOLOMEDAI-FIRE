@@ -203,7 +203,7 @@ class TestAllForbiddenTransitions:
     # -----------------------------------------------------------------------
     def test_initializing_initializing_forbidden(self) -> None:
         """INITIALIZING -> INITIALIZING is explicitly forbidden."""
-        calls: list[RuntimeEngine] = []
+        calls: list[str] = []
 
         class SentinelService(_Svc):
             def initialize(self, context: RuntimeContext) -> None:

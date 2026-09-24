@@ -136,7 +136,7 @@ def test_multimodal_entity_immutability() -> None:
         velocity=(0.1, 0.0, 0.0),
         active_gestures=("PINCH",),
         acoustic_direction=(10.0, 5.0),
-        source_modalities={Modality.VISION, Modality.GESTURE},
+        source_modalities=frozenset({Modality.VISION, Modality.GESTURE}),
         epoch_id=1,
     )
     assert entity.confidence == 0.8889  # 4-decimal round

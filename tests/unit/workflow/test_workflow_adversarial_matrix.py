@@ -168,6 +168,7 @@ def test_secret_redaction_in_diagnostics(
         payload={"session_id": "bad/id/TOP_SECRET_WORKFLOW_TOKEN"},
     )
     resp = message_dispatcher.dispatch(cmd)
+    assert resp is not None
     assert resp.message_type.value == "ERROR"
     assert "TOP_SECRET_WORKFLOW_TOKEN" not in resp.payload["error_message"]
     assert "<redacted>" in resp.payload["error_message"]

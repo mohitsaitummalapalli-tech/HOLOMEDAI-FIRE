@@ -5,6 +5,7 @@ import time
 import pytest
 from typing import Tuple
 
+from unittest.mock import MagicMock
 from holomed.devices.control.manager import DeviceControlManager
 from holomed.devices.control.exceptions import (
     CapabilityUnauthorizedError,
@@ -66,7 +67,7 @@ def m48_system() -> Tuple[DeviceControlManager, DeviceRegistry, SessionManager, 
             return False
         return gate.generation == gen
 
-    manager = DeviceControlManager(registry=registry, session_validator=validator)
+    manager = DeviceControlManager(registry=registry, session_validator=validator, rehydration_engine=MagicMock(), authoritative_epoch_provider=lambda: 1)
     # Temporary monkey-patch to connect events until manager is updated
     def on_stopped(env: MessageEnvelope):
         sess_id = env.payload.get("session_id")

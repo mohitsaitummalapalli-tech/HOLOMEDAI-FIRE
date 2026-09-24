@@ -332,6 +332,7 @@ def test_restart_only_durable_routing(shared_store_path):
 def test_evidence_identity_generation_mismatch_rejection(shared_store_path):
     from holomed.persistence.sessions import DurableSessionStore
     from holomed.persistence.exceptions import PersistenceTerminationConflictError
+    from unittest.mock import MagicMock
     from holomed.devices.control.manager import DeviceControlManager
     from holomed.devices.transport import TelemetryTransport
     from holomed.devices.resolution import ExecutionResolutionGate
@@ -496,6 +497,7 @@ def test_epoch_authority_fail_closed(shared_store_path):
 # ---------------------------------------------------------
 def test_submission_fence_closes_toctou(shared_store_path):
     from holomed.persistence.sessions import DurableSessionStore
+    from unittest.mock import MagicMock
     from holomed.devices.control.manager import DeviceControlManager
     from holomed.devices.models import CommandState, PhysicalCommand, DeviceType, DeviceState, EndpointLease, EndpointSafetyState, EndpointState
     from holomed.devices.registry import DeviceRegistry, RegistryAuthorityToken
@@ -548,7 +550,8 @@ def test_submission_fence_closes_toctou(shared_store_path):
         registry=registry,
         capacity_releaser=store.record_operation_terminated,
         capacity_admitter=store.record_operation_admitted,
-        authoritative_epoch_provider=authority.read_current_epoch
+        authoritative_epoch_provider=authority.read_current_epoch,
+        rehydration_engine=MagicMock()
     )
 
     from holomed.runtime.context import RuntimeContext

@@ -190,12 +190,14 @@ def test_dispatcher_routes(
     # 1. Start workflow via command
     cmd_start = create_command("workflow.start", "client", payload={"session_id": "sess_disp_wf"})
     resp_start = message_dispatcher.dispatch(cmd_start)
+    assert resp_start is not None
     assert resp_start.message_type.value == "RESPONSE"
     assert resp_start.payload["current_phase"] == "PATIENT_CONTEXT"
 
     # 2. Status query
     q_status = create_query("workflow.status", "client", payload={"session_id": "sess_disp_wf"})
     resp_status = message_dispatcher.dispatch(q_status)
+    assert resp_status is not None
     assert resp_status.message_type.value == "RESPONSE"
     assert resp_status.payload["current_phase"] == "PATIENT_CONTEXT"
 
@@ -210,6 +212,7 @@ def test_dispatcher_routes(
         },
     )
     resp_tr = message_dispatcher.dispatch(cmd_tr)
+    assert resp_tr is not None
     assert resp_tr.message_type.value == "RESPONSE"
     assert resp_tr.payload["current_phase"] == "PRE_PROCEDURE_PLANNING"
 
@@ -220,6 +223,7 @@ def test_dispatcher_routes(
         payload={"session_id": "sess_disp_wf", "sequence_number": 2, "reason": "Test abort"},
     )
     resp_ab = message_dispatcher.dispatch(cmd_ab)
+    assert resp_ab is not None
     assert resp_ab.message_type.value == "RESPONSE"
     assert resp_ab.payload["current_phase"] == "ABORTED"
 

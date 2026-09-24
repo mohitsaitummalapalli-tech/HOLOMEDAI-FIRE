@@ -256,15 +256,22 @@ class TestCapsuleModelCorrectness:
         assert math.isclose(c1, 14.0, abs_tol=1e-9)
 
     def test_capsule_clearance_decreases_with_larger_shaft_radius(self) -> None:
-        base_params = dict(
+        c1 = capsule_to_sphere_clearance(
             tip_position=(0.0, 0.0, 0.0),
             shaft_direction=(0.0, 0.0, 1.0),
             shaft_length=100.0,
+            shaft_radius=1.0,
             sphere_center=(20.0, 0.0, 0.0),
             sphere_radius=5.0,
         )
-        c1 = capsule_to_sphere_clearance(**base_params, shaft_radius=1.0)
-        c2 = capsule_to_sphere_clearance(**base_params, shaft_radius=5.0)
+        c2 = capsule_to_sphere_clearance(
+            tip_position=(0.0, 0.0, 0.0),
+            shaft_direction=(0.0, 0.0, 1.0),
+            shaft_length=100.0,
+            shaft_radius=5.0,
+            sphere_center=(20.0, 0.0, 0.0),
+            sphere_radius=5.0,
+        )
         assert c1 > c2
 
     def test_capsule_degenerates_to_point(self) -> None:

@@ -225,6 +225,7 @@ class TestM30CanonicalStatusQuery:
         )
 
         response = disp.dispatch(query)
+        assert response is not None
         assert response.message_type == MessageType.RESPONSE
         assert response.payload["session_id"] == "session_query_01"
         assert response.payload["decision"] == record.decision.value
@@ -260,6 +261,7 @@ class TestM30CanonicalStatusQuery:
         capacity_before = sg.active_sessions_count
 
         response = disp.dispatch(query)
+        assert response is not None
 
         # Check response is fail-closed error response
         assert response.message_type == MessageType.ERROR
@@ -294,6 +296,7 @@ class TestM30CanonicalStatusQuery:
             payload={},
         )
         resp = disp.dispatch(query)
+        assert resp is not None
         assert resp.message_type == MessageType.ERROR
         assert resp.payload["error_code"] == "ERR_INVALID_ARGS"
 
@@ -404,6 +407,7 @@ class TestM30ExecutionGatewayIntegration:
             payload={"session_id": "session_exec_m30"},
         )
         resp = dispatcher.dispatch(query)
+        assert resp is not None
         assert resp.payload["decision"] == gate_status.decision.value
 
     def test_safety_decisions_remain_semantically_identical_across_precedence(self) -> None:
@@ -492,6 +496,7 @@ class TestM30SessionIsolation:
             payload={"session_id": "non_existent_session"},
         )
         resp = disp.dispatch(query)
+        assert resp is not None
         assert resp.message_type == MessageType.ERROR
         assert resp.payload["error_code"] == "ERR_SESSION_NOT_FOUND"
 

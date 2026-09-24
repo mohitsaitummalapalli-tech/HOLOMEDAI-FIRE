@@ -6,6 +6,7 @@ from holomed.devices.control.exceptions import (
     CapabilityUnauthorizedError,
     DeviceCommandValidationError,
 )
+from unittest.mock import MagicMock
 from holomed.devices.control.manager import DeviceControlManager
 from holomed.devices.control.verifier import CommandVerifier
 from holomed.devices.models import (
@@ -26,7 +27,7 @@ from tests.unit.devices.conftest import make_test_context
 def manager_and_device():
     token = RegistryAuthorityToken()
     registry = DeviceRegistry(token=token)
-    manager = DeviceControlManager(registry=registry)
+    manager = DeviceControlManager(registry=registry, rehydration_engine=MagicMock(), authoritative_epoch_provider=lambda: 1)
     ctx = make_test_context(epoch_id=1)
     
     # Create device with a physical capability and endpoint

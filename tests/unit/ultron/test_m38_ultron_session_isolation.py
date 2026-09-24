@@ -394,4 +394,4 @@ def test_prompt_injection_text_remains_data(runtime_context: RuntimeContext) -> 
     for intent in intents:
         assert intent.session_id == "session_A"
         # Intents remain untrusted proposals, not clinical authorization
-        assert intent.action_type in (ActionType.SELECT, ActionType.HIGHLIGHT, ActionType.TRACK, ActionType.ALERT)
+        assert intent.action_type in (ActionType.SELECT, ActionType.HIGHLIGHT, ActionType.FOCUS, ActionType.REQUEST_CONFIRMATION)

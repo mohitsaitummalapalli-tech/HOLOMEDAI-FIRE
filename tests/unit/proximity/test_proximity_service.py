@@ -53,6 +53,7 @@ def _make_started_service(
         secret_filter=secret_filter,
         logger=logger,
     )
+    assert runtime_context is not None
     svc.initialize(runtime_context)
     svc.start()
     return svc

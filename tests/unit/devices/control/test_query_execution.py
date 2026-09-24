@@ -2,6 +2,7 @@
 
 import pytest
 
+from unittest.mock import MagicMock
 from holomed.devices.control.manager import DeviceControlManager
 from holomed.devices.interfaces import RegistryAuthorityToken
 from holomed.devices.models import DeviceState
@@ -19,7 +20,7 @@ def test_query_execution_success() -> None:
     registry.register(device, token)
     device._state = DeviceState.ACTIVE
 
-    manager = DeviceControlManager(registry=registry)
+    manager = DeviceControlManager(registry=registry, rehydration_engine=MagicMock(), authoritative_epoch_provider=lambda: 1)
     ctx = make_test_context(epoch_id=1)
     manager.initialize(ctx)
     manager.start()
@@ -46,7 +47,7 @@ def test_query_execution_success() -> None:
 def test_query_device_not_found() -> None:
     token = RegistryAuthorityToken()
     registry = DeviceRegistry(token)
-    manager = DeviceControlManager(registry=registry)
+    manager = DeviceControlManager(registry=registry, rehydration_engine=MagicMock(), authoritative_epoch_provider=lambda: 1)
     ctx = make_test_context(epoch_id=1)
     manager.initialize(ctx)
     manager.start()
@@ -71,7 +72,7 @@ def test_query_not_found() -> None:
     registry.register(device, token)
     device._state = DeviceState.ACTIVE
 
-    manager = DeviceControlManager(registry=registry)
+    manager = DeviceControlManager(registry=registry, rehydration_engine=MagicMock(), authoritative_epoch_provider=lambda: 1)
     ctx = make_test_context(epoch_id=1)
     manager.initialize(ctx)
     manager.start()

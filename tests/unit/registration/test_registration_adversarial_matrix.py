@@ -155,11 +155,15 @@ def test_replacing_fiducials_resets_state_to_draft(
     cap = _make_reg_cap(srv, "s1", seq=1)
     srv.submit_fiducials("s1", sample_locked_plan.plan_id, sample_cloud, capability=cap, sequence_number=1)
     srv.solve_registration("s1", sample_locked_plan.plan_id, capability=cap, sequence_number=1)
-    assert srv.get_registration("s1").state == RegistrationState.SOLVED
+    reg1 = srv.get_registration("s1")
+    assert reg1 is not None
+    assert reg1.state == RegistrationState.SOLVED
 
     # Re-submit fiducials
     srv.submit_fiducials("s1", sample_locked_plan.plan_id, sample_cloud, capability=cap, sequence_number=1)
-    assert srv.get_registration("s1").state == RegistrationState.DRAFT
+    reg2 = srv.get_registration("s1")
+    assert reg2 is not None
+    assert reg2.state == RegistrationState.DRAFT
 
     cap.invalidate()
     srv.stop()
@@ -279,6 +283,7 @@ def test_secret_filter_redaction_on_registration_errors(
         payload={"session_id": "TOP_SECRET_PATIENT_TOKEN"},
     )
     resp = message_dispatcher.dispatch(q)
+    assert resp is not None
     assert resp.message_type.value == "ERROR"
     assert "TOP_SECRET_PATIENT_TOKEN" not in resp.payload["error_message"]
 

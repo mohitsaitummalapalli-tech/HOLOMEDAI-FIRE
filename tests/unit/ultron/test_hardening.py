@@ -61,16 +61,23 @@ def test_ast_prohibited_import_scan() -> None:
     assert not violations, "Prohibited imports found in M04:\n" + "\n".join(violations)
 
 
+from holomed.runtime.service import IService, ServiceRegistration, compile_topology
+from unittest.mock import MagicMock
+
 def test_kahns_topological_dependency_ordering() -> None:
     """Verify Ultron cleanly compiles in Kahn's topological sort above M01, M02, M03."""
+
+    def mock_factory() -> IService:
+        return MagicMock(spec=IService)
+
     regs = {
-        "device.mgr": ServiceRegistration("device.mgr", lambda: None, ()),
-        "vision.service": ServiceRegistration("vision.service", lambda: None, ("device.mgr",)),
-        "audio.service": ServiceRegistration("audio.service", lambda: None, ("device.mgr",)),
-        "gesture.service": ServiceRegistration("gesture.service", lambda: None, ("vision.service",)),
+        "device.mgr": ServiceRegistration("device.mgr", mock_factory, ()),
+        "vision.service": ServiceRegistration("vision.service", mock_factory, ("device.mgr",)),
+        "audio.service": ServiceRegistration("audio.service", mock_factory, ("device.mgr",)),
+        "gesture.service": ServiceRegistration("gesture.service", mock_factory, ("vision.service",)),
         "ultron.service": ServiceRegistration(
             "ultron.service",
-            lambda: None,
+            mock_factory,
             ("vision.service", "audio.service", "gesture.service"),
         ),
     }

@@ -64,14 +64,21 @@ def test_ast_prohibited_import_scan() -> None:
     assert not violations, "Prohibited imports found in M06:\n" + "\n".join(violations)
 
 
+from holomed.runtime.service import IService, ServiceRegistration, compile_topology
+from unittest.mock import MagicMock
+
 def test_kahns_topological_dependency_ordering() -> None:
     """Verify XRService compiles cleanly in Kahn's sort above M00-M05."""
+
+    def mock_factory() -> IService:
+        return MagicMock(spec=IService)
+
     regs = {
-        "device.mgr": ServiceRegistration("device.mgr", lambda: None, ()),
-        "anatomy.service": ServiceRegistration("anatomy.service", lambda: None, ("device.mgr",)),
+        "device.mgr": ServiceRegistration("device.mgr", mock_factory, ()),
+        "anatomy.service": ServiceRegistration("anatomy.service", mock_factory, ("device.mgr",)),
         "xr.service": ServiceRegistration(
             "xr.service",
-            lambda: None,
+            mock_factory,
             ("device.mgr", "anatomy.service"),
         ),
     }

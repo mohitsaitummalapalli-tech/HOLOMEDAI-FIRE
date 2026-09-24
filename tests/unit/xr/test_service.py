@@ -106,6 +106,7 @@ def test_xr_service_public_operations(
 
     # Reset
     service.reset(epoch_id=1)
+    assert service.scene_graph is not None
     assert service.scene_graph.node_count == 0
 
     with pytest.raises(XREpochMismatchError):

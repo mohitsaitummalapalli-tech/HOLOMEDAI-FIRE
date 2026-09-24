@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from holomed.configuration.models import AppConfig
+from holomed.configuration.models import AppConfig, EnvironmentProfile, LogLevel
 from holomed.core.dispatcher import MessageDispatcher
 from holomed.core.models import DispatcherState
 from holomed.drift.service import DriftService
@@ -39,10 +39,10 @@ def logger(secret_filter: SecretFilter) -> StructuredLogger:
 def runtime_context() -> RuntimeContext:
     config = AppConfig(
         app_name="HoloMed-SafetyGate-Test",
-        environment="TESTING",
+        environment=EnvironmentProfile.TESTING,
         host="127.0.0.1",
         port=8090,
-        log_level="DEBUG",
+        log_level=LogLevel.DEBUG,
         gemini_api_key=None,
         protocol_version="1.0",
     )

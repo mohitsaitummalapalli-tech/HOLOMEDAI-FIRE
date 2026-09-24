@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import pytest
 
-from holomed.configuration.models import AppConfig
+from holomed.configuration.models import AppConfig, EnvironmentProfile, LogLevel
 from holomed.core.dispatcher import MessageDispatcher
 from holomed.execution._capability import _create_execution_capability
 from holomed.planning.models import (
@@ -27,10 +27,10 @@ from holomed.runtime.logging import SecretFilter
 def runtime_context() -> RuntimeContext:
     config = AppConfig(
         app_name="HoloMed-Registration-Test",
-        environment="TESTING",
+        environment=EnvironmentProfile.TESTING,
         host="127.0.0.1",
         port=8090,
-        log_level="DEBUG",
+        log_level=LogLevel.DEBUG,
         gemini_api_key=None,
         protocol_version="1.0",
     )
@@ -134,8 +134,8 @@ def planning_service(
     plan_srv.lock_plan(sample_locked_plan.plan_id, capability=cap_lock)
 
     orig_get = plan_srv.get_plan_for_session
-    def _get_plan_for_session_fixture(sid: str):
-        p = orig_get(sid)
+    def _get_plan_for_session_fixture(session_id: str):
+        p = orig_get(session_id)
         if p is None:
             return plan_srv.get_plan(sample_locked_plan.plan_id)
         return p

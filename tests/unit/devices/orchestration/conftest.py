@@ -8,6 +8,7 @@ import pytest
 
 from holomed.configuration.models import AppConfig, EnvironmentProfile, LogLevel, SecretString
 from holomed.core.dispatcher import MessageDispatcher
+from unittest.mock import MagicMock
 from holomed.devices.control.manager import DeviceControlManager
 from holomed.devices.coordination.coordinator import DeviceCoordinationService
 from holomed.devices.data.processor import DeviceDataProcessor
@@ -133,7 +134,7 @@ def device_subsystem_stack(context: RuntimeContext):
     token = getattr(mgr, "registry_token", None) or getattr(mgr, "_registry_token", None)
 
     # 2. ControlManager
-    ctrl = DeviceControlManager(reg)
+    ctrl = DeviceControlManager(reg, rehydration_engine=MagicMock(), authoritative_epoch_provider=lambda: 1)
     ctrl.initialize(context)
     ctrl.start()
 

@@ -8,6 +8,7 @@ from holomed.devices.control.exceptions import (
     CommandNotFoundError,
     DeviceNotFoundError,
 )
+from unittest.mock import MagicMock
 from holomed.devices.control.manager import DeviceControlManager
 from holomed.devices.interfaces import RecordingDeviceEventSink, RegistryAuthorityToken
 from holomed.devices.models import CapabilityCategory, DeviceCapability, DeviceState
@@ -27,7 +28,7 @@ def test_command_execution_success_and_response_envelope() -> None:
     device._state = DeviceState.ACTIVE
 
     sink = RecordingDeviceEventSink()
-    manager = DeviceControlManager(registry=registry, event_sink=sink)
+    manager = DeviceControlManager(registry=registry, event_sink=sink, rehydration_engine=MagicMock(), authoritative_epoch_provider=lambda: 1)
     ctx = make_test_context(epoch_id=1)
     manager.initialize(ctx)
     manager.start()
@@ -71,7 +72,7 @@ def test_command_handler_exception_redacted_in_error_response() -> None:
     device._state = DeviceState.ACTIVE
 
     filter_secrets = SecretFilter([SecretString("top_secret_credential_xyz")])
-    manager = DeviceControlManager(registry=registry, secret_filter=filter_secrets)
+    manager = DeviceControlManager(registry=registry, secret_filter=filter_secrets, rehydration_engine=MagicMock(), authoritative_epoch_provider=lambda: 1)
     ctx = make_test_context(epoch_id=1)
     manager.initialize(ctx)
     manager.start()
@@ -96,7 +97,7 @@ def test_command_handler_exception_redacted_in_error_response() -> None:
 def test_command_device_not_found() -> None:
     token = RegistryAuthorityToken()
     registry = DeviceRegistry(token)
-    manager = DeviceControlManager(registry=registry)
+    manager = DeviceControlManager(registry=registry, rehydration_engine=MagicMock(), authoritative_epoch_provider=lambda: 1)
     ctx = make_test_context(epoch_id=1)
     manager.initialize(ctx)
     manager.start()
@@ -121,7 +122,7 @@ def test_command_not_found() -> None:
     registry.register(device, token)
     device._state = DeviceState.ACTIVE
 
-    manager = DeviceControlManager(registry=registry)
+    manager = DeviceControlManager(registry=registry, rehydration_engine=MagicMock(), authoritative_epoch_provider=lambda: 1)
     ctx = make_test_context(epoch_id=1)
     manager.initialize(ctx)
     manager.start()
@@ -144,7 +145,7 @@ def test_command_idempotency_replay_and_conflict() -> None:
     registry.register(device, token)
     device._state = DeviceState.ACTIVE
 
-    manager = DeviceControlManager(registry=registry)
+    manager = DeviceControlManager(registry=registry, rehydration_engine=MagicMock(), authoritative_epoch_provider=lambda: 1)
     ctx = make_test_context(epoch_id=1)
     manager.initialize(ctx)
     manager.start()
@@ -208,7 +209,7 @@ def test_command_event_sink_failure_does_not_break_execution() -> None:
         def emit(self, event):
             raise RuntimeError("Database sink offline")
 
-    manager = DeviceControlManager(registry=registry, event_sink=CrashingEventSink())
+    manager = DeviceControlManager(registry=registry, event_sink=CrashingEventSink(), rehydration_engine=MagicMock(), authoritative_epoch_provider=lambda: 1)
     ctx = make_test_context(epoch_id=1)
     manager.initialize(ctx)
     manager.start()

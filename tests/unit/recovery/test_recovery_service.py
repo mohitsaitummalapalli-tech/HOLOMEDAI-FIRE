@@ -285,4 +285,5 @@ class TestRecoveryServiceRoutes:
             payload={"session_id": "session-01"},
         )
         resp = real_disp.dispatch(qry)
+        assert resp is not None
         assert resp.payload["state"] == "IDLE"

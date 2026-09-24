@@ -20,10 +20,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from holomed.configuration.models import AppConfig
+from holomed.configuration.models import AppConfig, EnvironmentProfile, LogLevel
 from holomed.core.dispatcher import MessageDispatcher
 from holomed.core.models import DispatcherState
 from holomed.navigation.exceptions import NavigationInterlockError
+from holomed.protocol.models import MessageEnvelope
 from holomed.navigation.models import NavigationState
 from holomed.navigation.service import NavigationService
 from holomed.protocol.builders import create_event
@@ -48,10 +49,10 @@ from tests.unit.safety_gate.conftest import make_gate_request
 def _make_runtime_context() -> RuntimeContext:
     config = AppConfig(
         app_name="HoloMed-M47-Test",
-        environment="TESTING",
+        environment=EnvironmentProfile.TESTING,
         host="127.0.0.1",
         port=8090,
-        log_level="DEBUG",
+        log_level=LogLevel.DEBUG,
         gemini_api_key=None,
         protocol_version="1.0",
     )
@@ -64,7 +65,7 @@ def _make_dispatcher() -> MagicMock:
     return dispatcher
 
 
-def _make_recovery_failed_event(session_id: str) -> MagicMock:
+def _make_recovery_failed_event(session_id: str) -> MessageEnvelope:
     """Create a recovery.failed event envelope."""
     return create_event(
         message_name="recovery.failed",
@@ -73,7 +74,7 @@ def _make_recovery_failed_event(session_id: str) -> MagicMock:
     )
 
 
-def _make_recovery_activated_event(session_id: str) -> MagicMock:
+def _make_recovery_activated_event(session_id: str) -> MessageEnvelope:
     """Create a recovery.spatial.activated event envelope."""
     return create_event(
         message_name="recovery.spatial.activated",

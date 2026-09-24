@@ -88,7 +88,7 @@ def test_session_sequence_monotonicity_and_rejection(sample_vision_observation) 
         sequence_number=0,
     )
     with pytest.raises(UltronSequenceError):
-        tracker.validate_and_record(lower_obs, current_epoch=1)
+        tracker.validate_and_record(lower_obs, current_epoch=1)  # type: ignore
 
     # Epoch mismatch
     with pytest.raises(UltronEpochMismatchError):

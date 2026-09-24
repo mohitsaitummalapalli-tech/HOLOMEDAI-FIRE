@@ -8,11 +8,11 @@ from types import MappingProxyType
 import uuid
 import pytest
 
-from holomed.configuration.models import AppConfig
+from holomed.configuration.models import AppConfig, EnvironmentProfile, LogLevel
 from holomed.core.dispatcher import MessageDispatcher
-from holomed.devices.interfaces import IDevice
+from holomed.devices.interfaces import IDevice, DeviceResourceAccessor, IPhysicalEndpoint
 from holomed.devices.manager import DeviceManager
-from holomed.devices.models import DeviceCapability, DeviceHealth, DeviceState, DeviceType
+from holomed.devices.models import CapabilityCategory, DeviceCapability, DeviceHealth, DeviceState, DeviceType
 from holomed.runtime.context import RuntimeContext
 from holomed.runtime.logging import SecretFilter
 from holomed.runtime.models import HealthStatus
@@ -53,25 +53,26 @@ class DummyUltronDevice(IDevice):
         return self._state
 
     @property
-    def capabilities(self) -> frozenset[DeviceCapability]:
-        return frozenset({DeviceCapability.DATA_STREAM})
+    def capabilities(self) -> tuple[DeviceCapability, ...]:
+        return (DeviceCapability(capability_id="test_data", category=CapabilityCategory.STREAMING, parameters={}),)
 
-    def initialize(self) -> None:
+    @property
+    def endpoints(self) -> tuple[IPhysicalEndpoint, ...]:
+        return ()
+
+    def initialize(self, accessor: DeviceResourceAccessor) -> None:
         pass
 
     def start(self) -> None:
         self._state = DeviceState.ACTIVE
 
-    def stop(self) -> None:
+    def stop(self, accessor: DeviceResourceAccessor) -> None:
         self._state = DeviceState.STOPPED
 
     def teardown(self) -> None:
         self._state = DeviceState.STOPPED
 
 
-    @property
-    def endpoints(self) -> tuple:
-        return ()
     def health(self) -> DeviceHealth:
         return DeviceHealth(
             device_id=self._device_id,
@@ -85,10 +86,10 @@ class DummyUltronDevice(IDevice):
 def runtime_context() -> RuntimeContext:
     config = AppConfig(
         app_name="HoloMed-Ultron-Test",
-        environment="TESTING",
+        environment=EnvironmentProfile.TESTING,
         host="127.0.0.1",
         port=8000,
-        log_level="DEBUG",
+        log_level=LogLevel.DEBUG,
         gemini_api_key=None,
         protocol_version="1.0",
     )
@@ -113,6 +114,7 @@ def device_manager(runtime_context: RuntimeContext) -> DeviceManager:
     dm.initialize(runtime_context)
     dm.start()
     reg = getattr(dm, "registry", None) or getattr(dm, "_registry", None)
+    assert reg is not None
     token = getattr(dm, "registry_token", None) or getattr(dm, "_registry_token", None)
     dev = DummyUltronDevice("ultron_sensor_0", "phys_ultron_0")
     reg.register(dev, token)

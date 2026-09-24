@@ -184,14 +184,15 @@ class DeviceControlManager(IService):
         self._state = ServiceState.STARTED
         
         try:
-            if self._rehydration_engine:
-                if not self._authoritative_epoch_provider:
-                    raise ServiceLifecycleError("Rehydration requires authoritative_epoch_provider")
-                auth_epoch = self._authoritative_epoch_provider()
-                if auth_epoch is None:
-                    raise ServiceLifecycleError("Authoritative epoch missing during startup")
-                
-                self._rehydration_engine.rehydrate_controller_state(current_session_id="system_boot")
+            if not self._rehydration_engine:
+                raise ServiceLifecycleError("StateRehydrationEngine is mandatory for production safety")
+            if not self._authoritative_epoch_provider:
+                raise ServiceLifecycleError("Rehydration requires authoritative_epoch_provider")
+            auth_epoch = self._authoritative_epoch_provider()
+            if auth_epoch is None:
+                raise ServiceLifecycleError("Authoritative epoch missing during startup")
+
+            self._rehydration_engine.rehydrate_controller_state(current_session_id="system_boot")
 
             self._timeout_shutdown.clear()
             self._timeout_thread = threading.Thread(target=self._timeout_loop, name="dcm_timeouts", daemon=True)

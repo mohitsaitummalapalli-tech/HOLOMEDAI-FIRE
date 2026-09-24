@@ -3,6 +3,7 @@ import time
 from holomed.devices.models import CommandState, EndpointSafetyState, EndpointState, DeviceType, EndpointLease, StopRouteState
 from holomed.devices.simulated import SimulatedDevice, SimulatedPhysicalEndpoint
 from holomed.devices.registry import DeviceRegistry
+from unittest.mock import MagicMock
 from holomed.devices.control.manager import DeviceControlManager
 from holomed.devices.resolution import ExecutionResolutionGate
 from holomed.devices.transport import TelemetryTransport, TelemetryPublisher
@@ -28,7 +29,7 @@ def registry():
 @pytest.fixture
 def manager(registry, gate, publisher):
     from holomed.configuration.models import AppConfig
-    dcm = DeviceControlManager(registry=registry, resolution_gate=gate)
+    dcm = DeviceControlManager(registry=registry, resolution_gate=gate, rehydration_engine=MagicMock(), authoritative_epoch_provider=lambda: 1)
     ctx = RuntimeContext(app_config=AppConfig(app_name="test", environment="test", host="localhost", port=8000, log_level="INFO"), epoch_id=1)
     dcm.initialize(ctx)
     dcm.start()

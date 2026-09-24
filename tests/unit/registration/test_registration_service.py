@@ -254,6 +254,7 @@ def test_registration_dispatcher_routes(
     # 4. registration.get remains functional
     q_get = create_query("registration.get", "xr_client", payload={"session_id": "sess_disp"})
     resp_get = message_dispatcher.dispatch(q_get)
+    assert resp_get is not None
     assert resp_get.message_type.value == "RESPONSE"
     assert resp_get.payload["state"] == "SOLVED"
     assert "transform" in resp_get.payload

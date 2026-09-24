@@ -9,6 +9,7 @@ from holomed.devices.control.exceptions import (
     DeviceCommandResultValidationError,
     DeviceCommandValidationError,
 )
+from unittest.mock import MagicMock
 from holomed.devices.control.manager import DeviceControlManager
 from holomed.devices.control.models import (
     MAX_COMMAND_RESULT_BYTES,
@@ -70,7 +71,7 @@ def test_ast_prohibited_imports_audit_control() -> None:
 def test_command_registry_capacity_limit() -> None:
     token = RegistryAuthorityToken()
     registry = DeviceRegistry(token)
-    manager = DeviceControlManager(registry=registry)
+    manager = DeviceControlManager(registry=registry, rehydration_engine=MagicMock(), authoritative_epoch_provider=lambda: 1)
 
     for i in range(MAX_REGISTERED_COMMANDS):
         manager.register_command(f"cmd.{i}", lambda d, p: {})
@@ -82,7 +83,7 @@ def test_command_registry_capacity_limit() -> None:
 def test_query_registry_capacity_limit() -> None:
     token = RegistryAuthorityToken()
     registry = DeviceRegistry(token)
-    manager = DeviceControlManager(registry=registry)
+    manager = DeviceControlManager(registry=registry, rehydration_engine=MagicMock(), authoritative_epoch_provider=lambda: 1)
 
     for i in range(MAX_REGISTERED_QUERIES):
         manager.register_query(f"query.{i}", lambda d, p: {})
@@ -116,7 +117,7 @@ def test_result_nan_and_infinity_rejected() -> None:
 def test_dynamic_device_replacement_invokes_new_instance() -> None:
     token = RegistryAuthorityToken()
     registry = DeviceRegistry(token)
-    manager = DeviceControlManager(registry=registry)
+    manager = DeviceControlManager(registry=registry, rehydration_engine=MagicMock(), authoritative_epoch_provider=lambda: 1)
     ctx = make_test_context(epoch_id=1)
     manager.initialize(ctx)
     manager.start()
