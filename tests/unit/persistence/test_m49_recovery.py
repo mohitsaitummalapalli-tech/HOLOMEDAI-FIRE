@@ -326,7 +326,8 @@ def test_end_to_end_recovery_engine(tmp_path):
     assert store2.get_active_physical_operations() == 1
 
     # Use rehydration engine
-    engine = StateRehydrationEngine(store2, None, auth)
+    from unittest.mock import MagicMock
+    engine = StateRehydrationEngine(store2, MagicMock(), auth)
     engine.rehydrate_controller_state(session2.session_id)
 
     # The capacity is NOT released (still holding)
@@ -348,3 +349,11 @@ def test_end_to_end_recovery_engine(tmp_path):
     assert last_line["payload"]["controller_epoch"] == epoch1
     assert last_line["epoch_id"] == epoch2  # Written with recovery authority
     assert last_line["session_id"] == session1.session_id
+
+    # Verify sess2.jsonl contains only SESSION_STARTED
+    journal2_file = store_dir / f"{session2.session_id}.jsonl"
+    with open(journal2_file, "r") as f:
+        lines2 = f.readlines()
+        
+    assert len(lines2) == 1
+    assert json.loads(lines2[0])["entry_type"] == "SESSION_STARTED"
