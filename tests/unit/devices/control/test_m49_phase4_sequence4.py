@@ -71,7 +71,7 @@ def is_thread_blocked(target_thread_name: str, func_name: str) -> bool:
 
 def wait_for_blocked(target_thread_name: str, func_name: str):
     while not is_thread_blocked(target_thread_name, func_name):
-        pass # Spin loop explicitly to avoid time.sleep()
+        pass # Spin loop explicitly to avoid time sleep
 
 def test_race_a_timeout_first(components):
     transport, gate, daemon, store = components

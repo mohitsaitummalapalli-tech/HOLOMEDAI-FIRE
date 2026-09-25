@@ -58,7 +58,10 @@ class ReconciliationDaemon:
         
         for record in updated_records:
             if record.terminal_resolution_status:
-                self._resolve_terminal_record(record)
+                try:
+                    self._resolve_terminal_record(record)
+                except StaleEpochError as e:
+                    logger.error(str(e))
 
     def _resolve_terminal_record(self, record: AuthoritativeExecutionRecord) -> None:
         """Write terminal resolution to DurableSessionStore."""

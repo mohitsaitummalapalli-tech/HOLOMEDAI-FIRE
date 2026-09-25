@@ -776,12 +776,12 @@ def test_real_g8_telemetry_trust_path(components):
     daemon.run_reconciliation_cycle()
     assert new_store.get_active_physical_operations() == 4
     
-    # Acceptance: Telemetry matching the HISTORICAL epoch (E1)
+    # Rejection: Telemetry matching the HISTORICAL epoch (E1) is now rejected under Sequence 4 stale-epoch rules
     good_hist_event = create_event(good_hist_exec, 13, CommandState.OPERATION_COMPLETED, session_id=session_id)
     good_hist_event = dataclasses.replace(good_hist_event, payload={"device_id": "dev-g8-good", "device_epoch": 1, "controller_epoch": epoch, "physical_operation_id": "op-g8-good", "command_nonce": "nonce-g8-good"})
     publisher.publish(good_hist_event)
     daemon.run_reconciliation_cycle()
-    # Accepted!
-    assert new_store.get_active_physical_operations() == 3
+    # Rejected!
+    assert new_store.get_active_physical_operations() == 4
 
 
