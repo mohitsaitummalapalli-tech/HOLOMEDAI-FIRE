@@ -77,6 +77,14 @@ class ReconciliationDaemon:
                 command_nonce = canon[4]
                 resolution = record.current_state.value
                 
+                # Verify G8 telemetry binding
+                if record.telemetry_identity is None:
+                    logger.error(f"Missing telemetry identity for {record.execution_id}, failing closed.")
+                    return
+                if record.telemetry_identity != canon:
+                    logger.error(f"Telemetry identity mismatch for {record.execution_id}: {record.telemetry_identity} != {canon}")
+                    return
+                
                 # Quarantined / Faulted Unknown remain in the active set but are marked.
                 # However, they are still considered "terminal" for the ExecutionResolutionGate.
                 # In sessions.py, they are accepted as valid terminal resolutions if not invalid.
@@ -96,7 +104,7 @@ class ReconciliationDaemon:
                     physical_operation_id=physical_operation_id,
                     command_nonce=command_nonce,
                     resolution=resolution,
-                    authoritative_epoch=None
+                    authoritative_epoch=self._session_store._epoch_id
                 )
                 return
         

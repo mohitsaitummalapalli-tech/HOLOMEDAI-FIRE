@@ -55,7 +55,7 @@ def create_event(
         source_authority=EventSourceAuthority.HARDWARE_DRIVER,
         source_origin="test",
         timestamp_utc="2026-09-24T00:00:00Z",
-        payload={},
+        payload={"device_id": "dev-1", "device_epoch": 1, "controller_epoch": 1, "physical_operation_id": "op-1", "command_nonce": "nonce-1"},
         evidence_generation=1,
         cryptographic_signature="sig",
         fencing_challenge="challenge"
@@ -306,11 +306,11 @@ def test_duplicate_telemetry_concurrently(components):
     session_store.record_operation_admitted(
         endpoint_id="end-1",
         session_id=session_id,
-        device_id="dev-dup",
+        device_id="dev-1",
         device_epoch=1,
         controller_epoch=epoch,
-        physical_operation_id="op-dup",
-        command_nonce="nonce-dup",
+        physical_operation_id="op-1",
+        command_nonce="nonce-1",
         execution_id=execution_id,
         command_name="test_cmd"
     )
@@ -457,9 +457,9 @@ def test_reconciliation_vs_recovery(components):
 
     # 1. Admit old operation
     session_store.record_operation_admitted(
-        endpoint_id="end-1", session_id=session_id, device_id="dev-rec",
-        device_epoch=1, controller_epoch=epoch, physical_operation_id="op-old",
-        command_nonce="nonce-old", execution_id=old_exec, command_name="cmd"
+        endpoint_id="end-1", session_id=session_id, device_id="dev-1",
+        device_epoch=1, controller_epoch=epoch, physical_operation_id="op-1",
+        command_nonce="nonce-1", execution_id=old_exec, command_name="cmd"
     )
 
     # 2. Terminal resolve old execution via telemetry
@@ -470,7 +470,7 @@ def test_reconciliation_vs_recovery(components):
 
     # 3. Admit new operation (recovery scenario)
     session_store.record_operation_admitted(
-        endpoint_id="end-1", session_id=session_id, device_id="dev-rec",
+        endpoint_id="end-1", session_id=session_id, device_id="dev-1",
         device_epoch=2, controller_epoch=epoch, physical_operation_id="op-new",
         command_nonce="nonce-new", execution_id=new_exec, command_name="cmd"
     )
@@ -557,9 +557,9 @@ def test_operation_completed_releases_exactly_once(components):
     execution_id = "exec-release-once"
 
     session_store.record_operation_admitted(
-        endpoint_id="end-1", session_id=session_id, device_id="dev-ro",
-        device_epoch=1, controller_epoch=epoch, physical_operation_id="op-ro",
-        command_nonce="nonce-ro", execution_id=execution_id, command_name="cmd"
+        endpoint_id="end-1", session_id=session_id, device_id="dev-1",
+        device_epoch=1, controller_epoch=epoch, physical_operation_id="op-1",
+        command_nonce="nonce-1", execution_id=execution_id, command_name="cmd"
     )
     assert session_store.get_active_physical_operations() == 1
 
@@ -662,13 +662,126 @@ def test_real_g8_telemetry_trust_path(components):
     assert session_store.get_active_physical_operations() == 1
     # Gate accepts it for the wrong exec, but Daemon ignores it because "wrong-exec" is not in active_snapshot
     assert gate._records["wrong-exec"].terminal_resolution_status is True
-    
-    # 6. Acceptance: Valid Evidence correctly bound
-    valid_event = create_event(execution_id, 5, CommandState.OPERATION_COMPLETED, session_id=session_id)
+    import dataclasses
+    bad_dev_event = create_event(execution_id, 5, CommandState.OPERATION_COMPLETED, session_id=session_id)
+    bad_dev_event = dataclasses.replace(bad_dev_event, payload={"device_id": "WRONG_DEV", "device_epoch": 1, "controller_epoch": epoch, "physical_operation_id": "op-g8", "command_nonce": "nonce-g8"})
+    publisher.publish(bad_dev_event)
+    daemon.run_reconciliation_cycle()
+    assert session_store.get_active_physical_operations() == 1
+
+    # 7. Rejection: Mismatched device_epoch in telemetry payload
+    bad_ep_event = create_event(execution_id, 6, CommandState.OPERATION_COMPLETED, session_id=session_id)
+    bad_ep_event = dataclasses.replace(bad_ep_event, payload={"device_id": "dev-g8", "device_epoch": 999, "controller_epoch": epoch, "physical_operation_id": "op-g8", "command_nonce": "nonce-g8"})
+    publisher.publish(bad_ep_event)
+    daemon.run_reconciliation_cycle()
+    assert session_store.get_active_physical_operations() == 1
+
+    # 8. Rejection: Mismatched controller_epoch in telemetry payload
+    bad_ce_event = create_event(execution_id, 7, CommandState.OPERATION_COMPLETED, session_id=session_id)
+    bad_ce_event = dataclasses.replace(bad_ce_event, payload={"device_id": "dev-g8", "device_epoch": 1, "controller_epoch": 999, "physical_operation_id": "op-g8", "command_nonce": "nonce-g8"})
+    publisher.publish(bad_ce_event)
+    daemon.run_reconciliation_cycle()
+    assert session_store.get_active_physical_operations() == 1
+
+    # 9. Rejection: Mismatched physical_operation_id in telemetry payload
+    bad_op_event = create_event(execution_id, 8, CommandState.OPERATION_COMPLETED, session_id=session_id)
+    bad_op_event = dataclasses.replace(bad_op_event, payload={"device_id": "dev-g8", "device_epoch": 1, "controller_epoch": epoch, "physical_operation_id": "WRONG_OP", "command_nonce": "nonce-g8"})
+    publisher.publish(bad_op_event)
+    daemon.run_reconciliation_cycle()
+    assert session_store.get_active_physical_operations() == 1
+
+    # 10. Rejection: Mismatched command_nonce in telemetry payload
+    bad_no_event = create_event(execution_id, 9, CommandState.OPERATION_COMPLETED, session_id=session_id)
+    bad_no_event = dataclasses.replace(bad_no_event, payload={"device_id": "dev-g8", "device_epoch": 1, "controller_epoch": epoch, "physical_operation_id": "op-g8", "command_nonce": "WRONG_NONCE"})
+    publisher.publish(bad_no_event)
+    daemon.run_reconciliation_cycle()
+    assert session_store.get_active_physical_operations() == 1
+
+    # 11. Acceptance: Valid Evidence correctly bound
+    valid_exec_id = "exec-valid"
+    session_store.record_operation_admitted(
+        endpoint_id="end-2", session_id=session_id, device_id="dev-g8-valid",
+        device_epoch=1, controller_epoch=epoch, physical_operation_id="op-g8-valid",
+        command_nonce="nonce-g8-valid", execution_id=valid_exec_id, command_name="cmd"
+    )
+    assert session_store.get_active_physical_operations() == 2
+
+    valid_event = create_event(valid_exec_id, 10, CommandState.OPERATION_COMPLETED, session_id=session_id)
+    # The valid event must have the correct payload identity to be accepted!
+    valid_event = dataclasses.replace(valid_event, payload={"device_id": "dev-g8-valid", "device_epoch": 1, "controller_epoch": epoch, "physical_operation_id": "op-g8-valid", "command_nonce": "nonce-g8-valid"})
     publisher.publish(valid_event)
     daemon.run_reconciliation_cycle()
     
     # Prove authoritative terminal record and capacity release
-    assert gate._records[execution_id].terminal_resolution_status is True
-    assert session_store.get_active_physical_operations() == 0
+    assert gate._records[valid_exec_id].terminal_resolution_status is True
+    # Capacity drops from 2 back to 1 (because the previous bad one is still trapped)
+    assert session_store.get_active_physical_operations() == 1
+
+    # 12. Acceptance: Duplicate valid telemetry is idempotent
+    publisher.publish(valid_event)
+    daemon.run_reconciliation_cycle()
+    assert session_store.get_active_physical_operations() == 1
+
+    # 13. Rejection: Unknown/Missing telemetry identity fails closed
+    missing_id_exec = "exec-missing"
+    session_store.record_operation_admitted(
+        endpoint_id="end-3", session_id=session_id, device_id="dev-g8-missing",
+        device_epoch=1, controller_epoch=epoch, physical_operation_id="op-g8-missing",
+        command_nonce="nonce-g8-missing", execution_id=missing_id_exec, command_name="cmd"
+    )
+    assert session_store.get_active_physical_operations() == 2
+    missing_id_event = create_event(missing_id_exec, 11, CommandState.OPERATION_COMPLETED, session_id=session_id)
+    # Payload has NO identity fields
+    missing_id_event = dataclasses.replace(missing_id_event, payload={})
+    publisher.publish(missing_id_event)
+    daemon.run_reconciliation_cycle()
+    # It fails closed! Capacity retained!
+    assert session_store.get_active_physical_operations() == 2
+
+    # 14. Acceptance & Rejection: Historical controller epoch is immutable
+    bad_hist_exec = "exec-hist-bad"
+    session_store.record_operation_admitted(
+        endpoint_id="end-4", session_id=session_id, device_id="dev-g8-bad",
+        device_epoch=1, controller_epoch=epoch, physical_operation_id="op-g8-bad",
+        command_nonce="nonce-g8-bad", execution_id=bad_hist_exec, command_name="cmd"
+    )
+    
+    good_hist_exec = "exec-hist-good"
+    session_store.record_operation_admitted(
+        endpoint_id="end-5", session_id=session_id, device_id="dev-g8-good",
+        device_epoch=1, controller_epoch=epoch, physical_operation_id="op-g8-good",
+        command_nonce="nonce-g8-good", execution_id=good_hist_exec, command_name="cmd"
+    )
+    
+    assert session_store.get_active_physical_operations() == 4
+    
+    # Simulate a crash and recovery: allocate a new epoch
+    session_store._authority.allocate_next_epoch()
+    epoch2 = session_store._authority.read_current_epoch()
+    
+    # Create a new session store and restore the session
+    new_store = DurableSessionStore(session_store._storage_root, epoch2)
+    new_store.restore_session_from_disk(session_id)
+    
+    # Replace daemon's session store
+    daemon._session_store = new_store
+    
+    # Verify historical operations are rehydrated
+    assert new_store.get_active_physical_operations() == 4
+    
+    # Rejection: Telemetry with the new epoch (E2) should fail, as the canonical identity holds E1!
+    bad_hist_event = create_event(bad_hist_exec, 12, CommandState.OPERATION_COMPLETED, session_id=session_id)
+    bad_hist_event = dataclasses.replace(bad_hist_event, payload={"device_id": "dev-g8-bad", "device_epoch": 1, "controller_epoch": epoch2, "physical_operation_id": "op-g8-bad", "command_nonce": "nonce-g8-bad"})
+    publisher.publish(bad_hist_event)
+    daemon.run_reconciliation_cycle()
+    assert new_store.get_active_physical_operations() == 4
+    
+    # Acceptance: Telemetry matching the HISTORICAL epoch (E1)
+    good_hist_event = create_event(good_hist_exec, 13, CommandState.OPERATION_COMPLETED, session_id=session_id)
+    good_hist_event = dataclasses.replace(good_hist_event, payload={"device_id": "dev-g8-good", "device_epoch": 1, "controller_epoch": epoch, "physical_operation_id": "op-g8-good", "command_nonce": "nonce-g8-good"})
+    publisher.publish(good_hist_event)
+    daemon.run_reconciliation_cycle()
+    # Accepted!
+    assert new_store.get_active_physical_operations() == 3
+
 

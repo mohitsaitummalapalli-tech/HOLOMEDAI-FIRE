@@ -157,6 +157,16 @@ class ExecutionResolutionGate(IExecutionResolutionGate):
             # Determine quarantine consequence
             quarantine = event.observed_state in (CommandState.FAULTED_UNKNOWN, CommandState.INTERLOCKED)
 
+            telemetry_identity = None
+            if event.payload and "device_id" in event.payload:
+                telemetry_identity = (
+                    event.payload.get("device_id"),
+                    event.payload.get("device_epoch"),
+                    event.payload.get("controller_epoch"),
+                    event.payload.get("physical_operation_id"),
+                    event.payload.get("command_nonce"),
+                )
+
             updated_record = AuthoritativeExecutionRecord(
                 execution_id=execution_id,
                 current_state=event.observed_state,
@@ -164,11 +174,12 @@ class ExecutionResolutionGate(IExecutionResolutionGate):
                 terminal_resolution_status=is_terminal,
                 terminal_event_id=event.event_id if is_terminal else None,
                 source_authority=event.source_authority,
-                lifecycle_generation=record.lifecycle_generation,
-                timeout_status=False,
+                lifecycle_generation=event.lifecycle_generation,
+                timeout_status=record.timeout_status,
                 quarantine_consequence=quarantine,
                 execution_claimed=record.execution_claimed,
                 stop_route_state=record.stop_route_state,
+                telemetry_identity=telemetry_identity if is_terminal else record.telemetry_identity,
             )
             self._records[execution_id] = updated_record
             return updated_record

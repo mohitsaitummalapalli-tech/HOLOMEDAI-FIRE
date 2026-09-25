@@ -405,6 +405,7 @@ class AuthoritativeExecutionRecord:
         execution_claimed: bool = False,
         stop_route_state: StopRouteState = StopRouteState.NOT_REQUESTED,
         physical_recovery_active: bool = False,
+        telemetry_identity: Optional[tuple] = None,
     ) -> None:
         if type(execution_id) is not str or not execution_id.strip():
             raise DeviceValidationError("execution_id must be a non-empty string")
@@ -441,6 +442,7 @@ class AuthoritativeExecutionRecord:
         self._execution_claimed = execution_claimed
         self._stop_route_state = stop_route_state
         self._physical_recovery_active = physical_recovery_active
+        self._telemetry_identity = telemetry_identity
 
     @property
     def execution_id(self) -> str:
@@ -457,6 +459,11 @@ class AuthoritativeExecutionRecord:
     @property
     def terminal_resolution_status(self) -> bool:
         return self._terminal_resolution_status
+
+    @property
+    def telemetry_identity(self) -> Optional[tuple]:
+        return self._telemetry_identity
+
 
     @property
     def terminal_event_id(self) -> Optional[str]:
