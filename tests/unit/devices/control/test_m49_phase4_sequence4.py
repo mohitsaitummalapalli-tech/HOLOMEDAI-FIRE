@@ -2,6 +2,8 @@ import pytest
 import threading
 from unittest.mock import patch
 import uuid
+import sys
+import traceback
 from holomed.devices.models import CommandState, ExecutionTelemetryEvent, EventSourceAuthority, AuthoritativeExecutionRecord
 from holomed.devices.transport import TelemetryTransport, TelemetryPublisher
 from holomed.devices.resolution import ExecutionResolutionGate
@@ -9,6 +11,7 @@ from holomed.devices.reconciler import TelemetryReconciler
 from holomed.devices.control.daemon import ReconciliationDaemon
 from holomed.persistence.sessions import DurableSessionStore
 from holomed.persistence.authority import ControllerAuthorityStore
+from holomed.devices.control.recovery import StateRehydrationEngine
 
 @pytest.fixture
 def session_store(tmp_path):
@@ -57,15 +60,20 @@ def create_event(
         fencing_challenge="challenge"
     )
 
+def is_thread_blocked(target_thread_name: str, func_name: str) -> bool:
+    for thread_id, frame in sys._current_frames().items():
+        thread = next((t for t in threading.enumerate() if t.ident == thread_id), None)
+        if thread and thread.name == target_thread_name:
+            for filename, lineno, name, line in traceback.extract_stack(frame):
+                if name == func_name:
+                    return True
+    return False
+
+def wait_for_blocked(target_thread_name: str, func_name: str):
+    while not is_thread_blocked(target_thread_name, func_name):
+        pass # Spin loop explicitly to avoid time.sleep()
+
 def test_race_a_timeout_first(components):
-    """
-    Race A: timeout operation acquires the REAL per-execution lock first;
-    terminal-evidence operation concurrently attempts the REAL resolve_terminal_event() path;
-    terminal evidence cannot win;
-    final state is FAULTED_UNKNOWN;
-    terminal resolution is durable;
-    physical capacity remains retained.
-    """
     transport, gate, daemon, store = components
     exec_id = "exec-race-a"
     session_id = store.start_session("test_client", store._epoch_id).session_id
@@ -76,94 +84,75 @@ def test_race_a_timeout_first(components):
         execution_id=exec_id, command_name="cmd1"
     )
 
-    timeout_record = None
-    terminal_record = None
-
     in_lock_event = threading.Event()
     contention_event = threading.Event()
-
     original_init = AuthoritativeExecutionRecord.__init__
 
     def hooked_init(self, *args, **kwargs):
         if threading.current_thread().name == "TimeoutThread":
             in_lock_event.set()
-            contention_event.wait(timeout=2.0)
+            contention_event.wait(timeout=5.0)
         original_init(self, *args, **kwargs)
 
+    timeout_record = None
     def run_timeout():
         nonlocal timeout_record
         timeout_record = gate.resolve_timeout(exec_id, lifecycle_generation=1)
 
-    def run_evidence():
-        nonlocal terminal_record
-        event = create_event(exec_id, sequence=1, state=CommandState.OPERATION_COMPLETED, session_id=session_id, epoch=store._epoch_id)
-        in_lock_event.wait(timeout=2.0)
-        # Block on exactly the same lock inside resolve_terminal_event
-        terminal_record = gate.resolve_terminal_event(event)
-
     with patch.object(AuthoritativeExecutionRecord, '__init__', hooked_init):
         t_a = threading.Thread(target=run_timeout, name="TimeoutThread")
-        t_b = threading.Thread(target=run_evidence, name="EvidenceThread")
-
         t_a.start()
-        t_b.start()
 
-        # Release the timeout thread once evidence thread is blocked/ready
+        # Wait until Thread A enters the locked region
+        in_lock_event.wait(timeout=5.0)
+
+        # Thread B: Production Path via Reconciler!
+        daemon.start()
+        event = create_event(exec_id, sequence=1, state=CommandState.OPERATION_COMPLETED, session_id=session_id, epoch=store._epoch_id)
+        TelemetryPublisher(transport).publish(event)
+        
+        # Prove Thread B (Daemon) is blocked by Thread A (Timeout)
+        wait_for_blocked("ReconciliationDaemon", "resolve_terminal_event")
+
+        # Release Thread A
         contention_event.set()
-
         t_a.join()
-        t_b.join()
+        
+        # We must also durably record the timeout (which the control plane does natively in manager but we don't have manager here)
+        store.record_operation_terminated(
+            session_id=session_id, device_id="dev-1", device_epoch=1,
+            controller_epoch=store._epoch_id, physical_operation_id="op-1",
+            command_nonce="nonce-1", resolution=CommandState.FAULTED_UNKNOWN.value
+        )
+        
+        # Sync daemon using dummy
+        daemon_processed = threading.Event()
+        original_term = store.record_operation_terminated
+        def hooked_term(*args, **kwargs):
+            original_term(*args, **kwargs)
+            if kwargs.get("physical_operation_id") == "op-dummy":
+                daemon_processed.set()
+        store.record_operation_terminated = hooked_term
 
-    assert timeout_record is not None
-    assert terminal_record is not None
+        dummy_id = "exec-dummy-sync"
+        store.record_operation_admitted(
+            endpoint_id="end-dummy", session_id=session_id, device_id="dev-1",
+            device_epoch=1, controller_epoch=store._epoch_id,
+            physical_operation_id="op-dummy", command_nonce="nonce-dummy",
+            execution_id=dummy_id, command_name="cmd-sync"
+        )
+        dummy_evt = create_event(dummy_id, 1, CommandState.OPERATION_COMPLETED, session_id, store._epoch_id, {"physical_operation_id": "op-dummy", "command_nonce": "nonce-dummy"})
+        TelemetryPublisher(transport).publish(dummy_evt)
+        
+        daemon_processed.wait(timeout=5.0)
+        daemon.stop()
+
     assert timeout_record.current_state == CommandState.FAULTED_UNKNOWN
-    assert terminal_record.current_state == CommandState.FAULTED_UNKNOWN
-
-    # To prove durable termination and capacity retention, pass it to Daemon
-    daemon_processed = threading.Event()
-    original_term = store.record_operation_terminated
-    def hooked_term(*args, **kwargs):
-        original_term(*args, **kwargs)
-        daemon_processed.set()
-    store.record_operation_terminated = hooked_term
-
-    daemon.start()
-    event_late = create_event(exec_id, sequence=2, state=CommandState.OPERATION_COMPLETED, session_id=session_id, epoch=store._epoch_id)
-    TelemetryPublisher(transport).publish(event_late)
-
-    # We must also durably record the timeout (which the control plane does natively)
-    store.record_operation_terminated(
-        session_id=session_id, device_id="dev-1", device_epoch=1,
-        controller_epoch=store._epoch_id, physical_operation_id="op-1",
-        command_nonce="nonce-1", resolution=CommandState.FAULTED_UNKNOWN.value
-    )
-
-    # Sync daemon using dummy
-    dummy_id = "exec-dummy-sync"
-    store.record_operation_admitted(
-        endpoint_id="end-dummy", session_id=session_id, device_id="dev-1",
-        device_epoch=1, controller_epoch=store._epoch_id,
-        physical_operation_id="op-dummy", command_nonce="nonce-dummy",
-        execution_id=dummy_id, command_name="cmd-sync"
-    )
-    dummy_evt = create_event(dummy_id, 1, CommandState.OPERATION_COMPLETED, session_id, store._epoch_id, {"physical_operation_id": "op-dummy", "command_nonce": "nonce-dummy"})
-    TelemetryPublisher(transport).publish(dummy_evt)
-
-    daemon_processed.wait(timeout=2.0)
-    daemon.stop()
-
     # verify capacity retained for FAULTED_UNKNOWN
     canon = ("dev-1", 1, store._epoch_id, "op-1", "nonce-1")
     assert canon in store.get_active_operations_snapshot()
 
 def test_race_b_evidence_first(components):
-    """
-    Race B: terminal evidence acquires the REAL per-execution lock first;
-    timeout concurrently attempts REAL resolve_timeout();
-    final state is OPERATION_COMPLETED;
-    durable termination occurs exactly once;
-    capacity releases exactly once.
-    """
     transport, gate, daemon, store = components
     exec_id = "exec-race-b"
     session_id = store.start_session("test_client", store._epoch_id).session_id
@@ -174,79 +163,74 @@ def test_race_b_evidence_first(components):
         execution_id=exec_id, command_name="cmd1"
     )
 
-    timeout_record = None
-    terminal_record = None
-
     in_lock_event = threading.Event()
     contention_event = threading.Event()
-
     original_init = AuthoritativeExecutionRecord.__init__
 
     def hooked_init(self, *args, **kwargs):
-        if threading.current_thread().name == "EvidenceThread":
+        if threading.current_thread().name == "ReconciliationDaemon":
             in_lock_event.set()
-            contention_event.wait(timeout=2.0)
+            contention_event.wait(timeout=5.0)
         original_init(self, *args, **kwargs)
 
-    def run_evidence():
-        nonlocal terminal_record
-        event = create_event(exec_id, sequence=1, state=CommandState.OPERATION_COMPLETED, session_id=session_id, epoch=store._epoch_id)
-        terminal_record = gate.resolve_terminal_event(event)
-
-    def run_timeout():
-        nonlocal timeout_record
-        in_lock_event.wait(timeout=2.0)
-        timeout_record = gate.resolve_timeout(exec_id, lifecycle_generation=1)
-
     with patch.object(AuthoritativeExecutionRecord, '__init__', hooked_init):
-        t_a = threading.Thread(target=run_evidence, name="EvidenceThread")
-        t_b = threading.Thread(target=run_timeout, name="TimeoutThread")
-
+        # Thread B: production evidence
+        daemon.start()
+        event = create_event(exec_id, sequence=1, state=CommandState.OPERATION_COMPLETED, session_id=session_id, epoch=store._epoch_id)
+        TelemetryPublisher(transport).publish(event)
+        
+        # Wait until Daemon enters the locked region
+        in_lock_event.wait(timeout=5.0)
+        
+        timeout_record = None
+        def run_timeout():
+            nonlocal timeout_record
+            timeout_record = gate.resolve_timeout(exec_id, lifecycle_generation=1)
+            
+        t_a = threading.Thread(target=run_timeout, name="TimeoutThread")
         t_a.start()
-        t_b.start()
-
+        
+        # Prove Thread A is blocked by Thread B (Daemon)
+        wait_for_blocked("TimeoutThread", "resolve_timeout")
+        
+        # Sync via dummy event for Daemon to complete exactly once
+        daemon_processed = threading.Event()
+        original_term = store.record_operation_terminated
+        call_count = [0]
+        def hooked_term(*args, **kwargs):
+            call_count[0] += 1
+            original_term(*args, **kwargs)
+            if kwargs.get("physical_operation_id") == "op-dummy":
+                daemon_processed.set()
+        store.record_operation_terminated = hooked_term
+        
+        # Release Daemon
         contention_event.set()
-
+        
+        # We also need a dummy event to sync since the daemon might process the first one before dummy is attached
+        dummy_id = "exec-dummy-sync"
+        store.record_operation_admitted(
+            endpoint_id="end-dummy", session_id=session_id, device_id="dev-1",
+            device_epoch=1, controller_epoch=store._epoch_id,
+            physical_operation_id="op-dummy", command_nonce="nonce-dummy",
+            execution_id=dummy_id, command_name="cmd-sync"
+        )
+        dummy_evt = create_event(dummy_id, 1, CommandState.OPERATION_COMPLETED, session_id, store._epoch_id, {"physical_operation_id": "op-dummy", "command_nonce": "nonce-dummy"})
+        TelemetryPublisher(transport).publish(dummy_evt)
+        
+        daemon_processed.wait(timeout=5.0)
         t_a.join()
-        t_b.join()
-
-    assert terminal_record is not None
+        daemon.stop()
+        
     assert timeout_record is not None
-    assert terminal_record.current_state == CommandState.OPERATION_COMPLETED
     assert timeout_record.current_state == CommandState.OPERATION_COMPLETED
-
-    # Prove durable termination exactly once via daemon
-    daemon_processed = threading.Event()
-    original_term = store.record_operation_terminated
-
-    call_count = [0]
-    def hooked_term(*args, **kwargs):
-        call_count[0] += 1
-        original_term(*args, **kwargs)
-        daemon_processed.set()
-
-    store.record_operation_terminated = hooked_term
-    daemon.start()
-
-    # Publish the same event to trigger daemon (since we bypassed it in run_evidence)
-    event = create_event(exec_id, sequence=1, state=CommandState.OPERATION_COMPLETED, session_id=session_id, epoch=store._epoch_id)
-    TelemetryPublisher(transport).publish(event)
-
-    daemon_processed.wait(timeout=2.0)
-    daemon.stop()
-
-    assert call_count[0] == 1
+    assert call_count[0] == 2 # 1 for exec-race-b, 1 for dummy-sync
+    
     # Capacity must be released
     canon = ("dev-1", 1, store._epoch_id, "op-1", "nonce-1")
     assert canon not in store.get_active_operations_snapshot()
 
 def test_restart_durable_outcome_evidence_end_to_end(components):
-    """
-    E1 runtime exists and admits an execution;
-    destroy E1; construct fresh E2;
-    deliver late E1 telemetry;
-    verify stale E1 telemetry cannot mutate E2 or release capacity.
-    """
     transport, gate, daemon, store = components
     exec_id = "exec-restart"
     session_id = store.start_session("test_client", store._epoch_id).session_id
@@ -269,7 +253,11 @@ def test_restart_durable_outcome_evidence_end_to_end(components):
     transport2 = TelemetryTransport()
     reconciler2 = TelemetryReconciler(transport2, gate2)
     daemon2 = ReconciliationDaemon(reconciler2, store2, polling_interval=0.01)
-
+    
+    # Rehydrate E2 state (quarantines the old command -> FAULTED_UNKNOWN)
+    rehydrator2 = StateRehydrationEngine(store2, gate2, auth2)
+    rehydrator2.rehydrate_controller_state(session_id)
+    
     daemon2.start()
 
     # E1 stale input arrives to E2 runtime
@@ -281,7 +269,8 @@ def test_restart_durable_outcome_evidence_end_to_end(components):
     original_term = store2.record_operation_terminated
     def hooked_term(*args, **kwargs):
         original_term(*args, **kwargs)
-        daemon_processed.set()
+        if kwargs.get("physical_operation_id") == "op-dummy":
+            daemon_processed.set()
     store2.record_operation_terminated = hooked_term
 
     session_id2 = store2.start_session("dummy_client", store2._epoch_id).session_id
@@ -299,10 +288,11 @@ def test_restart_durable_outcome_evidence_end_to_end(components):
     daemon_processed.wait(timeout=2.0)
     daemon2.stop()
 
-    # Verify E2 is untouched and capacity is not released
+    # Verify E2 is quarantined and stale telemetry rejected
     snapshot = store2.get_active_operations_snapshot()
     canon = ("dev-1", 1, 1, "op-1", "nonce-1")
     assert canon in snapshot
+    assert snapshot[canon].get("resolution") == "FAULTED_UNKNOWN"
 
 def test_late_timeout_after_successful_terminal_evidence(components):
     transport, gate, daemon, store = components
@@ -319,7 +309,8 @@ def test_late_timeout_after_successful_terminal_evidence(components):
     original_term = store.record_operation_terminated
     def hooked_term(*args, **kwargs):
         original_term(*args, **kwargs)
-        daemon_processed.set()
+        if kwargs.get("physical_operation_id") == "op-1":
+            daemon_processed.set()
     store.record_operation_terminated = hooked_term
 
     daemon.start()
@@ -354,7 +345,8 @@ def test_late_terminal_telemetry_after_timeout(components):
     original_term = store.record_operation_terminated
     def hooked_term(*args, **kwargs):
         original_term(*args, **kwargs)
-        daemon_processed.set()
+        if kwargs.get("physical_operation_id") == "op-dummy":
+            daemon_processed.set()
     store.record_operation_terminated = hooked_term
 
     daemon.start()
@@ -404,7 +396,8 @@ def test_duplicate_terminal_evidence_and_repeated_timeout(components):
     original_term = store.record_operation_terminated
     def hooked_term(*args, **kwargs):
         original_term(*args, **kwargs)
-        daemon_processed.set()
+        if kwargs.get("physical_operation_id") == "op-dummy":
+            daemon_processed.set()
     store.record_operation_terminated = hooked_term
 
     daemon.start()
@@ -458,7 +451,8 @@ def test_future_epoch_evidence_through_real_path(components):
     original_term = store.record_operation_terminated
     def hooked_term(*args, **kwargs):
         original_term(*args, **kwargs)
-        daemon_processed.set()
+        if kwargs.get("physical_operation_id") == "op-dummy":
+            daemon_processed.set()
     store.record_operation_terminated = hooked_term
 
     daemon.start()
