@@ -118,12 +118,6 @@ def test_race_a_timeout_first(components):
         contention_event.set()
         t_a.join()
         
-        # We must also durably record the timeout (which the control plane does natively in manager but we don't have manager here)
-        store.record_operation_terminated(
-            session_id=session_id, device_id="dev-1", device_epoch=1,
-            controller_epoch=store._epoch_id, physical_operation_id="op-1",
-            command_nonce="nonce-1", resolution=CommandState.FAULTED_UNKNOWN.value
-        )
         
         # Sync daemon using dummy
         daemon_processed = threading.Event()
@@ -293,6 +287,7 @@ def test_restart_durable_outcome_evidence_end_to_end(components):
     canon = ("dev-1", 1, 1, "op-1", "nonce-1")
     assert canon in snapshot
     assert snapshot[canon].get("resolution") == "FAULTED_UNKNOWN"
+    assert daemon2.stale_epoch_rejections == 1
 
 def test_late_timeout_after_successful_terminal_evidence(components):
     transport, gate, daemon, store = components
@@ -353,11 +348,6 @@ def test_late_terminal_telemetry_after_timeout(components):
 
     # 1. Timeout -> FAULTED_UNKNOWN
     gate.resolve_timeout(exec_id, lifecycle_generation=1)
-    store.record_operation_terminated(
-        session_id=session_id, device_id="dev-1", device_epoch=1,
-        controller_epoch=store._epoch_id, physical_operation_id="op-1",
-        command_nonce="nonce-1", resolution=CommandState.FAULTED_UNKNOWN.value
-    )
 
     # 2. Late telemetry arrives
     event = create_event(exec_id, sequence=1, state=CommandState.OPERATION_COMPLETED, session_id=session_id, epoch=store._epoch_id)
@@ -406,12 +396,6 @@ def test_duplicate_terminal_evidence_and_repeated_timeout(components):
     gate.resolve_timeout(exec_id, lifecycle_generation=1)
     rec1 = gate.resolve_timeout(exec_id, lifecycle_generation=1)
     assert rec1.current_state == CommandState.FAULTED_UNKNOWN
-
-    store.record_operation_terminated(
-        session_id=session_id, device_id="dev-1", device_epoch=1,
-        controller_epoch=store._epoch_id, physical_operation_id="op-1",
-        command_nonce="nonce-1", resolution=CommandState.FAULTED_UNKNOWN.value
-    )
 
     # Duplicate terminal evidence
     event = create_event(exec_id, sequence=1, state=CommandState.OPERATION_COMPLETED, session_id=session_id, epoch=store._epoch_id)
@@ -478,3 +462,168 @@ def test_future_epoch_evidence_through_real_path(components):
     # Future epoch event is rejected, capacity remains retained!
     canon = ("dev-1", 1, store._epoch_id, "op-1", "nonce-1")
     assert canon in store.get_active_operations_snapshot()
+from holomed.devices.control.manager import DeviceControlManager
+from holomed.devices.registry import DeviceRegistry
+from holomed.devices.interfaces import IDevice, IPhysicalEndpoint
+from holomed.devices.models import PhysicalCommandResult, SubmissionStatus
+
+class MockEndpoint(IPhysicalEndpoint):
+    def __init__(self, endpoint_id="end-1"):
+        self._endpoint_id = endpoint_id
+        self._active_lease = None
+    @property
+    def endpoint_id(self): return self._endpoint_id
+    @property
+    def capability_scopes(self): return frozenset(["cap1"])
+    @property
+    def active_lease(self): return self._active_lease
+    def acquire_lease(self, lease): self._active_lease = lease
+    def release_lease(self, session_id):
+        if self._active_lease and self._active_lease.session_id == session_id:
+            self._active_lease = None
+    def submit_command(self, cmd):
+        return PhysicalCommandResult(status=SubmissionStatus.ACCEPTED, details={})
+    def request_stop(self, execution_id): pass
+    def emergency_stop(self): pass
+    @property
+    def device_id(self): return "dev-1"
+    @property
+    def endpoint_state(self): pass
+    @property
+    def safety_state(self): pass
+    def recover(self): pass
+
+class MockDeviceForManager(IDevice):
+    def __init__(self, device_id="dev-1"):
+        self._device_id = device_id
+        self._endpoints = [MockEndpoint("end-1")]
+        from holomed.devices.interfaces import DeviceState
+        self._state = DeviceState.UNREGISTERED
+    @property
+    def device_id(self): return self._device_id
+    @property
+    def device_class(self): return "class"
+    @property
+    def capabilities(self):
+        class Cap:
+            capability_id = "cap1"
+            requires_physical_endpoint = True
+            target_endpoint_id = "end-1"
+        return [Cap()]
+    @property
+    def current_epoch(self): return 1
+    @property
+    def endpoints(self): return self._endpoints
+    @property
+    def physical_id(self): return "phys"
+    @property
+    def device_type(self): return "type"
+    @property
+    def state(self):
+        return self._state
+    @state.setter
+    def state(self, value):
+        self._state = value
+    def initialize(self, ctx): pass
+    def start(self): pass
+    def stop(self): pass
+    def health(self): pass
+
+def test_production_timeout_durable_outcome(tmp_path):
+    registry = DeviceRegistry("tok")
+    dev = MockDeviceForManager("dev-1")
+    registry.register(dev, "tok")
+    
+    from holomed.devices.interfaces import DeviceState
+    dev.state = DeviceState.ACTIVE
+
+    auth = ControllerAuthorityStore(tmp_path)
+    auth.allocate_next_epoch()
+    store = DurableSessionStore(tmp_path, epoch_id=auth.read_current_epoch())
+    session_id = store.start_session("test_client", store._epoch_id).session_id
+    
+    gate = ExecutionResolutionGate()
+    transport = TelemetryTransport()
+    reconciler = TelemetryReconciler(transport, gate)
+    daemon = ReconciliationDaemon(reconciler, store, polling_interval=0.01)
+
+    class DummyRehydrationEngine:
+        def rehydrate_controller_state(self, current_session_id):
+            pass
+
+    manager = DeviceControlManager(
+        registry=registry,
+        resolution_gate=gate,
+        capacity_releaser=store.record_operation_terminated,
+        capacity_admitter=store.record_operation_admitted,
+        reconciliation_daemon=daemon,
+        authoritative_epoch_provider=lambda: store._epoch_id,
+        rehydration_engine=DummyRehydrationEngine()
+    )
+    
+    class DummyCtx:
+        epoch_id = store._epoch_id
+    ctx = DummyCtx()
+    manager.initialize(ctx)
+    manager.start()
+    
+    manager.register_command("cmd1", lambda d, p: {}, required_capability_id="cap1")
+    
+    term_called = threading.Event()
+    original_term = store.record_operation_terminated
+    def hooked_term(*args, **kwargs):
+        original_term(*args, **kwargs)
+        if args and len(args) > 6 and args[6] == "FAULTED_UNKNOWN":
+            term_called.set()
+        elif kwargs.get("resolution") == "FAULTED_UNKNOWN":
+            term_called.set()
+    manager._capacity_releaser = hooked_term
+    
+    exec_id = "exec-timeout-prod"
+    from holomed.protocol.models import MessageEnvelope, MessageType
+    import uuid
+    env = MessageEnvelope(
+        protocol_version="1.0",
+        message_id=str(uuid.uuid4()),
+        correlation_id=str(uuid.uuid4()),
+        causation_id=None,
+        message_type=MessageType.COMMAND,
+        message_name="device.command",
+        source="client",
+        target="device_control_manager",
+        timestamp_utc=123456789.0,
+        payload={
+            "device_id": "dev-1",
+            "command": "cmd1",
+            "session_id": session_id,
+            "session_lifecycle_generation": 1,
+            "execution_id": exec_id
+        },
+        metadata={}
+    )
+    
+    res = manager.handle_command(env)
+    assert res.message_type != MessageType.ERROR
+    
+    with manager._timeout_lock:
+        if exec_id in manager._deadlines:
+            manager._deadlines[exec_id] = (0.0, manager._deadlines[exec_id][1])
+    
+    assert term_called.wait(timeout=5.0)
+    
+    snapshot = store.get_active_operations_snapshot()
+    canon = None
+    for key, val in snapshot.items():
+        if val.get("execution_id") == exec_id:
+            canon = key
+            break
+            
+    assert canon is not None
+    assert snapshot[canon].get("resolution") == "FAULTED_UNKNOWN"
+    
+    dev = registry.get("dev-1")
+    assert dev.endpoints[0].active_lease is not None
+    assert dev.endpoints[0].active_lease.execution_id == exec_id
+    
+    manager.stop()
+

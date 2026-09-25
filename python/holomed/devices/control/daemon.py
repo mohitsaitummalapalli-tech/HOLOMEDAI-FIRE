@@ -7,6 +7,7 @@ from typing import Optional
 from holomed.devices.reconciler import TelemetryReconciler
 from holomed.persistence.sessions import DurableSessionStore
 from holomed.devices.models import AuthoritativeExecutionRecord
+from holomed.devices.control.exceptions import StaleEpochError
 import logging
 
 logger = logging.getLogger(__name__)
@@ -25,6 +26,7 @@ class ReconciliationDaemon:
         self._polling_interval = polling_interval
         self._shutdown_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
+        self.stale_epoch_rejections: int = 0
 
     def start(self) -> None:
         """Start the reconciliation daemon."""
@@ -84,6 +86,11 @@ class ReconciliationDaemon:
                 if record.telemetry_identity != canon:
                     logger.error(f"Telemetry identity mismatch for {record.execution_id}: {record.telemetry_identity} != {canon}")
                     return
+                
+                # Verify STALE EPOCH REJECTION
+                if controller_epoch < self._session_store._epoch_id:
+                    self.stale_epoch_rejections += 1
+                    raise StaleEpochError(f"Rejected stale epoch: {controller_epoch} < {self._session_store._epoch_id}")
                 
                 # Quarantined / Faulted Unknown remain in the active set but are marked.
                 # However, they are still considered "terminal" for the ExecutionResolutionGate.

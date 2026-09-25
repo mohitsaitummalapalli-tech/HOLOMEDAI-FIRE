@@ -123,29 +123,48 @@ class DeviceControlManager(IService):
         self._executed_queries_count: int = 0
         self._sink_errors_count: int = 0
 
-    def release_capacity_for_execution(self, execution_id: str, terminal_state: str) -> None:
-        """Explicitly release physical capacity when a terminal state is proven."""
+    def durably_record_terminal_state(self, execution_id: str, terminal_state: str) -> None:
+        """Atomically records a terminal software resolution in the durable journal."""
+        with self._timeout_lock:
+            cmd = self._active_commands.pop(execution_id, None)
+            
+        if not cmd or not self._capacity_releaser:
+            return
+
+        device_id = None
+        for device in self._registry.all_devices:
+            for endpoint in device.endpoints:
+                if endpoint.endpoint_id == cmd.endpoint_id:
+                    device_id = device.device_id
+                    break
+            if device_id:
+                break
+                
+        if device_id:
+            val = terminal_state.value if hasattr(terminal_state, "value") else str(terminal_state)
+            self._capacity_releaser(
+                cmd.session_id,
+                device_id,
+                cmd.device_epoch,
+                cmd.controller_epoch,
+                cmd.physical_operation_id,
+                cmd.command_nonce,
+                val
+            )
+
+    def _release_physical_lease(self, execution_id: str) -> None:
+        """Hardware-level lease release."""
         for device in self._registry.all_devices:
             for endpoint in device.endpoints:
                 lease = endpoint.active_lease
                 if lease and lease.execution_id == execution_id:
-                    session_id = lease.session_id
-                    # 1. Hardware-level release
-                    self._lease_registry.release_lease(endpoint, session_id)
-                    # 2. Durable journal append
-                    with self._timeout_lock:
-                        cmd = self._active_commands.pop(execution_id, None)
-                    if cmd and self._capacity_releaser:
-                        self._capacity_releaser(
-                            session_id,
-                            device.device_id,
-                            cmd.device_epoch,
-                            cmd.controller_epoch,
-                            cmd.physical_operation_id,
-                            cmd.command_nonce,
-                            terminal_state
-                        )
+                    self._lease_registry.release_lease(endpoint, lease.session_id)
                     return
+
+    def release_capacity_for_execution(self, execution_id: str, terminal_state: str) -> None:
+        """Explicitly release physical capacity when a terminal state is proven."""
+        self._release_physical_lease(execution_id)
+        self.durably_record_terminal_state(execution_id, terminal_state)
 
     # --------------------------------------------------------------------------
     # IService Properties & Lifecycle Implementation
@@ -726,8 +745,10 @@ class DeviceControlManager(IService):
             for exec_id, gen in expired:
                 if self._resolution_gate:
                     record = self._resolution_gate.resolve_timeout(exec_id, gen)
-                    if record.terminal_resolution_status and self._resolution_gate.is_capacity_release_terminal(record.current_state):
-                        self.release_capacity_for_execution(exec_id, record.current_state)
+                    if record.terminal_resolution_status:
+                        self.durably_record_terminal_state(exec_id, record.current_state)
+                        if self._resolution_gate.is_capacity_release_terminal(record.current_state):
+                            self._release_physical_lease(exec_id)
 
             self._timeout_shutdown.wait(0.1)
 
@@ -736,8 +757,15 @@ class DeviceControlManager(IService):
         with self._timeout_lock:
             if execution_id in self._deadlines:
                 _, gen = self._deadlines.pop(execution_id)
-                if self._resolution_gate:
-                    self._resolution_gate.resolve_timeout(execution_id, gen)
+            else:
+                return
+                
+        if self._resolution_gate:
+            record = self._resolution_gate.resolve_timeout(execution_id, gen)
+            if record.terminal_resolution_status:
+                self.durably_record_terminal_state(execution_id, record.current_state)
+                if self._resolution_gate.is_capacity_release_terminal(record.current_state):
+                    self._release_physical_lease(execution_id)
     def _emit_audit_event(self, topic: str, payload: Dict[str, Any]) -> None:
         validate_concrete_topic(topic)
         envelope = create_event(

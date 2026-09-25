@@ -47,3 +47,6 @@ class IdempotencyConflictError(DeviceControlError):
 
 class ControlCapacityError(DeviceControlError):
     """Raised when registered commands, queries, or handler capacities are exceeded."""
+
+class StaleEpochError(DeviceControlError):
+    """Raised when telemetry arrives from a stale controller epoch."""
