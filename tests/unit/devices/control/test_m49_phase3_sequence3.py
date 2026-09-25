@@ -603,3 +603,72 @@ def test_evidence_identity_mismatch_rejection(components):
             controller_epoch=epoch, physical_operation_id="WRONG_OP", command_nonce="nonce-ev",
             resolution="OPERATION_COMPLETED"
         )
+
+def test_real_g8_telemetry_trust_path(components):
+    """E2E proof: Full telemetry trust boundary rejection and acceptance."""
+    transport, gate, daemon, session_store = components
+    publisher = TelemetryPublisher(transport)
+    
+    epoch = session_store._epoch_id
+    session_id = session_store.start_session("g8-trust", epoch).session_id
+    execution_id = "exec-g8"
+    
+    session_store.record_operation_admitted(
+        endpoint_id="end-1", session_id=session_id, device_id="dev-g8",
+        device_epoch=1, controller_epoch=epoch, physical_operation_id="op-g8",
+        command_nonce="nonce-g8", execution_id=execution_id, command_name="cmd"
+    )
+    assert session_store.get_active_physical_operations() == 1
+    
+    # 1. Rejection: Wrong Source Authority
+    bad_auth_event = create_event(execution_id, 1, CommandState.OPERATION_COMPLETED, session_id=session_id)
+    # The reconciler skips anything not HARDWARE_DRIVER or ENDPOINT_ADAPTER
+    # wait, create_event is a namedtuple-like, I need to use replace or construct directly
+    # ExecutionTelemetryEvent is a dataclass with frozen=True
+    import dataclasses
+    from holomed.devices.models import EventSourceAuthority
+    bad_auth_event = dataclasses.replace(bad_auth_event, source_authority=EventSourceAuthority.CONTROL_PLANE_TIMEOUT)
+    publisher.publish(bad_auth_event)
+    daemon.run_reconciliation_cycle()
+    assert session_store.get_active_physical_operations() == 1
+    assert execution_id not in gate._records
+    
+    # 2. Accept baseline sequence so we can test freshness rejection
+    base_event = create_event(execution_id, 2, CommandState.RUNNING, session_id=session_id)
+    publisher.publish(base_event)
+    daemon.run_reconciliation_cycle()
+    assert session_store.get_active_physical_operations() == 1
+    assert gate._records[execution_id].latest_accepted_sequence == 2
+    
+    # 3. Rejection: Stale Freshness (Sequence regression)
+    stale_event = create_event(execution_id, 1, CommandState.OPERATION_COMPLETED, session_id=session_id)
+    publisher.publish(stale_event)
+    daemon.run_reconciliation_cycle()
+    assert session_store.get_active_physical_operations() == 1
+    assert gate._records[execution_id].terminal_resolution_status is False
+    
+    # 4. Rejection: Mismatched Lifecycle Generation
+    bad_gen_event = create_event(execution_id, 3, CommandState.OPERATION_COMPLETED, session_id=session_id)
+    bad_gen_event = dataclasses.replace(bad_gen_event, lifecycle_generation=999)
+    publisher.publish(bad_gen_event)
+    daemon.run_reconciliation_cycle()
+    assert session_store.get_active_physical_operations() == 1
+    assert gate._records[execution_id].terminal_resolution_status is False
+    
+    # 5. Rejection: Unrelated Execution ID (Simulates mismatched device/operation mapping)
+    wrong_exec_event = create_event("wrong-exec", 4, CommandState.OPERATION_COMPLETED, session_id=session_id)
+    publisher.publish(wrong_exec_event)
+    daemon.run_reconciliation_cycle()
+    assert session_store.get_active_physical_operations() == 1
+    # Gate accepts it for the wrong exec, but Daemon ignores it because "wrong-exec" is not in active_snapshot
+    assert gate._records["wrong-exec"].terminal_resolution_status is True
+    
+    # 6. Acceptance: Valid Evidence correctly bound
+    valid_event = create_event(execution_id, 5, CommandState.OPERATION_COMPLETED, session_id=session_id)
+    publisher.publish(valid_event)
+    daemon.run_reconciliation_cycle()
+    
+    # Prove authoritative terminal record and capacity release
+    assert gate._records[execution_id].terminal_resolution_status is True
+    assert session_store.get_active_physical_operations() == 0
+

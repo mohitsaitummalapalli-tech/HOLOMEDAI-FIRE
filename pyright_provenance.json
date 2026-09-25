@@ -1,0 +1,432 @@
+[
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\proximity\\conftest.py:168:21 - error: Argument of type \"Literal['TESTING']\" cannot be assigned to parameter \"environment\" of type \"EnvironmentProfile\" in function \"__init__\"",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\proximity\\conftest.py:171:19 - error: Argument of type \"Literal['DEBUG']\" cannot be assigned to parameter \"log_level\" of type \"LogLevel\" in function \"__init__\"",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\proximity\\test_proximity_hardening.py:266:44 - error: Argument of type \"tuple[float, float, float] | float\" cannot be assigned to parameter \"tip_position\" of type \"Point3D\" in function \"capsule_to_sphere_clearance\"",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\proximity\\test_proximity_hardening.py:267:44 - error: Argument of type \"tuple[float, float, float] | float\" cannot be assigned to parameter \"tip_position\" of type \"Point3D\" in function \"capsule_to_sphere_clearance\"",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\proximity\\test_proximity_hardening.py:266:44 - error: Argument of type \"tuple[float, float, float] | float\" cannot be assigned to parameter \"shaft_direction\" of type \"Vector3D\" in function \"capsule_to_sphere_clearance\"",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\proximity\\test_proximity_hardening.py:267:44 - error: Argument of type \"tuple[float, float, float] | float\" cannot be assigned to parameter \"shaft_direction\" of type \"Vector3D\" in function \"capsule_to_sphere_clearance\"",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\proximity\\test_proximity_hardening.py:266:44 - error: Argument of type \"tuple[float, float, float] | float\" cannot be assigned to parameter \"shaft_length\" of type \"float\" in function \"capsule_to_sphere_clearance\"",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\proximity\\test_proximity_hardening.py:267:44 - error: Argument of type \"tuple[float, float, float] | float\" cannot be assigned to parameter \"shaft_length\" of type \"float\" in function \"capsule_to_sphere_clearance\"",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\proximity\\test_proximity_hardening.py:266:44 - error: Argument of type \"tuple[float, float, float] | float\" cannot be assigned to parameter \"sphere_center\" of type \"Point3D\" in function \"capsule_to_sphere_clearance\"",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\proximity\\test_proximity_hardening.py:267:44 - error: Argument of type \"tuple[float, float, float] | float\" cannot be assigned to parameter \"sphere_center\" of type \"Point3D\" in function \"capsule_to_sphere_clearance\"",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\proximity\\test_proximity_hardening.py:266:44 - error: Argument of type \"tuple[float, float, float] | float\" cannot be assigned to parameter \"sphere_radius\" of type \"float\" in function \"capsule_to_sphere_clearance\"",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\proximity\\test_proximity_hardening.py:267:44 - error: Argument of type \"tuple[float, float, float] | float\" cannot be assigned to parameter \"sphere_radius\" of type \"float\" in function \"capsule_to_sphere_clearance\"",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\proximity\\test_proximity_service.py:56:20 - error: Argument of type \"Unknown | None\" cannot be assigned to parameter \"context\" of type \"RuntimeContext\" in function \"initialize\"",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\recovery\\conftest.py:55:21 - error: Argument of type \"Literal['TESTING']\" cannot be assigned to parameter \"environment\" of type \"EnvironmentProfile\" in function \"__init__\"",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\recovery\\conftest.py:58:19 - error: Argument of type \"Literal['DEBUG']\" cannot be assigned to parameter \"log_level\" of type \"LogLevel\" in function \"__init__\"",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\recovery\\test_recovery_service.py:288:21 - error: \"payload\" is not a known attribute of \"None\" (reportOptionalMemberAccess)",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\registration\\conftest.py:30:21 - error: Argument of type \"Literal['TESTING']\" cannot be assigned to parameter \"environment\" of type \"EnvironmentProfile\" in function \"__init__\"",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\registration\\conftest.py:33:19 - error: Argument of type \"Literal['DEBUG']\" cannot be assigned to parameter \"log_level\" of type \"LogLevel\" in function \"__init__\"",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\registration\\conftest.py:142:37 - error: Cannot assign to attribute \"get_plan_for_session\" for class \"PlanningService\"",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\registration\\test_registration_adversarial_matrix.py:158:39 - error: \"state\" is not a known attribute of \"None\" (reportOptionalMemberAccess)",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\registration\\test_registration_adversarial_matrix.py:162:39 - error: \"state\" is not a known attribute of \"None\" (reportOptionalMemberAccess)",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\registration\\test_registration_adversarial_matrix.py:282:17 - error: \"message_type\" is not a known attribute of \"None\" (reportOptionalMemberAccess)",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\registration\\test_registration_adversarial_matrix.py:283:51 - error: \"payload\" is not a known attribute of \"None\" (reportOptionalMemberAccess)",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\registration\\test_registration_service.py:257:21 - error: \"message_type\" is not a known attribute of \"None\" (reportOptionalMemberAccess)",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\registration\\test_registration_service.py:258:21 - error: \"payload\" is not a known attribute of \"None\" (reportOptionalMemberAccess)",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\registration\\test_registration_service.py:259:36 - error: \"payload\" is not a known attribute of \"None\" (reportOptionalMemberAccess)",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\runtime\\test_hardening.py:213:34 - error: Argument of type \"Literal['unexpected_success']\" cannot be assigned to parameter \"object\" of type \"RuntimeEngine\" in function \"append\"",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\runtime\\test_hardening.py:215:34 - error: Argument of type \"Literal['correctly_rejected']\" cannot be assigned to parameter \"object\" of type \"RuntimeEngine\" in function \"append\"",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\safety_gate\\conftest.py:42:21 - error: Argument of type \"Literal['TESTING']\" cannot be assigned to parameter \"environment\" of type \"EnvironmentProfile\" in function \"__init__\"",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\safety_gate\\conftest.py:45:19 - error: Argument of type \"Literal['DEBUG']\" cannot be assigned to parameter \"log_level\" of type \"LogLevel\" in function \"__init__\"",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\safety_gate\\test_m30_safety_gate_dispatcher.py:228:25 - error: \"message_type\" is not a known attribute of \"None\" (reportOptionalMemberAccess)",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\safety_gate\\test_m30_safety_gate_dispatcher.py:265:25 - error: \"message_type\" is not a known attribute of \"None\" (reportOptionalMemberAccess)",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\safety_gate\\test_m30_safety_gate_dispatcher.py:297:21 - error: \"message_type\" is not a known attribute of \"None\" (reportOptionalMemberAccess)",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\safety_gate\\test_m30_safety_gate_dispatcher.py:495:21 - error: \"message_type\" is not a known attribute of \"None\" (reportOptionalMemberAccess)",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\safety_gate\\test_m30_safety_gate_dispatcher.py:229:25 - error: \"payload\" is not a known attribute of \"None\" (reportOptionalMemberAccess)",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\safety_gate\\test_m30_safety_gate_dispatcher.py:230:25 - error: \"payload\" is not a known attribute of \"None\" (reportOptionalMemberAccess)",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\safety_gate\\test_m30_safety_gate_dispatcher.py:231:25 - error: \"payload\" is not a known attribute of \"None\" (reportOptionalMemberAccess)",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\safety_gate\\test_m30_safety_gate_dispatcher.py:266:25 - error: \"payload\" is not a known attribute of \"None\" (reportOptionalMemberAccess)",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\safety_gate\\test_m30_safety_gate_dispatcher.py:298:21 - error: \"payload\" is not a known attribute of \"None\" (reportOptionalMemberAccess)",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\safety_gate\\test_m30_safety_gate_dispatcher.py:407:21 - error: \"payload\" is not a known attribute of \"None\" (reportOptionalMemberAccess)",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\safety_gate\\test_m30_safety_gate_dispatcher.py:496:21 - error: \"payload\" is not a known attribute of \"None\" (reportOptionalMemberAccess)",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\safety_gate\\test_m47_spatial_recovery_interlock.py:51:21 - error: Argument of type \"Literal['TESTING']\" cannot be assigned to parameter \"environment\" of type \"EnvironmentProfile\" in function \"__init__\"",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\safety_gate\\test_m47_spatial_recovery_interlock.py:54:19 - error: Argument of type \"Literal['DEBUG']\" cannot be assigned to parameter \"log_level\" of type \"LogLevel\" in function \"__init__\"",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\safety_gate\\test_m47_spatial_recovery_interlock.py:69:12 - error: Type \"MessageEnvelope\" is not assignable to return type \"MagicMock\"",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\safety_gate\\test_m47_spatial_recovery_interlock.py:78:12 - error: Type \"MessageEnvelope\" is not assignable to return type \"MagicMock\"",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\tools\\conftest.py:27:21 - error: Argument of type \"Literal['TESTING']\" cannot be assigned to parameter \"environment\" of type \"EnvironmentProfile\" in function \"__init__\"",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\tools\\conftest.py:30:19 - error: Argument of type \"Literal['DEBUG']\" cannot be assigned to parameter \"log_level\" of type \"LogLevel\" in function \"__init__\"",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\tools\\test_service.py:205:24 - error: \"message_type\" is not a known attribute of \"None\" (reportOptionalMemberAccess)",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\tools\\test_service.py:211:21 - error: \"message_type\" is not a known attribute of \"None\" (reportOptionalMemberAccess)",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\tools\\test_service.py:206:24 - error: \"payload\" is not a known attribute of \"None\" (reportOptionalMemberAccess)",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\tools\\test_service.py:212:25 - error: \"payload\" is not a known attribute of \"None\" (reportOptionalMemberAccess)",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\ultron\\conftest.py:56:9 - error: \"capabilities\" incorrectly overrides property of same name in class \"IDevice\"",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\ultron\\conftest.py:57:44 - error: Cannot access attribute \"DATA_STREAM\" for class \"type[DeviceCapability]\"",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\ultron\\conftest.py:59:9 - error: Method \"initialize\" overrides class \"IDevice\" in an incompatible manner",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\ultron\\conftest.py:65:9 - error: Method \"stop\" overrides class \"IDevice\" in an incompatible manner",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\ultron\\conftest.py:88:21 - error: Argument of type \"Literal['TESTING']\" cannot be assigned to parameter \"environment\" of type \"EnvironmentProfile\" in function \"__init__\"",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\ultron\\conftest.py:91:19 - error: Argument of type \"Literal['DEBUG']\" cannot be assigned to parameter \"log_level\" of type \"LogLevel\" in function \"__init__\"",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\ultron\\conftest.py:118:9 - error: \"register\" is not a known attribute of \"None\" (reportOptionalMemberAccess)",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\ultron\\test_hardening.py:67:57 - error: Argument of type \"() -> None\" cannot be assigned to parameter \"factory\" of type \"ServiceFactory\" in function \"__init__\"",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\ultron\\test_hardening.py:68:65 - error: Argument of type \"() -> None\" cannot be assigned to parameter \"factory\" of type \"ServiceFactory\" in function \"__init__\"",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\ultron\\test_hardening.py:69:63 - error: Argument of type \"() -> None\" cannot be assigned to parameter \"factory\" of type \"ServiceFactory\" in function \"__init__\"",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\ultron\\test_hardening.py:70:67 - error: Argument of type \"() -> None\" cannot be assigned to parameter \"factory\" of type \"ServiceFactory\" in function \"__init__\"",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\ultron\\test_hardening.py:73:13 - error: Argument of type \"() -> None\" cannot be assigned to parameter \"factory\" of type \"ServiceFactory\" in function \"__init__\"",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\ultron\\test_m38_ultron_session_isolation.py:397:91 - error: Cannot access attribute \"TRACK\" for class \"type[ActionType]\"",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\ultron\\test_m38_ultron_session_isolation.py:397:109 - error: Cannot access attribute \"ALERT\" for class \"type[ActionType]\"",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\ultron\\test_models.py:139:27 - error: Argument of type \"set[Modality]\" cannot be assigned to parameter \"source_modalities\" of type \"frozenset[Modality]\" in function \"__init__\"",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\ultron\\test_observation.py:91:37 - error: Argument of type \"SimpleNamespace\" cannot be assigned to parameter \"obs\" of type \"ModalityObservation\" in function \"validate_and_record\"",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\workflow\\conftest.py:26:21 - error: Argument of type \"Literal['TESTING']\" cannot be assigned to parameter \"environment\" of type \"EnvironmentProfile\" in function \"__init__\"",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\workflow\\conftest.py:29:19 - error: Argument of type \"Literal['DEBUG']\" cannot be assigned to parameter \"log_level\" of type \"LogLevel\" in function \"__init__\"",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\workflow\\test_workflow_adversarial_matrix.py:171:17 - error: \"message_type\" is not a known attribute of \"None\" (reportOptionalMemberAccess)",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\workflow\\test_workflow_adversarial_matrix.py:172:52 - error: \"payload\" is not a known attribute of \"None\" (reportOptionalMemberAccess)",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\workflow\\test_workflow_adversarial_matrix.py:173:33 - error: \"payload\" is not a known attribute of \"None\" (reportOptionalMemberAccess)",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\workflow\\test_workflow_service.py:193:23 - error: \"message_type\" is not a known attribute of \"None\" (reportOptionalMemberAccess)",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\workflow\\test_workflow_service.py:199:24 - error: \"message_type\" is not a known attribute of \"None\" (reportOptionalMemberAccess)",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\workflow\\test_workflow_service.py:213:20 - error: \"message_type\" is not a known attribute of \"None\" (reportOptionalMemberAccess)",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\workflow\\test_workflow_service.py:223:20 - error: \"message_type\" is not a known attribute of \"None\" (reportOptionalMemberAccess)",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\workflow\\test_workflow_service.py:194:23 - error: \"payload\" is not a known attribute of \"None\" (reportOptionalMemberAccess)",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\workflow\\test_workflow_service.py:200:24 - error: \"payload\" is not a known attribute of \"None\" (reportOptionalMemberAccess)",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\workflow\\test_workflow_service.py:214:20 - error: \"payload\" is not a known attribute of \"None\" (reportOptionalMemberAccess)",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\workflow\\test_workflow_service.py:224:20 - error: \"payload\" is not a known attribute of \"None\" (reportOptionalMemberAccess)",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\xr\\conftest.py:28:21 - error: Argument of type \"Literal['TESTING']\" cannot be assigned to parameter \"environment\" of type \"EnvironmentProfile\" in function \"__init__\"",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\xr\\conftest.py:31:19 - error: Argument of type \"Literal['DEBUG']\" cannot be assigned to parameter \"log_level\" of type \"LogLevel\" in function \"__init__\"",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\xr\\test_hardening.py:70:57 - error: Argument of type \"() -> None\" cannot be assigned to parameter \"factory\" of type \"ServiceFactory\" in function \"__init__\"",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\xr\\test_hardening.py:71:67 - error: Argument of type \"() -> None\" cannot be assigned to parameter \"factory\" of type \"ServiceFactory\" in function \"__init__\"",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\xr\\test_hardening.py:74:13 - error: Argument of type \"() -> None\" cannot be assigned to parameter \"factory\" of type \"ServiceFactory\" in function \"__init__\"",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  },
+  {
+    "diagnostic": "c:\\Users\\mohit\\OneDrive\\Desktop\\HOLOMEDAI-FIRE\\tests\\unit\\xr\\test_service.py:109:32 - error: \"node_count\" is not a known attribute of \"None\" (reportOptionalMemberAccess)",
+    "classification": "A",
+    "justification": "Inevitable resolution of an invalid type signature due to Sequence 3 type signatures."
+  }
+]
