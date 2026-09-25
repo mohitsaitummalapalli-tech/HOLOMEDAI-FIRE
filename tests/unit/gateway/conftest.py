@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import pytest
 
-from holomed.configuration.models import AppConfig
+from holomed.configuration.models import AppConfig, EnvironmentProfile, LogLevel
 from holomed.core.dispatcher import MessageDispatcher
 from holomed.runtime.context import RuntimeContext
 from holomed.runtime.logging import SecretFilter
@@ -15,10 +15,10 @@ from holomed.runtime.logging import SecretFilter
 def runtime_context() -> RuntimeContext:
     config = AppConfig(
         app_name="HoloMed-Gateway-Test",
-        environment="TESTING",
+        environment=EnvironmentProfile.TESTING,
         host="127.0.0.1",
         port=8088,
-        log_level="DEBUG",
+        log_level=LogLevel.DEBUG,
         gemini_api_key=None,
         protocol_version="1.0",
     )

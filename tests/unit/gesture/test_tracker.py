@@ -90,6 +90,7 @@ def test_tracker_eight_hand_capacity_limit(open_hand_landmarks: tuple[SpatialLan
         # Shift wrist depth position by 0.5m each so they don't associate
         shifted = []
         for lm in open_hand_landmarks:
+            assert lm.depth_m is not None
             shifted.append(SpatialLandmark(lm.landmark_id, lm.name, lm.u, lm.v, lm.depth_m + 0.5 * i, lm.confidence))
         s_3d = [unproject_spatial_landmark(lm) for lm in shifted]
         for _ in range(3):
@@ -102,6 +103,7 @@ def test_tracker_eight_hand_capacity_limit(open_hand_landmarks: tuple[SpatialLan
     # 9th hand arrives: all 8 are CONFIRMED, so 9th hand is dropped
     extra = []
     for lm in open_hand_landmarks:
+        assert lm.depth_m is not None
         extra.append(SpatialLandmark(lm.landmark_id, lm.name, lm.u, lm.v, lm.depth_m + 5.0, lm.confidence))
     extra_3d = [unproject_spatial_landmark(lm) for lm in extra]
     tracks, new_id = tracker.update(extra_3d, Handedness.RIGHT)

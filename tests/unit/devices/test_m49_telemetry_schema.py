@@ -63,7 +63,7 @@ def test_event_immutability():
 
     with pytest.raises(Exception):
         # frozen dataclass prevents setting attributes
-        event.event_sequence = 2
+        event.event_sequence = 2  # type: ignore
 
 
 def test_nested_payload_integrity():
@@ -93,10 +93,10 @@ def test_nested_payload_integrity():
     # Payload should be deep frozen by deep_freeze_parameter
     with pytest.raises(Exception):
         # Type error or attribute error on MappingProxyType
-        event.payload["progress"] = 60
+        event.payload["progress"] = 60  # type: ignore
 
     with pytest.raises(Exception):
-        event.payload["nested"]["a"] = 2
+        event.payload["nested"]["a"] = 2  # type: ignore
 
 
 def test_valid_source_authority():
@@ -233,4 +233,4 @@ def test_record_mutation_prevented():
 
     with pytest.raises(AttributeError):
         # We exposed no setters, only properties.
-        record.current_state = CommandState.COMPLETED
+        record.current_state = CommandState.COMPLETED  # type: ignore

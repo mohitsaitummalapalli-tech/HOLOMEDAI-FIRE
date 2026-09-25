@@ -45,6 +45,7 @@ def _make_started_service(
         secret_filter=secret_filter,
         logger=logger,
     )
+    assert runtime_context is not None
     svc.initialize(runtime_context)
     svc.start()
     return svc
@@ -287,6 +288,7 @@ class TestDriftServiceRoutes:
 
         # 3 fresh observations within dwell buffer
         t0 = datetime.now(timezone.utc) - timedelta(milliseconds=200)
+        response = None
         for i in range(3):
             t_sample = t0 + timedelta(milliseconds=i * 80)
             cmd = create_command(
@@ -305,6 +307,7 @@ class TestDriftServiceRoutes:
             )
             response = svc.handle_evaluate_command(cmd)
 
+        assert response is not None
         assert response.message_name == "drift.evaluate.response"
         assert response.payload["state"] == "STABLE"
         assert response.payload["passed"] is True

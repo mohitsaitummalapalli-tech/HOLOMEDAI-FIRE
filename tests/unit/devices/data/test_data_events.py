@@ -60,7 +60,7 @@ def test_event_sink_failure_isolation() -> None:
         def emit(self, event):
             raise RuntimeError("Database connection lost")
 
-    processor = DeviceDataProcessor(registry=registry, event_sink=BrokenSink())
+    processor = DeviceDataProcessor(registry=registry, event_sink=BrokenSink())  # type: ignore
     ctx = make_test_context(epoch_id=1)
     processor.initialize(ctx)
     processor.start()

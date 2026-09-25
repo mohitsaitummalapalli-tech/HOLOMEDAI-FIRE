@@ -98,9 +98,6 @@ class IPhysicalEndpoint(abc.ABC):
     def endpoint_state(self) -> EndpointState:
         """Current execution plane state of the endpoint (e.g., READY, QUARANTINED)."""
 
-    @abc.abstractmethod
-    def recover(self) -> None:
-        """Explicitly recover the endpoint from QUARANTINED state."""
 
     @abc.abstractmethod
     def emergency_stop(self) -> EndpointSafetyState:
@@ -114,6 +111,11 @@ class IPhysicalEndpoint(abc.ABC):
     @abc.abstractmethod
     def active_lease(self) -> Optional[EndpointLease]:
         """The currently active lease for this physical endpoint, if any."""
+
+    @abc.abstractmethod
+    def set_endpoint_epoch(self, epoch_id: int) -> None:
+        """Synchronize the physical endpoint to the newly allocated durable epoch."""
+
 
     @abc.abstractmethod
     def acquire_lease(self, lease: EndpointLease) -> None:

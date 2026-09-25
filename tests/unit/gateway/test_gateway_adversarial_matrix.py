@@ -89,14 +89,20 @@ def test_dispatcher_disconnect_command_and_client_list_query(
     # Query gateway.clients (M34: requires session_id)
     q_list = create_query("gateway.clients", "admin", payload={"session_id": "s1"})
     resp_list = message_dispatcher.dispatch(q_list)
+    assert resp_list is not None
+    assert resp_list.message_type is not None
     assert resp_list.message_type.value == "RESPONSE"
+    assert resp_list.payload is not None
     assert len(resp_list.payload["clients"]) == 1
     assert resp_list.payload["clients"][0]["client_id"] == "client_to_disconnect"
 
     # Command disconnect (M34: requires matching session_id)
     cmd_disc = create_command("gateway.disconnect", "admin", payload={"client_id": "client_to_disconnect", "session_id": "s1"})
     resp_disc = message_dispatcher.dispatch(cmd_disc)
+    assert resp_disc is not None
+    assert resp_disc.message_type is not None
     assert resp_disc.message_type.value == "RESPONSE"
+    assert resp_disc.payload is not None
     assert resp_disc.payload["disconnected_client_id"] == "client_to_disconnect"
     assert srv.active_connections_count == 0
 
@@ -171,7 +177,7 @@ def test_e2e_workflow_command_routing_through_gateway(
 
     from holomed.gateway.framing import FrameParser
     parser = FrameParser()
-    frames = [deserialize_envelope(f) for f in parser.feed(all_raw)]
+    frames = [deserialize_envelope(f) for f in parser.feed(bytes(all_raw))]
     assert any(
         f.message_type.value == "RESPONSE" and f.payload.get("current_phase") == "PATIENT_CONTEXT"
         for f in frames

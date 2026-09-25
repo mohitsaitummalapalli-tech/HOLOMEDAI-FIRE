@@ -9,7 +9,7 @@ import uuid
 
 import pytest
 
-from holomed.configuration.models import AppConfig
+from holomed.configuration.models import AppConfig, LogLevel, EnvironmentProfile
 from holomed.core.dispatcher import MessageDispatcher
 from holomed.devices.manager import DeviceManager
 from holomed.devices.models import (
@@ -36,8 +36,8 @@ def test_epoch() -> int:
 def runtime_context(test_epoch: int) -> RuntimeContext:
     config = AppConfig(
         app_name="HoloMed-Test",
-        environment="TESTING",
-        log_level="DEBUG",
+        environment=EnvironmentProfile.TESTING,
+        log_level=LogLevel.DEBUG,
         host="127.0.0.1",
         port=8000,
     )
@@ -87,16 +87,16 @@ class DummyOpticalCamera(IDevice):
         return self._state
 
     @property
-    def capabilities(self) -> frozenset[DeviceCapability]:
-        return frozenset({DeviceCapability.DATA_STREAM})
+    def capabilities(self) -> tuple[DeviceCapability, ...]:
+        return ()
 
-    def initialize(self) -> None:
+    def initialize(self, accessor) -> None:
         pass
 
     def start(self) -> None:
         self._state = DeviceState.ACTIVE
 
-    def stop(self) -> None:
+    def stop(self, accessor) -> None:
         self._state = DeviceState.STOPPED
 
     def teardown(self) -> None:
@@ -124,6 +124,7 @@ def device_manager(runtime_context: RuntimeContext) -> DeviceManager:
     reg = getattr(dm, "registry", None) or getattr(dm, "_registry", None)
     token = getattr(dm, "registry_token", None) or getattr(dm, "_registry_token", None)
     cam = DummyOpticalCamera("cam_optical_0", "phys_cam_0")
+    assert reg is not None
     reg.register(cam, token)
     cam._state = DeviceState.ACTIVE
     return dm
@@ -230,7 +231,9 @@ def closed_fist_landmarks() -> tuple[SpatialLandmark, ...]:
 @pytest.fixture
 def pointing_landmarks(closed_fist_landmarks: tuple[SpatialLandmark, ...]) -> tuple[SpatialLandmark, ...]:
     """Pointing hand: index extended upwards, other 3 fingers folded."""
-    fist_dict = {lm.landmark_id: (lm.u, lm.v, lm.depth_m) for lm in closed_fist_landmarks}
+    fist_dict: dict[int, tuple[float, float, float]] = {
+        lm.landmark_id: (lm.u, lm.v, lm.depth_m or 1.0) for lm in closed_fist_landmarks
+    }
     # Extend index finger:
     fist_dict[6] = (0.45, 0.45, 1.0)
     fist_dict[7] = (0.45, 0.38, 1.0)
@@ -241,7 +244,9 @@ def pointing_landmarks(closed_fist_landmarks: tuple[SpatialLandmark, ...]) -> tu
 @pytest.fixture
 def two_finger_landmarks(pointing_landmarks: tuple[SpatialLandmark, ...]) -> tuple[SpatialLandmark, ...]:
     """Two-finger pose: index and middle extended upwards, ring and pinky folded."""
-    pt_dict = {lm.landmark_id: (lm.u, lm.v, lm.depth_m) for lm in pointing_landmarks}
+    pt_dict: dict[int, tuple[float, float, float]] = {
+        lm.landmark_id: (lm.u, lm.v, lm.depth_m or 1.0) for lm in pointing_landmarks
+    }
     # Extend middle finger as well:
     pt_dict[10] = (0.50, 0.43, 1.0)
     pt_dict[11] = (0.50, 0.35, 1.0)
@@ -252,7 +257,9 @@ def two_finger_landmarks(pointing_landmarks: tuple[SpatialLandmark, ...]) -> tup
 @pytest.fixture
 def pinch_landmarks(open_hand_landmarks: tuple[SpatialLandmark, ...]) -> tuple[SpatialLandmark, ...]:
     """Pinch gesture: thumb tip (4) and index tip (8) touching/close (<= 0.035m)."""
-    oh_dict = {lm.landmark_id: (lm.u, lm.v, lm.depth_m) for lm in open_hand_landmarks}
+    oh_dict: dict[int, tuple[float, float, float]] = {
+        lm.landmark_id: (lm.u, lm.v, lm.depth_m or 1.0) for lm in open_hand_landmarks
+    }
     # Position thumb tip and index tip at nearly identical 3D positions:
     # (u=0.45, v=0.40, depth=1.0m)
     oh_dict[4] = (0.450, 0.400, 1.0)
@@ -263,7 +270,9 @@ def pinch_landmarks(open_hand_landmarks: tuple[SpatialLandmark, ...]) -> tuple[S
 @pytest.fixture
 def thumb_up_landmarks(closed_fist_landmarks: tuple[SpatialLandmark, ...]) -> tuple[SpatialLandmark, ...]:
     """Thumbs up: thumb extended pointing straight UP (+Y), fingers folded."""
-    f_dict = {lm.landmark_id: (lm.u, lm.v, lm.depth_m) for lm in closed_fist_landmarks}
+    f_dict: dict[int, tuple[float, float, float]] = {
+        lm.landmark_id: (lm.u, lm.v, lm.depth_m or 1.0) for lm in closed_fist_landmarks
+    }
     # Extend thumb upwards (+Y optical: v lower than mcp v)
     f_dict[1] = (0.40, 0.65, 1.0)
     f_dict[2] = (0.38, 0.60, 1.0)
@@ -275,7 +284,9 @@ def thumb_up_landmarks(closed_fist_landmarks: tuple[SpatialLandmark, ...]) -> tu
 @pytest.fixture
 def thumb_down_landmarks(closed_fist_landmarks: tuple[SpatialLandmark, ...]) -> tuple[SpatialLandmark, ...]:
     """Thumbs down: thumb extended pointing straight DOWN (-Y), fingers folded."""
-    f_dict = {lm.landmark_id: (lm.u, lm.v, lm.depth_m) for lm in closed_fist_landmarks}
+    f_dict: dict[int, tuple[float, float, float]] = {
+        lm.landmark_id: (lm.u, lm.v, lm.depth_m or 1.0) for lm in closed_fist_landmarks
+    }
     # Extend thumb downwards (+Y optical: v higher than mcp v)
     f_dict[1] = (0.40, 0.60, 1.0)
     f_dict[2] = (0.38, 0.62, 1.0)

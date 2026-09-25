@@ -9,6 +9,7 @@ from holomed.devices.resolution import ExecutionResolutionGate
 from holomed.devices.transport import TelemetryTransport, TelemetryPublisher
 from holomed.devices.reconciler import TelemetryReconciler
 from holomed.runtime.context import RuntimeContext
+from holomed.devices.interfaces import RegistryAuthorityToken
 
 @pytest.fixture
 def gate():
@@ -24,13 +25,13 @@ def publisher(transport):
 
 @pytest.fixture
 def registry():
-    return DeviceRegistry("test_token")
+    return DeviceRegistry(RegistryAuthorityToken())  # type: ignore
 
 @pytest.fixture
 def manager(registry, gate, publisher):
-    from holomed.configuration.models import AppConfig
+    from holomed.configuration.models import AppConfig, EnvironmentProfile, LogLevel
     dcm = DeviceControlManager(registry=registry, resolution_gate=gate, rehydration_engine=MagicMock(), authoritative_epoch_provider=lambda: 1)
-    ctx = RuntimeContext(app_config=AppConfig(app_name="test", environment="test", host="localhost", port=8000, log_level="INFO"), epoch_id=1)
+    ctx = RuntimeContext(app_config=AppConfig(app_name="test", environment=EnvironmentProfile.TESTING, host="localhost", port=8000, log_level=LogLevel.INFO), epoch_id=1)
     dcm.initialize(ctx)
     dcm.start()
     return dcm
@@ -40,7 +41,7 @@ def endpoint_and_device(gate, publisher, registry):
     ep = SimulatedPhysicalEndpoint("ep_1", "dev_1", gate=gate, publisher=publisher)
     dev = SimulatedDevice("dev_1", "phys_1", DeviceType.SIMULATED_GENERIC)
     dev.set_endpoints((ep,))
-    registry.register(dev, "test_token")
+    registry.register(dev, registry._token)
     
     lease = EndpointLease(
         device_epoch=1,

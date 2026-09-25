@@ -184,17 +184,23 @@ def test_service_dispatcher_routes(
     # 1. gesture.pipeline.status
     q_status = create_query("gesture.pipeline.status", source="test", target="gesture_service", payload={}, metadata={"session_id": "default_session"})
     resp_status = message_dispatcher.dispatch(q_status)
+    assert resp_status is not None
+    assert resp_status.payload is not None
     assert resp_status.payload["service_name"] == "gesture_service"
     assert resp_status.payload["tracked_hands"] == 1
 
     # 2. gesture.pipeline.audit
     q_audit = create_query("gesture.pipeline.audit", source="test", target="gesture_service", payload={}, metadata={"session_id": "default_session"})
     resp_audit = message_dispatcher.dispatch(q_audit)
+    assert resp_audit is not None
+    assert resp_audit.payload is not None
     assert resp_audit.payload["is_consistent"] is True
 
     # 3. gesture.tracks
     q_tracks = create_query("gesture.tracks", source="test", target="gesture_service", payload={}, metadata={"session_id": "default_session"})
     resp_tracks = message_dispatcher.dispatch(q_tracks)
+    assert resp_tracks is not None
+    assert resp_tracks.payload is not None
     assert resp_tracks.payload["active_tracks_count"] == 1
 
     # 4. gesture.pipeline.reset
@@ -205,6 +211,8 @@ def test_service_dispatcher_routes(
         payload={"epoch_id": runtime_context.epoch_id},
     )
     resp_reset = message_dispatcher.dispatch(cmd_reset)
+    assert resp_reset is not None
+    assert resp_reset.payload is not None
     assert resp_reset.payload["reset_completed"] is True
 
 

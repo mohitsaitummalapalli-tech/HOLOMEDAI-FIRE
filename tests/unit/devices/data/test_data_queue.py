@@ -53,4 +53,6 @@ def test_queue_capacity_overflow_rejection_is_non_mutating() -> None:
 
     # Existing queue contents remain untouched (D149)
     assert len(queue) == 3
-    assert queue.peek().sequence_number == 1
+    peek_res = queue.peek()
+    assert peek_res is not None
+    assert peek_res.sequence_number == 1

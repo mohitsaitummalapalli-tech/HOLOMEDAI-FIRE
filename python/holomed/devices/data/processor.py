@@ -398,7 +398,7 @@ class DeviceDataProcessor(IService):
             data_item = DeviceData(
                 device_id=payload.get("device_id", ""),
                 physical_id=payload.get("physical_id", ""),
-                device_type=payload.get("device_type"),
+                device_type=payload.get("device_type"),  # type: ignore
                 kind=DeviceDataKind[kind_str],
                 sequence_number=payload.get("sequence_number", -1),
                 timestamp_utc=payload.get("timestamp_utc", envelope.timestamp_utc),

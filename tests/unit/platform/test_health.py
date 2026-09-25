@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import pytest
+from typing import Any
 
 from holomed.platform.health import HealthAggregator
 from holomed.runtime.logging import SecretFilter

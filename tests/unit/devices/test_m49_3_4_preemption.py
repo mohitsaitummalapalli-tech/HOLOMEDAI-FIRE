@@ -9,6 +9,7 @@ from holomed.devices.resolution import ExecutionResolutionGate
 from holomed.devices.transport import TelemetryTransport, TelemetryPublisher
 from holomed.devices.reconciler import TelemetryReconciler
 from holomed.runtime.context import RuntimeContext
+from holomed.devices.interfaces import RegistryAuthorityToken
 
 @pytest.fixture
 def gate():
@@ -24,13 +25,13 @@ def publisher(transport):
 
 @pytest.fixture
 def registry():
-    return DeviceRegistry("test_token")
+    return DeviceRegistry(RegistryAuthorityToken())  # type: ignore
 
 @pytest.fixture
 def manager(registry, gate, publisher):
-    from holomed.configuration.models import AppConfig
+    from holomed.configuration.models import AppConfig, EnvironmentProfile, LogLevel
     dcm = DeviceControlManager(registry=registry, resolution_gate=gate, rehydration_engine=MagicMock(), authoritative_epoch_provider=lambda: 1)
-    ctx = RuntimeContext(app_config=AppConfig(app_name="test", environment="test", host="localhost", port=8000, log_level="INFO"), epoch_id=1)
+    ctx = RuntimeContext(app_config=AppConfig(app_name="test", environment=EnvironmentProfile.TESTING, host="localhost", port=8000, log_level=LogLevel.INFO), epoch_id=1)
     dcm.initialize(ctx)
     dcm.start()
     return dcm
@@ -40,7 +41,7 @@ def endpoint_and_device(gate, publisher, registry):
     ep = SimulatedPhysicalEndpoint("ep_1", "dev_1", gate=gate, publisher=publisher)
     dev = SimulatedDevice("dev_1", "phys_1", DeviceType.SIMULATED_GENERIC)
     dev.set_endpoints((ep,))
-    registry.register(dev, "test_token")
+    registry.register(dev, registry._token)
     
     lease = EndpointLease(
         device_epoch=1,
@@ -179,7 +180,7 @@ def test_preclaim_gate_authority_deterministic(gate, transport, publisher, regis
 
     dev = SimulatedDevice("dev_det_1", "phys_det_1", DeviceType.SIMULATED_GENERIC)
     dev.set_endpoints((ep,))
-    registry.register(dev, "test_token")
+    registry.register(dev, registry._token)
 
     lease = EndpointLease(
         device_epoch=1,
@@ -224,7 +225,7 @@ def test_preclaim_no_worker_local_preempted_bypass(gate, transport, publisher, r
 
     dev = SimulatedDevice("dev_det_2", "phys_det_2", DeviceType.SIMULATED_GENERIC)
     dev.set_endpoints((ep,))
-    registry.register(dev, "test_token")
+    registry.register(dev, registry._token)
 
     lease = EndpointLease(
         device_epoch=1,
@@ -279,7 +280,7 @@ def test_preclaim_gate_then_worker_dequeue_integration(gate, transport, publishe
     ep = SimulatedPhysicalEndpoint("ep_det_3", "dev_det_3", gate=gate, publisher=publisher)
     dev = SimulatedDevice("dev_det_3", "phys_det_3", DeviceType.SIMULATED_GENERIC)
     dev.set_endpoints((ep,))
-    registry.register(dev, "test_token")
+    registry.register(dev, registry._token)
 
     lease = EndpointLease(
         device_epoch=1,
@@ -366,7 +367,7 @@ def test_exactly_once_physical_delivery_via_manager(gate, transport, publisher, 
     ep = SimulatedPhysicalEndpoint("ep_once_1", "dev_once_1", gate=gate, publisher=publisher)
     dev = SimulatedDevice("dev_once_1", "phys_once_1", DeviceType.SIMULATED_GENERIC)
     dev.set_endpoints((ep,))
-    registry.register(dev, "test_token")
+    registry.register(dev, registry._token)
 
     lease = EndpointLease(
         device_epoch=1,
@@ -396,10 +397,10 @@ def test_exactly_once_physical_delivery_via_manager(gate, transport, publisher, 
     stop_call_count = 0
     original_request_stop = ep.request_stop
 
-    def counting_request_stop(eid):
+    def counting_request_stop(execution_id: str):
         nonlocal stop_call_count
         stop_call_count += 1
-        return original_request_stop(eid)
+        return original_request_stop(execution_id)
 
     ep.request_stop = counting_request_stop
 

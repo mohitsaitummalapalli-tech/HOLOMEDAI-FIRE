@@ -109,7 +109,8 @@ def test_telemetry_re_registration_resets_session(device_registry: DeviceRegistr
 
     acc = TelemetryAccumulator(device_registry, current_epoch_id=1)
     acc.update("dev_01", 1, 10, "ts1", "SUBMITTED")
-    assert acc.get("dev_01").last_sequence_number == 10
+    assert acc.get("dev_01") is not None
+    assert acc.get("dev_01").last_sequence_number == 10  # type: ignore
 
     # Stop and deregister dev1
     dev1._state = DeviceState.STOPPED

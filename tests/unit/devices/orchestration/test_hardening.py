@@ -50,15 +50,16 @@ def test_exception_multiple_inheritance_conformance() -> None:
 
 
 def test_topological_compiler_clean_acyclic_order() -> None:
-    """Verify Kahn's topological sort compiles cleanly with device_orchestration at highest rank (D167)."""
+    from unittest.mock import MagicMock
+    from typing import Any
     regs = {
-        "device.mgr": ServiceRegistration("device.mgr", lambda: None, ()),
-        "device.ctrl": ServiceRegistration("device.ctrl", lambda: None, ("device.mgr",)),
-        "device.data": ServiceRegistration("device.data", lambda: None, ("device.mgr",)),
-        "device.coord": ServiceRegistration("device.coord", lambda: None, ("device.mgr",)),
+        "device.mgr": ServiceRegistration("device.mgr", lambda: MagicMock(), ()),  # type: ignore
+        "device.ctrl": ServiceRegistration("device.ctrl", lambda: MagicMock(), ("device.mgr",)),  # type: ignore
+        "device.data": ServiceRegistration("device.data", lambda: MagicMock(), ("device.mgr",)),  # type: ignore
+        "device.coord": ServiceRegistration("device.coord", lambda: MagicMock(), ("device.mgr",)),  # type: ignore
         "device.orch": ServiceRegistration(
             "device.orch",
-            lambda: None,
+            lambda: MagicMock(),  # type: ignore
             ("device.mgr", "device.ctrl", "device.data", "device.coord"),
         ),
     }

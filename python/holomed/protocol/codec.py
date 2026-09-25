@@ -1,7 +1,7 @@
 """HoloMed Protocol Serialization & Deserialization Engine."""
 
 import json
-from json.decoder import JSONArray, JSONObject, WHITESPACE
+from json.decoder import JSONArray, JSONObject, WHITESPACE  # type: ignore
 from typing import Any, Dict, List, Tuple, Union
 
 from holomed.protocol.exceptions import (
@@ -55,7 +55,7 @@ class SafeJSONDecoder(json.JSONDecoder):
             object_hook: Any,
             object_pairs_hook: Any,
             memo: Any = None,
-            _w: Any = WHITESPACE.match,
+            _w: Any = WHITESPACE.match,  # type: ignore
         ) -> Tuple[Dict[str, Any], int]:
             self.current_depth += 1
             if self.current_depth > self.max_depth:
@@ -72,7 +72,7 @@ class SafeJSONDecoder(json.JSONDecoder):
         def custom_parse_array(
             s_and_end: Tuple[str, int],
             scan_once: Any,
-            _w: Any = WHITESPACE.match,
+            _w: Any = WHITESPACE.match,  # type: ignore
         ) -> Tuple[List[Any], int]:
             self.current_depth += 1
             if self.current_depth > self.max_depth:
@@ -86,7 +86,7 @@ class SafeJSONDecoder(json.JSONDecoder):
 
         self.parse_object = custom_parse_object
         self.parse_array = custom_parse_array
-        self.scan_once = json.scanner.py_make_scanner(self)
+        self.scan_once = json.scanner.py_make_scanner(self)  # type: ignore
 
 
 def envelope_to_dict(envelope: MessageEnvelope) -> Dict[str, Any]:

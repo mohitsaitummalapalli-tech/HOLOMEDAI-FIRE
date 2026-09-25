@@ -145,5 +145,5 @@ def test_processor_exception_isolated_and_secret_redacted() -> None:
     assert res is not None
     assert res.status == ProcessingStatus.FAILED
     assert res.error_code == "ERR_PROCESSING_FAILURE"
-    assert "telemetry_secret_key_123" not in res.error_message
-    assert "<redacted>" in res.error_message
+    assert "telemetry_secret_key_123" not in str(res.error_message)
+    assert "<redacted>" in str(res.error_message)

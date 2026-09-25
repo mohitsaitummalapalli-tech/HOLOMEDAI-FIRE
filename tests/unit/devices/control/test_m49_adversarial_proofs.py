@@ -11,6 +11,8 @@ from holomed.persistence.sessions import DurableSessionStore
 from holomed.persistence.authority import ControllerAuthorityStore
 from holomed.devices.control.models import GLOBAL_PHYSICAL_OPERATION_CAPACITY
 from holomed.persistence.exceptions import PersistenceCapacityError, PersistenceEpochMismatchError, PersistenceIdentityReuseError, PersistenceLifecycleError, PersistenceValidationError
+from holomed.devices.models import PhysicalCommandResult, SubmissionStatus
+from typing import Any
 
 HELPER_SCRIPT = Path(__file__).parent / "_proof_helper.py"
 
@@ -357,17 +359,18 @@ def test_evidence_identity_generation_mismatch_rejection(shared_store_path):
         @property
         def device_id(self): return "dev_e"
         @property
-        def safety_state(self): return EndpointSafetyState.SAFE
+        def safety_state(self): return EndpointSafetyState.SAFE_STOPPED
         @property
         def endpoint_state(self): return EndpointState.READY
         def recover(self): pass
-        def emergency_stop(self): return EndpointSafetyState.SAFE
+        def emergency_stop(self): return EndpointSafetyState.SAFE_STOPPED
         def request_stop(self, execution_id): pass
         @property
         def active_lease(self): return EndpointLease("ep_e", "dev_e", session, 1, 1, "exec_e", frozenset(), 1, epoch)
         def acquire_lease(self, lease): pass
         def release_lease(self, session_id): pass
-        def submit_command(self, cmd): pass
+        def submit_command(self, command): return PhysicalCommandResult(status=SubmissionStatus.ACCEPTED, details={})
+        def set_endpoint_epoch(self, epoch_id: int) -> None: pass
 
     class MockDevice(IDevice):
         def __init__(self):
@@ -377,7 +380,7 @@ def test_evidence_identity_generation_mismatch_rejection(shared_store_path):
         @property
         def physical_id(self): return "phys_e"
         @property
-        def device_type(self): return DeviceType.ACTUATOR
+        def device_type(self): return DeviceType.SURGICAL_TOOL
         @property
         def state(self): return self._state
         @state.setter
@@ -388,10 +391,12 @@ def test_evidence_identity_generation_mismatch_rejection(shared_store_path):
         def capabilities(self): return tuple()
         @property
         def endpoints(self): return (MockEndpoint(),)
-        def initialize(self, acc): pass
+        def initialize(self, accessor: Any = None): pass
         def start(self): pass
-        def stop(self, acc): pass
-        def health(self): pass
+        def stop(self, accessor: Any = None): pass
+        def health(self):
+            from holomed.devices.models import DeviceHealth, HealthStatus
+            return DeviceHealth("dev_e", HealthStatus.HEALTHY, "OK", "2026-09-01T12:00:00Z")
 
     dev = MockDevice()
     registry.register(dev, token)
@@ -406,7 +411,8 @@ def test_evidence_identity_generation_mismatch_rejection(shared_store_path):
 
     gate.claim_execution_ownership("exec_e", 1)
 
-    def _run_pipeline(event: ExecutionTelemetryEvent, manager_command_override: PhysicalCommand = None):
+    from typing import Optional
+    def _run_pipeline(event: ExecutionTelemetryEvent, manager_command_override: Optional[PhysicalCommand] = None):
         if manager_command_override:
             manager._active_commands[event.execution_id] = manager_command_override
 
@@ -523,7 +529,7 @@ def test_submission_fence_closes_toctou(shared_store_path):
         @property
         def physical_id(self): return "phys_fence"
         @property
-        def device_type(self): return DeviceType.ACTUATOR
+        def device_type(self): return DeviceType.SURGICAL_TOOL
         @property
         def state(self): return self._state
         @state.setter
@@ -537,10 +543,12 @@ def test_submission_fence_closes_toctou(shared_store_path):
             return (DeviceCapability("cap1", CapabilityCategory.CONTROL, MappingProxyType({}), requires_physical_endpoint=True, target_endpoint_id="ep_fence"),)
         @property
         def endpoints(self): return (endpoint,)
-        def initialize(self, acc): pass
+        def initialize(self, accessor: Any = None): pass
         def start(self): pass
-        def stop(self, acc): pass
-        def health(self): pass
+        def stop(self, accessor: Any = None): pass
+        def health(self):
+            from holomed.devices.models import DeviceHealth, HealthStatus
+            return DeviceHealth("dev_fence", HealthStatus.HEALTHY, "OK", "2026-09-01T12:00:00Z")
 
     dev = FencedDevice()
     registry.register(dev, token)
@@ -555,7 +563,9 @@ def test_submission_fence_closes_toctou(shared_store_path):
     )
 
     from holomed.runtime.context import RuntimeContext
-    ctx = RuntimeContext("tnt1", "srv1", epoch)
+    from holomed.configuration.models import AppConfig, EnvironmentProfile, LogLevel
+    app_cfg = AppConfig("Test", EnvironmentProfile.TESTING, "127.0.0.1", 8080, LogLevel.DEBUG)
+    ctx = RuntimeContext(app_cfg, epoch)
     manager.initialize(ctx)
     manager.start()
 
@@ -564,11 +574,11 @@ def test_submission_fence_closes_toctou(shared_store_path):
     # Simulate the rollover BETWEEN admission and endpoint execution.
     # We monkeypatch endpoint.submit_command to advance the epoch FIRST, simulating the exact race!
     original_submit = endpoint.submit_command
-    def adversarial_submit(cmd):
+    def adversarial_submit(command):
         # A new controller has just taken over authority BEFORE we physically transmit!
         authority.allocate_next_epoch()
         # Now we proceed with physical transmission
-        return original_submit(cmd)
+        return original_submit(command)
 
     endpoint.submit_command = adversarial_submit
 

@@ -97,12 +97,13 @@ def make_test_tool(tool_id: str = "anatomy.query_organ") -> ToolDescriptor:
 @pytest.fixture
 def test_runtime_context() -> RuntimeContext:
     from holomed.configuration.models import AppConfig
+    from holomed.configuration.models import AppConfig, EnvironmentProfile, LogLevel
     cfg = AppConfig(
         app_name="HoloMed-Gateway-Test",
-        environment="TESTING",
+        environment=EnvironmentProfile.TESTING,
         host="127.0.0.1",
         port=8090,
-        log_level="DEBUG",
+        log_level=LogLevel.DEBUG,
         gemini_api_key=None,
         protocol_version="1.0",
     )
@@ -156,7 +157,7 @@ def test_tool_service_direct_call_without_capability_fails_closed(
         sequence_number=1,
         depth=1,
         parameters={"subsystem": "test"},
-        correlation_id=None,
+        correlation_id="corr-1",
         causation_id=None,
         timestamp_utc=datetime.now(timezone.utc).isoformat(),
     )
@@ -288,7 +289,10 @@ def test_execution_tool_invoke_command_success(
     )
     resp = dispatcher.dispatch(cmd)
 
+    assert resp is not None
+    assert resp.message_type is not None
     assert resp.message_type.value == "RESPONSE"
+    assert resp.payload is not None
     assert resp.payload["session_id"] == "session-01"
     assert resp.payload["tool_id"] == "anatomy.query_organ"
     assert resp.payload["execution_status"] == "EXECUTED_CLEAR"
@@ -350,7 +354,10 @@ def test_execution_tool_invoke_blocked_by_safety_gate(
     )
     resp = dispatcher.dispatch(cmd)
 
+    assert resp is not None
+    assert resp.message_type is not None
     assert resp.message_type.value == "RESPONSE"
+    assert resp.payload is not None
     assert resp.payload["execution_status"] == "BLOCKED_SAFETY_GATE"
     assert resp.payload["gate_decision"] == "DENIED_INTERLOCKED"
     assert resp.payload["gate_reason_code"] == "LANDMARK_DRIFT_EXCEEDED"
@@ -424,7 +431,10 @@ def test_execution_tool_invoke_blocked_by_workflow(
     )
     resp = dispatcher.dispatch(cmd)
 
+    assert resp is not None
+    assert resp.message_type is not None
     assert resp.message_type.value == "RESPONSE"
+    assert resp.payload is not None
     assert resp.payload["execution_status"] == "BLOCKED_WORKFLOW"
     assert "result_payload" not in resp.payload
 
@@ -478,7 +488,10 @@ def test_execution_workflow_resume_command(
     )
     resp = dispatcher.dispatch(cmd)
 
+    assert resp is not None
+    assert resp.message_type is not None
     assert resp.message_type.value == "RESPONSE"
+    assert resp.payload is not None
     assert resp.payload["session_id"] == "session-01"
     assert resp.payload["phase"] == "NAVIGATION"
     assert resp.payload["recovery_revision"] == 1

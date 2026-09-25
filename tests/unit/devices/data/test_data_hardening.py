@@ -119,7 +119,7 @@ def test_reentrant_submit_rejected() -> None:
     res = processor.process_next()
     assert res is not None
     assert res.status.value == "FAILED"
-    assert "Reentrant submit()" in res.error_message
+    assert "Reentrant submit()" in str(res.error_message)
 
 
 def test_query_methods_return_immutable_views() -> None:

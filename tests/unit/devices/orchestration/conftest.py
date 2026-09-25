@@ -134,6 +134,7 @@ def device_subsystem_stack(context: RuntimeContext):
     token = getattr(mgr, "registry_token", None) or getattr(mgr, "_registry_token", None)
 
     # 2. ControlManager
+    assert reg is not None
     ctrl = DeviceControlManager(reg, rehydration_engine=MagicMock(), authoritative_epoch_provider=lambda: 1)
     ctrl.initialize(context)
     ctrl.start()

@@ -26,6 +26,7 @@ class ControllerAuthorityStore:
         self._epoch_path = self._storage_root / "controller_epoch.json"
         self._lock_path = self._storage_root / ".epoch.lock"
         self._global_admission_lock_path = self._storage_root / ".physical_admission.lock"
+        self._global_transaction_lock_path = self._storage_root / ".global_transaction.lock"
 
         if not self._storage_root.exists():
             self._storage_root.mkdir(parents=True, exist_ok=True)
@@ -150,6 +151,20 @@ class ControllerAuthorityStore:
             self._global_admission_lock_path.touch()
             
         with open(self._global_admission_lock_path, "a") as lock_file:
+            fd = lock_file.fileno()
+            self._acquire_lock(fd)
+            try:
+                yield
+            finally:
+                self._release_lock(fd)
+
+    @contextlib.contextmanager
+    def _get_global_transaction_lock(self):
+        """Acquire the global transaction lock for cross-device operations."""
+        if not self._global_transaction_lock_path.exists():
+            self._global_transaction_lock_path.touch()
+
+        with open(self._global_transaction_lock_path, "a") as lock_file:
             fd = lock_file.fileno()
             self._acquire_lock(fd)
             try:

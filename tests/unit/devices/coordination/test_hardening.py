@@ -67,12 +67,12 @@ def test_topological_compiler_compatibility():
     registry = {
         "device.manager": ServiceRegistration(
             name="device.manager",
-            factory=lambda: None,
+            factory=lambda: MagicMock(),  # type: ignore
             dependencies=(),
         ),
         "device.coordination": ServiceRegistration(
             name="device.coordination",
-            factory=lambda: None,
+            factory=lambda: MagicMock(),  # type: ignore
             dependencies=("device.manager",),
         ),
     }
@@ -89,12 +89,12 @@ def test_shutdown_release_failure_aggregation(device_registry: DeviceRegistry):
     # Monkeypatch one resource to fail on release
     orig_release = coordinator.resources.release
 
-    def failing_release(res_id: str):
-        if res_id == "coordination.telemetry":
+    def failing_release(resource_id: str):
+        if resource_id == "coordination.telemetry":
             raise RuntimeError("Hardware bus hung on telemetry handle release")
-        orig_release(res_id)
+        orig_release(resource_id)
 
-    coordinator.resources.release = failing_release
+    coordinator.resources.release = failing_release  # type: ignore
 
     with pytest.raises(DeviceCoordinationShutdownError) as exc_info:
         coordinator.stop()

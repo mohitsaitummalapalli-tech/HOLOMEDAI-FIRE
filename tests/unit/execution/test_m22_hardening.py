@@ -34,6 +34,7 @@ from holomed.navigation.exceptions import (
 from holomed.navigation.models import NavigationState, TrackedInstrumentPose
 from holomed.navigation.service import NavigationService
 from holomed.planning.models import TrajectoryPlan
+from holomed.planning.service import PlanningService
 from holomed.protocol.builders import create_command, create_query
 from holomed.recovery.exceptions import (
     RecoveryAuthorizationError,
@@ -71,13 +72,13 @@ from holomed.workflow.service import WorkflowService
 
 @pytest.fixture
 def test_runtime_context() -> RuntimeContext:
-    from holomed.configuration.models import AppConfig
+    from holomed.configuration.models import AppConfig, LogLevel, EnvironmentProfile
     config = AppConfig(
         app_name="HoloMed-M22-Hardening-Test",
-        environment="TESTING",
+        environment=EnvironmentProfile.TESTING,
         host="127.0.0.1",
         port=8090,
-        log_level="DEBUG",
+        log_level=LogLevel.DEBUG,
         gemini_api_key=None,
         protocol_version="1.0",
     )

@@ -71,6 +71,7 @@ def test_track_history_length_bound_thirtytwo() -> None:
     tracker = TemporalAcousticTracker()
     dir1 = AcousticDirection(azimuth_deg=20.0, elevation_deg=10.0, confidence=0.9)
 
+    tracks = []
     for i in range(50):
         tracks = tracker.update(dir1, f"t_{i}")
 

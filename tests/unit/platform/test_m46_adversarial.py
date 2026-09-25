@@ -100,6 +100,7 @@ def test_05_authoritative_paths_evict():
     sess = manager.start_session("sess_1", 0)
     
     gate = manager.get_lifecycle_gate("sess_1")
+    assert gate is not None
     assert gate.is_active
     
     manager.evict_session("sess_1")
@@ -110,6 +111,7 @@ def test_06_authoritative_paths_reset():
     sess = manager.start_session("sess_1", 0)
     
     gate = manager.get_lifecycle_gate("sess_1")
+    assert gate is not None
     assert gate.is_active
     
     manager.reset(1)
@@ -120,6 +122,7 @@ def test_07_authoritative_paths_clear():
     sess = manager.start_session("sess_1", 0)
     
     gate = manager.get_lifecycle_gate("sess_1")
+    assert gate is not None
     assert gate.is_active
     
     manager.clear()

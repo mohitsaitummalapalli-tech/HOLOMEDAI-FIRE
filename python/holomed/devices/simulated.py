@@ -9,7 +9,7 @@ import time
 from datetime import datetime, timezone
 from enum import Enum
 from types import MappingProxyType
-from typing import Optional, Tuple, Set
+from typing import Optional, Tuple, Set, Callable
 
 from holomed.devices.interfaces import DeviceResourceAccessor, IDevice
 from holomed.devices.models import (
@@ -62,6 +62,7 @@ class SimulatedPhysicalEndpoint(IPhysicalEndpoint):
         self._active_lease: Optional[EndpointLease] = None
         self._last_accepted_sequence = 0
         self._queue_capacity = queue_capacity
+        self._endpoint_epoch: Optional[int] = None
 
         # Concurrency and execution boundary
         self._submit_lock = threading.Lock()
@@ -116,9 +117,6 @@ class SimulatedPhysicalEndpoint(IPhysicalEndpoint):
     def endpoint_state(self) -> EndpointState:
         return self._endpoint_state
 
-    def recover(self) -> None:
-        with self._submit_lock:
-            self._endpoint_state = EndpointState.READY
 
     def request_stop(self, execution_id: str) -> None:
         """Independently request a stop for a specific active execution."""
@@ -130,6 +128,39 @@ class SimulatedPhysicalEndpoint(IPhysicalEndpoint):
             return self._safety_state
         self._safety_state = EndpointSafetyState.SAFE_STOPPED
         return self._safety_state
+
+    def simulate_driver_hardware_ready(self, recovery_operation_id: str) -> dict:
+        """M49 Sequence 5: Generate unforgeable hardware-ready evidence bound to recovery operation."""
+        # Simulated unforgeable evidence
+        return {
+            "evidence_type": "SIMULATED_HARDWARE_READY",
+            "recovery_operation_id": recovery_operation_id,
+            "endpoint_id": self._endpoint_id,
+            "device_id": self._device_id,
+            "signature": f"sim-sig-{self._endpoint_id}-{recovery_operation_id}",
+            "hardware_timestamp_utc": datetime.now(timezone.utc).isoformat()
+        }
+
+    def simulate_driver_isolation(self, recovery_operation_id: str) -> dict:
+        """M49 Sequence 5: Quiesce physical output and generate isolation evidence."""
+        with self._submit_lock:
+            self._safety_state = EndpointSafetyState.SAFE_STOPPED
+            self._endpoint_state = EndpointState.QUARANTINED
+            self._active_lease = None
+            while not self._command_queue.empty():
+                try:
+                    self._command_queue.get_nowait()
+                    self._command_queue.task_done()
+                except queue.Empty:
+                    break
+        return {
+            "evidence_type": "SIMULATED_ISOLATION_QUIESCENCE",
+            "recovery_operation_id": recovery_operation_id,
+            "endpoint_id": self._endpoint_id,
+            "device_id": self._device_id,
+            "signature": f"sim-sig-iso-{self._endpoint_id}-{recovery_operation_id}",
+            "hardware_timestamp_utc": datetime.now(timezone.utc).isoformat()
+        }
 
     def acquire_lease(self, lease: EndpointLease) -> None:
         with self._submit_lock:
@@ -147,12 +178,24 @@ class SimulatedPhysicalEndpoint(IPhysicalEndpoint):
                 if self._safety_state != EndpointSafetyState.HARDWARE_INTERLOCKED:
                     self._safety_state = EndpointSafetyState.SAFE_STOPPED
 
+    def set_endpoint_epoch(self, epoch_id: int) -> None:
+        """Synchronize the physical endpoint to the newly allocated durable epoch."""
+        with self._submit_lock:
+            self._endpoint_epoch = epoch_id
+
     def set_epoch_fence(self, epoch_provider: Callable[[], int]) -> None:
         """Driver boundary hook to read current epoch atomically at submission."""
         self._epoch_provider = epoch_provider
 
     def submit_command(self, command: PhysicalCommand) -> PhysicalCommandResult:
         with self._submit_lock:
+            # Driver-level strict epoch boundary check
+            if self._endpoint_epoch is not None and command.device_epoch != self._endpoint_epoch:
+                return PhysicalCommandResult(
+                    status=SubmissionStatus.REJECTED,
+                    details={"error": f"Stale device epoch: command={command.device_epoch}, endpoint={self._endpoint_epoch}"}
+                )
+
             # Lifecycle checks
             if self._worker_state != WorkerState.RUNNING:
                 if self._worker_state == WorkerState.SHUTDOWN_REQUESTED:
@@ -188,7 +231,7 @@ class SimulatedPhysicalEndpoint(IPhysicalEndpoint):
                     details={"actuated_sequence": self._last_accepted_sequence}
                 )
 
-            # Atomic physical fence boundary
+            # Atomic physical fence boundary (for controller synchronization)
             if getattr(self, "_epoch_provider", None):
                 current = self._epoch_provider()
                 if current != command.controller_epoch:

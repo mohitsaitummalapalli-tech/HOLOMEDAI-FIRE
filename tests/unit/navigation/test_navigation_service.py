@@ -147,6 +147,7 @@ def test_navigation_service_fails_closed_if_registration_invalidated(
 
     # 3. Invalidate registration in M13 (e.g. drift error > 1.5mm)
     reg = verified_registration_service.get_registration("sess_nav_01")
+    assert reg is not None
     invalid_reg = RegistrationStatusRecord(
         session_id=reg.session_id,
         plan_id=reg.plan_id,
@@ -286,6 +287,7 @@ def test_navigation_service_dispatcher_routes(
         payload={"session_id": "sess_nav_01"},
     )
     resp_status = message_dispatcher.dispatch(status_query)
+    assert resp_status is not None
     assert resp_status.message_type.value == "RESPONSE"
     assert resp_status.payload["state"] == "IDLE"
 

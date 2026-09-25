@@ -141,7 +141,7 @@ class DeviceControlManager(IService):
                 break
                 
         if device_id:
-            val = terminal_state.value if hasattr(terminal_state, "value") else str(terminal_state)
+            val = str(getattr(terminal_state, "value", terminal_state))
             self._capacity_releaser(
                 cmd.session_id,
                 device_id,
@@ -704,6 +704,54 @@ class DeviceControlManager(IService):
         except Exception as e:
             self._logger.error("Device rehydration failed", extra={"device_id": device_id, "error": str(e)})
             raise DeviceControlError(f"Device rehydration failed for {device_id}: {e}") from e
+
+    def quarantine_device(self, device_id: str) -> None:
+        """Quarantine a device by closing admission and stopping endpoints."""
+        self._admission_state = AdmissionState.INITIALIZING
+        if not self._registry.contains(device_id):
+            raise DeviceNotFoundError(f"Device '{device_id}' not found")
+        device = self._registry.get(device_id)
+        for endpoint in device.endpoints:
+            endpoint.emergency_stop()
+
+    def recover_device(
+        self,
+        device_id: str,
+        coordinator: Any,  # holomed.persistence.coordinator.DurableGlobalCoordinator
+        hardware_evidence: dict,
+    ) -> None:
+        """Perform Sequence 5 strict device reinitialization and admission opening.
+
+        Args:
+            device_id: The ID of the device to reinitialize.
+            coordinator: The global durable coordinator.
+            hardware_evidence: Unforgeable proof of safe device state.
+        """
+        # Ensure admission gate is closed before starting
+        self._admission_state = AdmissionState.INITIALIZING
+
+        if not self._registry.contains(device_id):
+            raise DeviceNotFoundError(f"Device '{device_id}' not found")
+        device = self._registry.get(device_id)
+
+        # 1. Hardware-ready evidence (assumed proven before calling this, passed in).
+
+        # 2. DEVICE_READY(E2) durable commit
+        new_epoch = coordinator.commit_device_ready(device_id, hardware_evidence)
+
+        # 3. Runtime projection updated (update device object's epoch in registry)
+        # Note: In a real flow, the device registry or object needs its epoch updated.
+        if hasattr(device, "current_epoch"):
+            setattr(device, "current_epoch", new_epoch)
+
+        # 4. Endpoint epoch explicitly synchronized to E2
+        for endpoint in device.endpoints:
+            if hasattr(endpoint, "set_endpoint_epoch"):
+                endpoint.set_endpoint_epoch(new_epoch)
+
+        # 5. Admission gate transitions to OPEN
+        self._admission_state = AdmissionState.READY
+
 
     def preempt_execution(self, device_id: str, endpoint_id: str, execution_id: str, lifecycle_generation: int) -> None:
         """Issue an authoritative preemption routing request for a specific execution."""

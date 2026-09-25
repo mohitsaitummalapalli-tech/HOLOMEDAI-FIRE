@@ -108,6 +108,7 @@ def test_real_frozen_services_end_to_end_integration(
     # 7. Test dispatcher query and commands with real services
     q_status = create_query("platform.status", "client")
     resp_status = message_dispatcher.dispatch(q_status)
+    assert resp_status is not None
     assert resp_status.message_type.value == "RESPONSE"
     assert resp_status.payload["aggregate_health"] == "HEALTHY"
 
@@ -117,6 +118,7 @@ def test_real_frozen_services_end_to_end_integration(
         payload={"session_id": "real_clinical_session", "sequence_number": 1},
     )
     resp_cycle = message_dispatcher.dispatch(cmd_cycle)
+    assert resp_cycle is not None
     assert resp_cycle.message_type.value == "RESPONSE"
     assert resp_cycle.payload["status"] == "COMPLETED"
 

@@ -13,7 +13,8 @@ from holomed.anatomy.models import (
     Point3D,
     RigidTransform3D,
 )
-from holomed.configuration.models import AppConfig
+from typing import Any
+from holomed.configuration.models import AppConfig, EnvironmentProfile, LogLevel
 from holomed.core.dispatcher import MessageDispatcher
 from holomed.devices.interfaces import IDevice
 from holomed.devices.manager import DeviceManager
@@ -50,16 +51,16 @@ class DummyAnatomyDevice(IDevice):
         return self._state
 
     @property
-    def capabilities(self) -> frozenset[DeviceCapability]:
-        return frozenset({DeviceCapability.DATA_STREAM})
+    def capabilities(self) -> tuple[DeviceCapability, ...]:
+        return tuple()
 
-    def initialize(self) -> None:
+    def initialize(self, accessor: Any = None) -> None:
         pass
 
     def start(self) -> None:
         self._state = DeviceState.ACTIVE
 
-    def stop(self) -> None:
+    def stop(self, accessor: Any = None) -> None:
         self._state = DeviceState.STOPPED
 
     def teardown(self) -> None:
@@ -82,10 +83,10 @@ class DummyAnatomyDevice(IDevice):
 def runtime_context() -> RuntimeContext:
     config = AppConfig(
         app_name="HoloMed-Anatomy-Test",
-        environment="TESTING",
+        environment=EnvironmentProfile.TESTING,
         host="127.0.0.1",
         port=8000,
-        log_level="DEBUG",
+        log_level=LogLevel.DEBUG,
         gemini_api_key=None,
         protocol_version="1.0",
     )
@@ -112,6 +113,7 @@ def device_manager(runtime_context: RuntimeContext) -> DeviceManager:
     reg = getattr(dm, "registry", None) or getattr(dm, "_registry", None)
     token = getattr(dm, "registry_token", None) or getattr(dm, "_registry_token", None)
     dev = DummyAnatomyDevice("surgical_tool_0", "phys_tool_0")
+    assert reg is not None
     reg.register(dev, token)
     dev._state = DeviceState.ACTIVE
     return dm

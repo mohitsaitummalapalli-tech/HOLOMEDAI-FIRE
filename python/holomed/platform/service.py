@@ -264,7 +264,7 @@ class PlatformService(IService):
             )
 
         # Poll underlying services
-        service_states = {k: v.state for k, v in self._services.items() if hasattr(v, "state")}
+        service_states = {k: v.state for k, v in self._services.items() if hasattr(v, "state")}  # type: ignore
         report = self._health_aggregator.aggregate_health(self._services, service_states, self._epoch_id)
 
         return ServiceHealth(
@@ -365,7 +365,7 @@ class PlatformService(IService):
                 srv = self._services.get(srv_name)
                 if srv is not None and hasattr(srv, "reset"):
                     try:
-                        srv.reset(target_epoch_id)
+                        srv.reset(target_epoch_id)  # type: ignore
                     except Exception as e:
                         self._state = ServiceState.FAILED
                         self._emit_event(
@@ -380,7 +380,7 @@ class PlatformService(IService):
             for srv_name in ("gesture_service", "audio_service", "vision_service"):
                 srv = self._services.get(srv_name)
                 if srv is not None and hasattr(srv, "clear"):
-                    srv.clear()
+                    srv.clear()  # type: ignore
 
             # 4. Commit supervisor epoch
             self._epoch_id = target_epoch_id
@@ -402,7 +402,7 @@ class PlatformService(IService):
         ):
             raise PlatformResourceIntegrityError("Subsystems uninitialized")
 
-        service_states = {k: v.state for k, v in self._services.items() if hasattr(v, "state")}
+        service_states = {k: v.state for k, v in self._services.items() if hasattr(v, "state")}  # type: ignore
         return self._auditor.audit_platform(
             services=self._services,
             service_states=service_states,

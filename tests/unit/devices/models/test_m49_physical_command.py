@@ -56,14 +56,14 @@ def test_physical_command_immutability():
     )
 
     with pytest.raises(dataclasses.FrozenInstanceError):
-        cmd.endpoint_id = "ep_2"
+        cmd.endpoint_id = "ep_2"  # type: ignore
 
     with pytest.raises(dataclasses.FrozenInstanceError):
-        cmd.session_id = "sess_2"
+        cmd.session_id = "sess_2"  # type: ignore
 
     # Parameters must be deep-frozen
     with pytest.raises(TypeError):
-        cmd.parameters["a"] = 2
+        cmd.parameters["a"] = 2  # type: ignore
 
 def test_physical_command_alias_mutation():
     """Test that mutating an alias passed to construction does not mutate the command."""

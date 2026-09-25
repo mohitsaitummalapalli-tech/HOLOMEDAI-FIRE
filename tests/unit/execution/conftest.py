@@ -52,12 +52,13 @@ def logger(secret_filter: SecretFilter) -> StructuredLogger:
 
 @pytest.fixture
 def runtime_context() -> RuntimeContext:
+    from holomed.configuration.models import AppConfig, EnvironmentProfile, LogLevel
     config = AppConfig(
         app_name="HoloMed-Execution-Test",
-        environment="TESTING",
+        environment=EnvironmentProfile.TESTING,
         host="127.0.0.1",
         port=8090,
-        log_level="DEBUG",
+        log_level=LogLevel.DEBUG,
         gemini_api_key=None,
         protocol_version="1.0",
     )

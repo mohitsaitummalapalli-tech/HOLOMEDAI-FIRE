@@ -12,6 +12,8 @@ from holomed.devices.control.daemon import ReconciliationDaemon
 from holomed.persistence.sessions import DurableSessionStore
 from holomed.persistence.authority import ControllerAuthorityStore
 from holomed.devices.control.recovery import StateRehydrationEngine
+from holomed.devices.interfaces import RegistryAuthorityToken
+from typing import Any
 
 @pytest.fixture
 def session_store(tmp_path):
@@ -141,6 +143,7 @@ def test_race_a_timeout_first(components):
         daemon_processed.wait(timeout=5.0)
         daemon.stop()
 
+    assert timeout_record is not None
     assert timeout_record.current_state == CommandState.FAULTED_UNKNOWN
     # verify capacity retained for FAULTED_UNKNOWN
     canon = ("dev-1", 1, store._epoch_id, "op-1", "nonce-1")
@@ -481,16 +484,23 @@ class MockEndpoint(IPhysicalEndpoint):
     def release_lease(self, session_id):
         if self._active_lease and self._active_lease.session_id == session_id:
             self._active_lease = None
-    def submit_command(self, cmd):
+    def submit_command(self, command):
         return PhysicalCommandResult(status=SubmissionStatus.ACCEPTED, details={})
     def request_stop(self, execution_id): pass
-    def emergency_stop(self): pass
+    def emergency_stop(self):
+        from holomed.devices.models import EndpointSafetyState
+        return EndpointSafetyState.SAFE_STOPPED
     @property
     def device_id(self): return "dev-1"
     @property
-    def endpoint_state(self): pass
+    def endpoint_state(self):
+        from holomed.devices.models import EndpointState
+        return EndpointState.READY
     @property
-    def safety_state(self): pass
+    def safety_state(self):
+        from holomed.devices.models import EndpointSafetyState
+        return EndpointSafetyState.ACTIVE
+    def set_endpoint_epoch(self, epoch_id: int) -> None: pass
     def recover(self): pass
 
 class MockDeviceForManager(IDevice):
@@ -505,35 +515,38 @@ class MockDeviceForManager(IDevice):
     def device_class(self): return "class"
     @property
     def capabilities(self):
-        class Cap:
-            capability_id = "cap1"
-            requires_physical_endpoint = True
-            target_endpoint_id = "end-1"
-        return [Cap()]
+        from holomed.devices.models import DeviceCapability, CapabilityCategory
+        from types import MappingProxyType
+        return (DeviceCapability("cap1", CapabilityCategory.CONTROL, MappingProxyType({}), requires_physical_endpoint=True, target_endpoint_id="end-1"),)
     @property
     def current_epoch(self): return 1
     @property
-    def endpoints(self): return self._endpoints
+    def endpoints(self): return tuple(self._endpoints)
     @property
     def physical_id(self): return "phys"
     @property
-    def device_type(self): return "type"
+    def device_type(self):
+        from holomed.devices.models import DeviceType
+        return DeviceType.SIMULATED_GENERIC
     @property
     def state(self):
         return self._state
     @state.setter
     def state(self, value):
         self._state = value
-    def initialize(self, ctx): pass
+    def initialize(self, accessor: Any = None): pass
     def start(self): pass
-    def stop(self): pass
-    def health(self): pass
+    def stop(self, accessor: Any = None): pass
+    def health(self):
+        from holomed.devices.models import DeviceHealth, HealthStatus
+        return DeviceHealth("dev-1", HealthStatus.HEALTHY, "OK", "2026-09-01T12:00:00Z")
 
 def test_production_timeout_durable_outcome(tmp_path):
-    registry = DeviceRegistry("tok")
+    token = RegistryAuthorityToken()  # type: ignore
+    registry = DeviceRegistry(token)
     dev = MockDeviceForManager("dev-1")
-    registry.register(dev, "tok")
-    
+    registry.register(dev, token)
+
     from holomed.devices.interfaces import DeviceState
     dev.state = DeviceState.ACTIVE
 
@@ -547,7 +560,8 @@ def test_production_timeout_durable_outcome(tmp_path):
     reconciler = TelemetryReconciler(transport, gate)
     daemon = ReconciliationDaemon(reconciler, store, polling_interval=0.01)
 
-    class DummyRehydrationEngine:
+    class DummyRehydrationEngine(StateRehydrationEngine):
+        def __init__(self, store): pass
         def rehydrate_controller_state(self, current_session_id):
             pass
 
@@ -558,12 +572,13 @@ def test_production_timeout_durable_outcome(tmp_path):
         capacity_admitter=store.record_operation_admitted,
         reconciliation_daemon=daemon,
         authoritative_epoch_provider=lambda: store._epoch_id,
-        rehydration_engine=DummyRehydrationEngine()
+        rehydration_engine=DummyRehydrationEngine(store)
     )
     
-    class DummyCtx:
-        epoch_id = store._epoch_id
-    ctx = DummyCtx()
+    from holomed.runtime.context import RuntimeContext
+    from holomed.configuration.models import AppConfig, EnvironmentProfile, LogLevel
+    app_cfg = AppConfig("Test", EnvironmentProfile.TESTING, "127.0.0.1", 8080, LogLevel.DEBUG)
+    ctx = RuntimeContext(app_cfg, store._epoch_id)
     manager.initialize(ctx)
     manager.start()
     
@@ -591,7 +606,7 @@ def test_production_timeout_durable_outcome(tmp_path):
         message_name="device.command",
         source="client",
         target="device_control_manager",
-        timestamp_utc=123456789.0,
+        timestamp_utc="2026-09-01T12:00:00Z",
         payload={
             "device_id": "dev-1",
             "command": "cmd1",

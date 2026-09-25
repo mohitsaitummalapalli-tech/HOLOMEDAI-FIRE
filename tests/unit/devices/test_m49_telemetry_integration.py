@@ -188,8 +188,7 @@ def test_quarantine_invariant(endpoint):
     with pytest.raises(Exception):
         endpoint.submit_command(create_cmd("exec_quarantine"))
 
-    endpoint.recover()
-    assert endpoint.endpoint_state == EndpointState.READY
+    assert not hasattr(endpoint, "recover")
 
 
 # j. duplicate event

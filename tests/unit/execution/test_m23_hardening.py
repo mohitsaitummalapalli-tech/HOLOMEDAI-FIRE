@@ -102,8 +102,8 @@ def sample_locked_plan(planning_service: PlanningService) -> SurgicalPlanDefinit
     planning_service.lock_plan("plan_m23", capability=cap_lock)
 
     orig_get = planning_service.get_plan_for_session
-    def _get_plan_for_session_m23(sid: str):
-        p = orig_get(sid)
+    def _get_plan_for_session_m23(session_id: str):
+        p = orig_get(session_id)
         if p is None:
             return planning_service.get_plan("plan_m23")
         return p
@@ -140,7 +140,10 @@ class TestM23DispatcherRouteRemoval:
         # registration.get -> Routable
         q = create_query("registration.get", "console", payload={"session_id": "s1"})
         resp = message_dispatcher.dispatch(q)
+        assert resp is not None
+        assert resp.message_type is not None
         assert resp.message_type.value == "ERROR"
+        assert resp.payload is not None
         assert resp.payload["error_code"] == "ERR_REGISTRATION_NOT_FOUND"
 
         reg_srv.stop()
@@ -355,7 +358,10 @@ class TestM23GatewayRegistrationCoordination:
             },
         )
         resp = message_dispatcher.dispatch(cmd)
+        assert resp is not None
+        assert resp.message_type is not None
         assert resp.message_type.value == "RESPONSE"
+        assert resp.payload is not None
         assert resp.payload["execution_status"] == "EXECUTED_CLEAR"
 
         gw.stop()

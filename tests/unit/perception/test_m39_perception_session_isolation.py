@@ -91,8 +91,8 @@ class DummyDevice(IDevice):
         return self._dev_type
 
     @property
-    def capabilities(self) -> frozenset[DeviceCapability]:
-        return frozenset()
+    def capabilities(self) -> tuple[DeviceCapability, ...]:
+        return tuple()
 
     @property
     def current_epoch(self) -> int:
@@ -102,13 +102,13 @@ class DummyDevice(IDevice):
     def state(self) -> DeviceState:
         return self._state
 
-    def initialize(self) -> None:
-        self._state = DeviceState.INITIALIZED
+    def initialize(self, accessor) -> None:
+        self._state = DeviceState.READY
 
     def start(self) -> None:
         self._state = DeviceState.ACTIVE
 
-    def stop(self) -> None:
+    def stop(self, accessor) -> None:
         self._state = DeviceState.STOPPED
 
 
@@ -188,7 +188,7 @@ def test_runtime_context() -> RuntimeContext:
         host="localhost",
         port=8080,
         log_level=LogLevel.DEBUG,
-        gemini_api_key="test_key",
+        gemini_api_key=None,
         protocol_version="1.0",
     )
     return RuntimeContext(app_config=app_cfg, epoch_id=1)
@@ -206,6 +206,7 @@ def device_registry_env(test_runtime_context: RuntimeContext) -> tuple[DeviceReg
     cam = DummyDevice("cam_main", "phys_cam_001", DeviceType.RGB_CAMERA)
     mic = DummyDevice("mic_main", "phys_mic_001", DeviceType.AUDIO_MICROPHONE)
 
+    assert reg is not None
     reg.register(cam, token)
     reg.register(mic, token)
     cam._state = DeviceState.ACTIVE

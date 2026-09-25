@@ -95,6 +95,7 @@ def test_evaluator_post_target_overextension(sample_plan_trajectory: TrajectoryP
     assert dev.position_class == PositionClass.POST_TARGET
     assert dev.is_aligned is False
     assert dev.is_safe is False
+    assert dev.safety_interlock is not None
     assert dev.safety_interlock.severity == InterlockSeverity.BLOCKING
 
 
@@ -170,6 +171,7 @@ def test_evaluator_stale_pose_exceeding_200ms(sample_plan_trajectory: Trajectory
     )
     assert dev.state == NavigationState.STALE
     assert dev.is_safe is False
+    assert dev.safety_interlock is not None
     assert dev.safety_interlock.condition_name == "STALE_POSE_DATA"
 
 
@@ -212,6 +214,7 @@ def test_evaluator_insufficient_confidence_triggers_interlock(sample_plan_trajec
         pose, sample_plan_trajectory, now_utc="2026-09-01T12:00:00.050Z"
     )
     assert dev.state == NavigationState.INTERLOCKED
+    assert dev.safety_interlock is not None
     assert dev.safety_interlock.condition_name == "INSUFFICIENT_CONFIDENCE"
 
 
@@ -233,6 +236,7 @@ def test_evaluator_excessive_uncertainty_triggers_interlock(sample_plan_trajecto
         pose, sample_plan_trajectory, now_utc="2026-09-01T12:00:00.050Z"
     )
     assert dev.state == NavigationState.INTERLOCKED
+    assert dev.safety_interlock is not None
     assert dev.safety_interlock.condition_name == "EXCESSIVE_UNCERTAINTY"
 
 

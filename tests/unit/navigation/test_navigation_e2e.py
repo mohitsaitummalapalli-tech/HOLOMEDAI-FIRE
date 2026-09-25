@@ -103,7 +103,10 @@ def test_e2e_complete_navigation_pipeline(
     # 4. Status query via dispatcher works cleanly
     status_query = create_query("navigation.status.get", "xr_client", payload={"session_id": "sess_nav_01"})
     resp_status = message_dispatcher.dispatch(status_query)
+    assert resp_status is not None
+    assert resp_status.message_type is not None
     assert resp_status.message_type.value == "RESPONSE"
+    assert resp_status.payload is not None
     assert resp_status.payload["state"] == "ALIGNED"
     assert resp_status.payload["xr_presentation"]["tip_position_m"] == [0.01, 0.02, 0.08]
 

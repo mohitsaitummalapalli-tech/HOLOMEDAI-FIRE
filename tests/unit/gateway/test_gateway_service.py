@@ -309,6 +309,7 @@ def test_m45_synchronous_ingress_safety(
     # Simulate persistence returning non-ACTIVE (e.g. STOPPED)
     # Since we use conftest patch, we can just alter the session ID internally:
     import dataclasses
+    assert c.session is not None
     c._session = dataclasses.replace(c.session, session_id="stop_sess_c")
 
     # Send a query

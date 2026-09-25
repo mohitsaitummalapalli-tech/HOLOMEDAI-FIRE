@@ -230,6 +230,7 @@ def test_spoofed_execution_session_teardown_cannot_destroy_b(
     plat_srv.start_session("SESSION_B")
     wf_srv.start_workflow("SESSION_B")
     assert plat_srv.has_session("SESSION_B") is True
+    assert plat_srv.session_manager is not None
     assert plat_srv.session_manager.get_session("SESSION_B").status == SessionStatus.ACTIVE
     assert wf_srv.get_workflow_state("SESSION_B").current_phase == WorkflowPhase.PATIENT_CONTEXT
 
@@ -251,6 +252,7 @@ def test_spoofed_execution_session_teardown_cannot_destroy_b(
 
     # Verify Session B is 100% active and intact
     assert plat_srv.has_session("SESSION_B") is True
+    assert plat_srv.session_manager is not None
     assert plat_srv.session_manager.get_session("SESSION_B").status == SessionStatus.ACTIVE
     assert wf_srv.get_workflow_state("SESSION_B").current_phase == WorkflowPhase.PATIENT_CONTEXT
 

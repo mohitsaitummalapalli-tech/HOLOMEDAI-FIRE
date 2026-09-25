@@ -6,7 +6,7 @@ from __future__ import annotations
 from typing import Any, Optional
 import pytest
 
-from holomed.configuration.models import AppConfig
+from holomed.configuration.models import AppConfig, EnvironmentProfile, LogLevel
 from holomed.core.dispatcher import MessageDispatcher
 from holomed.devices.manager import DeviceManager
 from holomed.runtime.context import RuntimeContext
@@ -24,10 +24,10 @@ from holomed.xr.models import CameraViewport, PresentationDescription, VisualCat
 def runtime_context() -> RuntimeContext:
     config = AppConfig(
         app_name="HoloMed-Platform-Test",
-        environment="TESTING",
+        environment=EnvironmentProfile.TESTING,
         host="127.0.0.1",
         port=8000,
-        log_level="DEBUG",
+        log_level=LogLevel.DEBUG,
         gemini_api_key=None,
         protocol_version="1.0",
     )

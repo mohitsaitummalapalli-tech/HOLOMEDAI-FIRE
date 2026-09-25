@@ -73,5 +73,5 @@ def test_stage_failure_isolation_and_redaction() -> None:
     result, _ = pipeline.process(chunk, view)
     assert result.quality == AudioQuality.FAILED
     assert result.error_code == "ERR_PROCESSING_FAILURE"
-    assert "super_secret_token_123" not in result.error_message
-    assert "<redacted>" in result.error_message
+    assert "super_secret_token_123" not in str(result.error_message)
+    assert "<redacted>" in str(result.error_message)

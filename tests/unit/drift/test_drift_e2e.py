@@ -48,6 +48,7 @@ class TestDriftE2E:
 
         # Step 3: Sample Nasion accurately with dwell (3 samples)
         t0 = datetime(2025, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        rec1 = None
         for i in range(3):
             t_sample = t0 + timedelta(milliseconds=i * 80)
             obs = make_landmark_observation(
@@ -57,6 +58,7 @@ class TestDriftE2E:
             )
             rec1 = svc.evaluate(obs, now_utc=t_sample.isoformat())
 
+        assert rec1 is not None
         assert rec1.state == DriftState.STABLE
         assert rec1.passed is True
 

@@ -47,5 +47,5 @@ class DeviceOrchestrationShutdownError(DeviceOrchestrationError, DeviceShutdownE
     """Raised when structural resource release fails during teardown."""
 
     def __init__(self, message: str, failures: Sequence[DeviceShutdownFailureRecord]) -> None:
-        super().__init__(message, failures)
+        super().__init__(message, tuple(failures))
         self.failures = tuple(failures)

@@ -167,3 +167,95 @@ class ReplayVerificationReport:
             raise PersistenceValidationError("total_entries_verified must be non-negative")
         if not isinstance(self.state_divergences, tuple):
             object.__setattr__(self, "state_divergences", tuple(self.state_divergences))
+
+
+class TransactionState(str, enum.Enum):
+    """Authoritative durable lifecycle of an atomic transaction."""
+
+    NONE = "NONE"
+    INTENTED = "INTENTED"
+    PARTICIPANTS_PREPARED = "PARTICIPANTS_PREPARED"
+    COMMITTED = "COMMITTED"
+    ABORTED = "ABORTED"
+
+
+class RecoveryOperationState(str, enum.Enum):
+    """Authoritative durable lifecycle of a recovery operation."""
+
+    STARTED = "STARTED"
+    PREPARED = "PREPARED"
+    EVIDENCE_ACCEPTED = "EVIDENCE_ACCEPTED"
+    FINALIZED = "FINALIZED"
+    ABORTED = "ABORTED"
+
+
+class DeviceJournalEntryType(str, enum.Enum):
+    """Semantic category of append-only device journal entries."""
+
+    DEVICE_QUARANTINED = "DEVICE_QUARANTINED"
+    ISOLATION_TRANSACTION_INTENTED = "ISOLATION_TRANSACTION_INTENTED"
+    ISOLATION_PARTICIPANTS_PREPARED = "ISOLATION_PARTICIPANTS_PREPARED"
+    ISOLATION_TRANSACTION_COMMITTED = "ISOLATION_TRANSACTION_COMMITTED"
+    ISOLATION_TRANSACTION_ABORTED = "ISOLATION_TRANSACTION_ABORTED"
+    DEVICE_READY_COMMITTED = "DEVICE_READY_COMMITTED"
+
+
+@dataclass(frozen=True)
+class DurableDeviceRecord:
+    """Immutable persistent metadata representing a physical device."""
+
+    device_id: str
+    epoch_id: int
+    created_timestamp_utc: str
+    last_sequence: int = -1
+    schema_version: str = PERSISTENCE_SCHEMA_VERSION
+    metadata: Mapping[str, Any] = field(default_factory=lambda: MappingProxyType({}))
+    isolation_transactions: Mapping[str, TransactionState] = field(default_factory=lambda: MappingProxyType({}))
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.device_id, str) or not self.device_id.strip():
+            raise PersistenceValidationError(f"Invalid device_id: {self.device_id!r}")
+        if self.epoch_id < 0:
+            raise PersistenceValidationError(f"epoch_id must be non-negative, got {self.epoch_id}")
+        if self.last_sequence < -1:
+            raise PersistenceValidationError(f"last_sequence cannot be < -1, got {self.last_sequence}")
+        if self.schema_version != PERSISTENCE_SCHEMA_VERSION:
+            raise PersistenceValidationError(f"Unsupported schema version: {self.schema_version!r}")
+        if not isinstance(self.metadata, (dict, MappingProxyType)):
+            raise PersistenceValidationError("metadata must be a mapping")
+        if not isinstance(self.metadata, MappingProxyType):
+            object.__setattr__(self, "metadata", MappingProxyType(dict(self.metadata)))
+
+
+@dataclass(frozen=True)
+class DeviceJournalEntry:
+    """Immutable cryptographically chained append-only device journal record."""
+
+    entry_id: str
+    entry_type: DeviceJournalEntryType
+    schema_version: str
+    timestamp_utc: str
+    epoch_id: int
+    device_id: str
+    sequence_number: int
+    payload: Mapping[str, Any]
+    sha256_hash: str
+    previous_entry_hash: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.entry_id, str) or not self.entry_id.strip():
+            raise PersistenceValidationError("entry_id must be a non-empty string")
+        if not isinstance(self.device_id, str) or not self.device_id.strip():
+            raise PersistenceValidationError(f"Invalid device_id: {self.device_id!r}")
+        if self.epoch_id < 0:
+            raise PersistenceValidationError(f"epoch_id must be non-negative, got {self.epoch_id}")
+        if self.sequence_number < -1:
+            raise PersistenceValidationError(f"sequence_number cannot be < -1, got {self.sequence_number}")
+        if not HASH_REGEX.match(self.sha256_hash):
+            raise PersistenceValidationError(f"Invalid sha256_hash format: {self.sha256_hash!r}")
+        if not HASH_REGEX.match(self.previous_entry_hash):
+            raise PersistenceValidationError(f"Invalid previous_entry_hash format: {self.previous_entry_hash!r}")
+        if not isinstance(self.payload, (dict, MappingProxyType)):
+            raise PersistenceValidationError("payload must be a mapping")
+        if not isinstance(self.payload, MappingProxyType):
+            object.__setattr__(self, "payload", MappingProxyType(dict(self.payload)))

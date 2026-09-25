@@ -146,4 +146,4 @@ def test_no_public_mutation_path_bypasses_gate():
     # Actually Python class isn't strictly frozen unless it's a dataclass frozen=True,
     # but the API doesn't expose setters.
     with pytest.raises(AttributeError):
-        rec.current_state = CommandState.COMPLETED
+        rec.current_state = CommandState.COMPLETED  # type: ignore

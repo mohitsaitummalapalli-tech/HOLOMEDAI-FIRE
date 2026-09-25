@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import pytest
 
-from holomed.configuration.models import AppConfig
+from holomed.configuration.models import AppConfig, EnvironmentProfile, LogLevel
 from holomed.core.dispatcher import MessageDispatcher
 from holomed.planning.models import (
     PatientCaseContext,
@@ -23,10 +23,10 @@ from holomed.workflow.models import InterlockSeverity
 def runtime_context() -> RuntimeContext:
     config = AppConfig(
         app_name="HoloMed-Planning-Test",
-        environment="TESTING",
+        environment=EnvironmentProfile.TESTING,
         host="127.0.0.1",
         port=8089,
-        log_level="DEBUG",
+        log_level=LogLevel.DEBUG,
         gemini_api_key=None,
         protocol_version="1.0",
     )

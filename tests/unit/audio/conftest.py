@@ -5,7 +5,7 @@ import binascii
 from datetime import datetime, timezone
 import math
 import struct
-from typing import Optional, Sequence
+from typing import Any, Optional, Sequence
 import uuid
 
 import pytest
@@ -61,17 +61,17 @@ class DummyMicrophoneDevice(IDevice):
         return self._state
 
     @property
-    def capabilities(self) -> frozenset[DeviceCapability]:
-        return frozenset({DeviceCapability.DATA_STREAM})
+    def capabilities(self) -> tuple[DeviceCapability, ...]:
+        return tuple()
 
-    def initialize(self) -> None:
+    def initialize(self, accessor: Any = None) -> None:
         self._state = DeviceState.INITIALIZING
         self._state = DeviceState.READY
 
     def start(self) -> None:
         self._state = DeviceState.ACTIVE
 
-    def stop(self) -> None:
+    def stop(self, accessor: Any = None) -> None:
         self._state = DeviceState.STOPPED
 
     def teardown(self) -> None:
@@ -99,7 +99,7 @@ def test_runtime_context() -> RuntimeContext:
         host="127.0.0.1",
         port=8080,
         log_level=LogLevel.DEBUG,
-        gemini_api_key="test_key",
+        gemini_api_key=None,
         protocol_version="1.0",
     )
     return RuntimeContext(app_config=config, epoch_id=1)
@@ -116,6 +116,7 @@ def device_registry_with_microphone(test_runtime_context: RuntimeContext) -> tup
     token = getattr(dm, "registry_token", None) or getattr(dm, "_registry_token", None)
 
     mic = DummyMicrophoneDevice(device_id="mic_01", physical_id="usb://mic_array_1")
+    assert reg is not None
     reg.register(mic, token)
     mic._state = DeviceState.ACTIVE
     return reg, dm

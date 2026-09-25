@@ -142,6 +142,7 @@ class DevicePlaneOrchestrator(IService):
 
         # Instantiate bridge and auditor
         reg = getattr(self._device_manager, "registry", None) or getattr(self._device_manager, "_registry", None)
+        assert reg is not None
         self._bridge = DeviceCrossPlaneBridge(
             registry=reg,
             coordination=self._coordination,

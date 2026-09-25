@@ -26,14 +26,16 @@ def test_runtime_context() -> RuntimeContext:
         host="localhost",
         port=8080,
         log_level=LogLevel.DEBUG,
-        gemini_api_key="test_key",
+        gemini_api_key=None,
         protocol_version="1.0",
     )
     return RuntimeContext(app_config=app_cfg, epoch_id=1)
 
 
+from typing import Generator
+
 @pytest.fixture
-def dispatcher(test_runtime_context: RuntimeContext) -> MessageDispatcher:
+def dispatcher(test_runtime_context: RuntimeContext) -> Generator[MessageDispatcher, None, None]:
     d = MessageDispatcher()
     d.initialize(test_runtime_context)
     # DO NOT start the dispatcher here. Services must register handlers during their initialize() first.

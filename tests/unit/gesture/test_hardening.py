@@ -29,18 +29,21 @@ from holomed.vision.models import SpatialLandmark
 from tests.unit.gesture.conftest import make_observation
 
 
+from unittest.mock import MagicMock
+from holomed.runtime.service import IService
+
 def test_topological_dependency_minimal_footprint() -> None:
     """Verify Kahn's topological sort compiles cleanly with gesture depending on vision."""
     regs = {
-        "device.mgr": ServiceRegistration("device.mgr", lambda: None, ()),
+        "device.mgr": ServiceRegistration("device.mgr", lambda: MagicMock(spec=IService), ()),
         "vision.service": ServiceRegistration(
             "vision.service",
-            lambda: None,
+            lambda: MagicMock(spec=IService),
             ("device.mgr",),
         ),
         "gesture.service": ServiceRegistration(
             "gesture.service",
-            lambda: None,
+            lambda: MagicMock(spec=IService),
             ("vision.service",),
         ),
     }

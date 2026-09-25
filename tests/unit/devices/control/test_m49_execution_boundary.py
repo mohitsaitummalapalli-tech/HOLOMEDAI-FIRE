@@ -1,6 +1,7 @@
 import time
 import pytest
 import threading
+from typing import Generator
 from unittest.mock import patch
 
 from holomed.devices.models import (
@@ -11,7 +12,7 @@ from holomed.devices.models import (
 from holomed.devices.simulated import SimulatedPhysicalEndpoint, WorkerState
 
 @pytest.fixture
-def active_endpoint() -> SimulatedPhysicalEndpoint:
+def active_endpoint() -> Generator[SimulatedPhysicalEndpoint, None, None]:
     ep = SimulatedPhysicalEndpoint("ep_1", "dev_1", queue_capacity=2)
     lease = EndpointLease(
             device_epoch=1,

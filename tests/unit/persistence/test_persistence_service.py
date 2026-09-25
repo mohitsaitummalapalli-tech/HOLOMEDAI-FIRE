@@ -96,6 +96,7 @@ def test_dispatcher_routes(
     # 1. Query status
     q_status = create_query("persistence.status", "client")
     resp_status = message_dispatcher.dispatch(q_status)
+    assert resp_status is not None
     assert resp_status.message_type.value == "RESPONSE"
     assert resp_status.payload["service_name"] == "persistence_service"
 
@@ -120,6 +121,7 @@ def test_dispatcher_routes(
     # 2. Query session
     q_sess = create_query("persistence.session.get", "client", payload={"session_id": "sess_disp_01"})
     resp_sess = message_dispatcher.dispatch(q_sess)
+    assert resp_sess is not None
     assert resp_sess.message_type.value == "RESPONSE"
     assert resp_sess.payload["session_id"] == "sess_disp_01"
     assert resp_sess.payload["total_cycles"] == 1
@@ -131,12 +133,14 @@ def test_dispatcher_routes(
         payload={"session_id": "sess_disp_01", "sequence_number": 0},
     )
     resp_cycle = message_dispatcher.dispatch(q_cycle)
+    assert resp_cycle is not None
     assert resp_cycle.message_type.value == "RESPONSE"
     assert resp_cycle.payload["cycle_id"] == "c_disp_01"
 
     # 4. Command replay
     cmd_rep = create_command("persistence.replay", "client", payload={"session_id": "sess_disp_01"})
     resp_rep = message_dispatcher.dispatch(cmd_rep)
+    assert resp_rep is not None
     assert resp_rep.message_type.value == "RESPONSE"
     assert resp_rep.payload["replay_status"] == "VERIFIED"
 
@@ -183,6 +187,7 @@ def test_m32_persistence_path_security(
         payload={"session_id": "valid_session_123", "sequence_number": 0},
     )
     resp_valid = message_dispatcher.dispatch(q_valid)
+    assert resp_valid is not None
     assert resp_valid.message_type.value == "RESPONSE"
     assert resp_valid.payload["cycle_id"] == "c_valid_01"
 
@@ -195,6 +200,7 @@ def test_m32_persistence_path_security(
         payload={"session_id": "../traversal_sess", "sequence_number": 0},
     )
     resp_traversal = message_dispatcher.dispatch(q_traversal)
+    assert resp_traversal is not None
     assert resp_traversal.message_type.value == "ERROR"
     assert resp_traversal.payload["error_code"] == "ERR_PERSISTENCE_SECURITY_ERROR"
 
@@ -205,6 +211,7 @@ def test_m32_persistence_path_security(
         payload={"session_id": "/etc/passwd", "sequence_number": 0},
     )
     resp_abs = message_dispatcher.dispatch(q_abs)
+    assert resp_abs is not None
     assert resp_abs.message_type.value == "ERROR"
     assert resp_abs.payload["error_code"] == "ERR_PERSISTENCE_SECURITY_ERROR"
 
@@ -215,6 +222,7 @@ def test_m32_persistence_path_security(
         payload={"session_id": "sess$invalid;rm", "sequence_number": 0},
     )
     resp_malformed = message_dispatcher.dispatch(q_malformed)
+    assert resp_malformed is not None
     assert resp_malformed.message_type.value == "ERROR"
     assert resp_malformed.payload["error_code"] == "ERR_PERSISTENCE_SECURITY_ERROR"
 

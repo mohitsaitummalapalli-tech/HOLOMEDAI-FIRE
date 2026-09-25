@@ -205,7 +205,10 @@ class TestM24DispatcherHardening:
 
         query = create_query("planning.get", "test", payload={"plan_id": sample_draft_plan.plan_id})
         resp = message_dispatcher.dispatch(query)
+        assert resp is not None
+        assert resp.message_type is not None
         assert resp.message_type.value == "RESPONSE"
+        assert resp.payload is not None
         assert resp.payload["plan_id"] == sample_draft_plan.plan_id
         assert resp.payload["case_id"] == "case_m24"
         srv.stop()
@@ -226,7 +229,10 @@ class TestM24DispatcherHardening:
 
         cmd = create_command("execution.planning.execute", "test", payload={})
         resp = message_dispatcher.dispatch(cmd)
+        assert resp is not None
+        assert resp.message_type is not None
         assert resp.message_type.value == "ERROR"
+        assert resp.payload is not None
         assert resp.payload["error_code"] == "ERR_INVALID_ARGS"
         gateway.stop()
 
@@ -250,7 +256,10 @@ class TestM24DispatcherProtocolValidation:
 
         cmd = create_command("execution.planning.execute", "test", payload={"session_id": "s1"})
         resp = message_dispatcher.dispatch(cmd)
+        assert resp is not None
+        assert resp.message_type is not None
         assert resp.message_type.value == "ERROR"
+        assert resp.payload is not None
         assert resp.payload["error_code"] == "ERR_INVALID_ARGS"
         gateway.stop()
 
@@ -274,6 +283,8 @@ class TestM24DispatcherProtocolValidation:
             payload={"session_id": "s1", "sequence_number": "invalid_num", "operation": "SUBMIT"},
         )
         resp = message_dispatcher.dispatch(cmd)
+        assert resp is not None
+        assert resp.message_type is not None
         assert resp.message_type.value == "ERROR"
         gateway.stop()
 
@@ -900,6 +911,7 @@ class TestM24ResilienceAndAudit:
         )
         res = gateway.execute_planning(req)
         assert res.execution_status == ExecutionStatus.FAILED_NAVIGATION_GEOMETRY
+        assert res.error_message is not None
         assert "not found" in res.error_message
 
         gateway.stop()
@@ -948,6 +960,7 @@ class TestM24ResilienceAndAudit:
         )
         res = gateway.execute_planning(req)
         assert res.execution_status == ExecutionStatus.FAILED_NAVIGATION_GEOMETRY
+        assert res.error_message is not None
         assert "Checkpoint registry failure" in res.error_message
 
         gateway.stop()

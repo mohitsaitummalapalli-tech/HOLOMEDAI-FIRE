@@ -62,19 +62,20 @@ def test_ast_prohibited_import_scan() -> None:
 
 def test_kahns_topological_dependency_ordering() -> None:
     """Verify AnatomyService compiles cleanly in Kahn's sort above M00-M04."""
+    from unittest.mock import MagicMock
     regs = {
-        "device.mgr": ServiceRegistration("device.mgr", lambda: None, ()),
-        "vision.service": ServiceRegistration("vision.service", lambda: None, ("device.mgr",)),
-        "audio.service": ServiceRegistration("audio.service", lambda: None, ("device.mgr",)),
-        "gesture.service": ServiceRegistration("gesture.service", lambda: None, ("vision.service",)),
+        "device.mgr": ServiceRegistration("device.mgr", lambda: MagicMock(), ()),  # type: ignore
+        "vision.service": ServiceRegistration("vision.service", lambda: MagicMock(), ("device.mgr",)),  # type: ignore
+        "audio.service": ServiceRegistration("audio.service", lambda: MagicMock(), ("device.mgr",)),  # type: ignore
+        "gesture.service": ServiceRegistration("gesture.service", lambda: MagicMock(), ("vision.service",)),  # type: ignore
         "ultron.service": ServiceRegistration(
             "ultron.service",
-            lambda: None,
+            lambda: MagicMock(),  # type: ignore
             ("vision.service", "audio.service", "gesture.service"),
         ),
         "anatomy.service": ServiceRegistration(
             "anatomy.service",
-            lambda: None,
+            lambda: MagicMock(),  # type: ignore
             ("device.mgr", "ultron.service"),
         ),
     }

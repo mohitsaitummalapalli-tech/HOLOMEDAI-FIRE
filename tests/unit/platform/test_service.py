@@ -90,12 +90,14 @@ def test_dispatcher_routes_query_and_cycle(
     # Query status
     q_status = create_query("platform.status", "client")
     resp_status = message_dispatcher.dispatch(q_status)
+    assert resp_status is not None
     assert resp_status.message_type.value == "RESPONSE"
     assert resp_status.payload["service_name"] == "platform_service"
 
     # Start session
     cmd_start = create_command("platform.session.start", "client", payload={"session_id": "sess_disp"})
     resp_start = message_dispatcher.dispatch(cmd_start)
+    assert resp_start is not None
     assert resp_start.message_type.value == "RESPONSE"
 
     # Execute cycle
@@ -105,6 +107,7 @@ def test_dispatcher_routes_query_and_cycle(
         payload={"session_id": "sess_disp", "sequence_number": 0},
     )
     resp_cycle = message_dispatcher.dispatch(cmd_cycle)
+    assert resp_cycle is not None
     assert resp_cycle.message_type.value == "RESPONSE"
     assert resp_cycle.payload["status"] == "COMPLETED"
 

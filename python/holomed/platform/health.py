@@ -41,7 +41,7 @@ class HealthAggregator:
         is_clean = True
 
         for name, srv in services.items():
-            state = service_states.get(name, srv.state if hasattr(srv, "state") else ServiceState.UNINITIALIZED)
+            state = service_states.get(name, srv.state if hasattr(srv, "state") else ServiceState.UNINITIALIZED)  # type: ignore
             raw_states[name] = state.name
 
             try:

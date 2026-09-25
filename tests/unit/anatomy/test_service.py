@@ -112,6 +112,7 @@ def test_anatomy_service_public_api(
 
     # Reset
     service.reset(epoch_id=1)
+    assert service.hierarchy is not None
     assert service.hierarchy.entity_count == 0
 
     with pytest.raises(AnatomyEpochMismatchError):

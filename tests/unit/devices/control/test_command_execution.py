@@ -209,7 +209,7 @@ def test_command_event_sink_failure_does_not_break_execution() -> None:
         def emit(self, event):
             raise RuntimeError("Database sink offline")
 
-    manager = DeviceControlManager(registry=registry, event_sink=CrashingEventSink(), rehydration_engine=MagicMock(), authoritative_epoch_provider=lambda: 1)
+    manager = DeviceControlManager(registry=registry, event_sink=CrashingEventSink(), rehydration_engine=MagicMock(), authoritative_epoch_provider=lambda: 1)  # type: ignore
     ctx = make_test_context(epoch_id=1)
     manager.initialize(ctx)
     manager.start()

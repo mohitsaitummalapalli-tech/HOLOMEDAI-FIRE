@@ -38,16 +38,19 @@ def test_state_machine_confirmation_and_release_lifecycle() -> None:
 
     # Frame 3: Condition remains True -> remains ACTIVE
     res = sm.update(tid, GestureType.POINT, 0.9, 3, 1, "2026-09-01T12:00:00.066000Z")
+    assert res is not None
     assert res.state == GestureState.ACTIVE.value
     assert len(events_emitted) == 1  # No duplicate event
 
     # Frame 4: Condition false (UNKNOWN) -> release frame 1 (still ACTIVE)
     res = sm.update(tid, GestureType.UNKNOWN, 0.0, 4, 1, "2026-09-01T12:00:00.100000Z")
+    assert res is not None
     assert res.state == GestureState.ACTIVE.value
     assert len(events_emitted) == 1
 
     # Frame 5: Condition false (UNKNOWN) -> release frame 2 -> RELEASED
     res = sm.update(tid, GestureType.UNKNOWN, 0.0, 5, 1, "2026-09-01T12:00:00.133000Z")
+    assert res is not None
     assert res.state == GestureState.RELEASED.value
     assert len(events_emitted) == 2
     assert events_emitted[1][0] == "gesture.released"
@@ -69,6 +72,7 @@ def test_state_machine_candidate_cancellation() -> None:
 
     # Frame 1: Candidate
     res = sm.update(tid, GestureType.PINCH, 0.85, 1, 1, "2026-09-01T12:00:00.000000Z")
+    assert res is not None
     assert res.state == GestureState.CANDIDATE.value
 
     # Frame 2: Abort

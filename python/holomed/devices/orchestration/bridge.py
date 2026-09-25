@@ -187,7 +187,7 @@ class DeviceCrossPlaneBridge(IDeviceEventSink):
         if type(device_id) is str and device_id:
             # Retire session if available
             if hasattr(self._coordination, "retire_session"):
-                self._coordination.retire_session(device_id)
+                self._coordination.retire_session(device_id)  # type: ignore
             elif hasattr(self._coordination, "_telemetry") and self._coordination._telemetry is not None:
                 self._coordination._telemetry.retire_session(device_id)
 

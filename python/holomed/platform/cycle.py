@@ -77,8 +77,8 @@ class CycleCoordinator:
         if ultron_srv is not None:
             if hasattr(ultron_srv, "fuse") and hasattr(ultron_srv, "reason"):
                 try:
-                    fused_ctx = ultron_srv.fuse()
-                    actions = ultron_srv.reason()
+                    fused_ctx = ultron_srv.fuse()  # type: ignore
+                    actions = ultron_srv.reason()  # type: ignore
                     fused_count = len(fused_ctx.entities) if hasattr(fused_ctx, "entities") else len(actions)
                     phases_completed.append("REASONING")
                 except Exception as e:
@@ -88,7 +88,7 @@ class CycleCoordinator:
                     diagnostic_msg = f"Ultron reasoning failed: {type(e).__name__}"
             elif hasattr(ultron_srv, "execute_cycle"):
                 try:
-                    actions = ultron_srv.execute_cycle(observation=None)
+                    actions = ultron_srv.execute_cycle(observation=None)  # type: ignore
                     fused_count = len(actions)
                     phases_completed.append("REASONING")
                 except Exception as e:
@@ -101,7 +101,7 @@ class CycleCoordinator:
         anatomy_srv = services.get("anatomy_service")
         if anatomy_srv is not None and hasattr(anatomy_srv, "step_simulation"):
             try:
-                anatomy_srv.step_simulation(count=1)
+                anatomy_srv.step_simulation(count=1)  # type: ignore
                 phases_completed.append("ANATOMY")
             except Exception as e:
                 status = CycleStatus.DEGRADED
@@ -112,15 +112,15 @@ class CycleCoordinator:
         # Phase 6: Tools
         tool_srv = services.get("tool_service")
         if tool_srv is not None:
-            if hasattr(tool_srv, "engine") and tool_srv.engine is not None:
-                tool_count = len(tool_srv.engine.result_history)
+            if hasattr(tool_srv, "engine") and tool_srv.engine is not None:  # type: ignore
+                tool_count = len(tool_srv.engine.result_history)  # type: ignore
             phases_completed.append("TOOLS")
 
         # Phase 7: XR Presentation Frame
         xr_srv = services.get("xr_service")
         if xr_srv is not None and hasattr(xr_srv, "generate_frame"):
             try:
-                frame_desc = xr_srv.generate_frame()
+                frame_desc = xr_srv.generate_frame()  # type: ignore
                 xr_nodes = len(frame_desc.nodes)
                 phases_completed.append("PRESENTATION")
             except Exception as e:

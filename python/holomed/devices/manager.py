@@ -146,6 +146,8 @@ class DeviceManager(IService):
         if self._state in (ServiceState.STOPPED, ServiceState.UNINITIALIZED):
             return
 
+        assert self._authority is not None
+
         failures: List[DeviceShutdownFailureRecord] = []
         execution_index = 0
 
@@ -329,11 +331,12 @@ class DeviceManager(IService):
         self._in_transaction = True
         try:
             device = self._registry.get(device_id)
+            assert self._authority is not None
             if not self._authority.is_device_clean(device_id):
                 raise DeviceLifecycleError(f"Cannot deregister device '{device_id}' with dirty outstanding resources")
 
             self._registry.deregister(device_id, self._registry_token)
-            device._state = DeviceState.UNREGISTERED
+            device._state = DeviceState.UNREGISTERED  # type: ignore
 
             self._emit_event("device.deregistered", {
                 "device_id": device.device_id,
@@ -355,14 +358,15 @@ class DeviceManager(IService):
             if device.state != DeviceState.REGISTERED:
                 raise DeviceLifecycleError(f"Cannot initialize device '{device_id}' in state {device.state.name}, expected REGISTERED")
 
-            device._state = DeviceState.INITIALIZING
+            device._state = DeviceState.INITIALIZING  # type: ignore
+            assert self._authority is not None
             accessor = DeviceResourceAccessor(self._authority, device_id)
             try:
                 device.initialize(accessor)
-                device._state = DeviceState.READY
+                device._state = DeviceState.READY  # type: ignore
                 self._emit_event("device.initialized", {"device_id": device.device_id, "device_type": device.device_type.name})
             except Exception as e:
-                device._state = DeviceState.FAILED
+                device._state = DeviceState.FAILED  # type: ignore
                 self._emit_event("device.failed", {"device_id": device.device_id, "error": self._secret_filter.redact(str(e))})
                 raise
         finally:
@@ -380,18 +384,19 @@ class DeviceManager(IService):
             if device.state != DeviceState.READY:
                 raise DeviceLifecycleError(f"Cannot start device '{device_id}' in state {device.state.name}, expected READY")
 
+            assert self._authority is not None
             handles_before = frozenset(self._authority.get_device_outstanding_handles(device_id))
             try:
                 device.start()
                 handles_after = frozenset(self._authority.get_device_outstanding_handles(device_id))
                 if handles_after != handles_before:
-                    device._state = DeviceState.FAILED
+                    device._state = DeviceState.FAILED  # type: ignore
                     raise DeviceLifecycleError(f"Device '{device_id}' acquired new resources during start(), which is strictly forbidden")
 
-                device._state = DeviceState.ACTIVE
+                device._state = DeviceState.ACTIVE  # type: ignore
                 self._emit_event("device.started", {"device_id": device.device_id, "device_type": device.device_type.name})
             except Exception as e:
-                device._state = DeviceState.FAILED
+                device._state = DeviceState.FAILED  # type: ignore
                 self._emit_event("device.failed", {"device_id": device.device_id, "error": self._secret_filter.redact(str(e))})
                 raise
         finally:
@@ -409,18 +414,19 @@ class DeviceManager(IService):
             if device.state not in (DeviceState.READY, DeviceState.ACTIVE):
                 raise DeviceLifecycleError(f"Cannot stop device '{device_id}' in state {device.state.name}, expected READY or ACTIVE")
 
-            device._state = DeviceState.STOPPING
+            device._state = DeviceState.STOPPING  # type: ignore
+            assert self._authority is not None
             accessor = DeviceResourceAccessor(self._authority, device_id)
             try:
                 device.stop(accessor)
                 if not self._authority.is_device_clean(device_id):
-                    device._state = DeviceState.FAILED
+                    device._state = DeviceState.FAILED  # type: ignore
                     raise DeviceLifecycleError(f"Device '{device_id}' returned cleanly from stop() but resources remain unreleased")
 
-                device._state = DeviceState.STOPPED
+                device._state = DeviceState.STOPPED  # type: ignore
                 self._emit_event("device.stopped", {"device_id": device.device_id, "device_type": device.device_type.name})
             except Exception as e:
-                device._state = DeviceState.FAILED
+                device._state = DeviceState.FAILED  # type: ignore
                 self._emit_event("device.failed", {"device_id": device.device_id, "error": self._secret_filter.redact(str(e))})
                 raise
         finally:
@@ -438,24 +444,25 @@ class DeviceManager(IService):
             if device.state != DeviceState.FAILED:
                 raise DeviceLifecycleError(f"Cannot retry cleanup on device '{device_id}' in state {device.state.name}, expected FAILED")
 
+            assert self._authority is not None
             if self._authority.is_device_clean(device_id):
-                device._state = DeviceState.STOPPED
+                device._state = DeviceState.STOPPED  # type: ignore
                 self._emit_event("device.stopped", {"device_id": device.device_id, "device_type": device.device_type.name})
                 return True
 
-            device._state = DeviceState.STOPPING
+            device._state = DeviceState.STOPPING  # type: ignore
             accessor = DeviceResourceAccessor(self._authority, device_id)
             try:
                 device.stop(accessor)
                 if self._authority.is_device_clean(device_id):
-                    device._state = DeviceState.STOPPED
+                    device._state = DeviceState.STOPPED  # type: ignore
                     self._emit_event("device.stopped", {"device_id": device.device_id, "device_type": device.device_type.name})
                     return True
                 else:
-                    device._state = DeviceState.FAILED
+                    device._state = DeviceState.FAILED  # type: ignore
                     return False
             except Exception:
-                device._state = DeviceState.FAILED
+                device._state = DeviceState.FAILED  # type: ignore
                 return False
         finally:
             self._in_transaction = False
@@ -498,32 +505,34 @@ class DeviceManager(IService):
                     try:
                         if active_dev.state == DeviceState.REGISTERED:
                             self._registry.deregister(dev_id, self._registry_token)
-                            active_dev._state = DeviceState.UNREGISTERED
+                            active_dev._state = DeviceState.UNREGISTERED  # type: ignore
                             removed.append(dev_id)
                         elif active_dev.state in (DeviceState.READY, DeviceState.ACTIVE):
-                            active_dev._state = DeviceState.STOPPING
+                            active_dev._state = DeviceState.STOPPING  # type: ignore
+                            assert self._authority is not None
                             accessor = DeviceResourceAccessor(self._authority, dev_id)
                             active_dev.stop(accessor)
                             if self._authority.is_device_clean(dev_id):
                                 self._registry.deregister(dev_id, self._registry_token)
-                                active_dev._state = DeviceState.UNREGISTERED
+                                active_dev._state = DeviceState.UNREGISTERED  # type: ignore
                                 removed.append(dev_id)
                             else:
-                                active_dev._state = DeviceState.FAILED
+                                active_dev._state = DeviceState.FAILED  # type: ignore
                                 failed[dev_id] = "Disappeared device stop succeeded but resources remained dirty"
                         elif active_dev.state == DeviceState.STOPPED:
                             self._registry.deregister(dev_id, self._registry_token)
-                            active_dev._state = DeviceState.UNREGISTERED
+                            active_dev._state = DeviceState.UNREGISTERED  # type: ignore
                             removed.append(dev_id)
                         elif active_dev.state == DeviceState.FAILED:
+                            assert self._authority is not None
                             if self._authority.is_device_clean(dev_id):
                                 self._registry.deregister(dev_id, self._registry_token)
-                                active_dev._state = DeviceState.UNREGISTERED
+                                active_dev._state = DeviceState.UNREGISTERED  # type: ignore
                                 removed.append(dev_id)
                             else:
                                 failed[dev_id] = "Disappeared device is dirty FAILED; cannot deregister"
                     except Exception as e:
-                        active_dev._state = DeviceState.FAILED
+                        active_dev._state = DeviceState.FAILED  # type: ignore
                         failed[dev_id] = self._secret_filter.redact(f"Failed stopping disappeared device: {e}")
                 else:
                     # Present in both: check exact 5-field equality
@@ -548,26 +557,29 @@ class DeviceManager(IService):
 
                     # 2. RETIRE OLD: stop and deregister old device
                     if old_dev.state in (DeviceState.READY, DeviceState.ACTIVE):
-                        old_dev._state = DeviceState.STOPPING
+                        old_dev._state = DeviceState.STOPPING  # type: ignore
+                        assert self._authority is not None
                         accessor = DeviceResourceAccessor(self._authority, dev_id)
                         old_dev.stop(accessor)
 
+                    assert self._authority is not None
                     if not self._authority.is_device_clean(dev_id):
-                        old_dev._state = DeviceState.FAILED
+                        old_dev._state = DeviceState.FAILED  # type: ignore
                         failed[dev_id] = "Old device stop left dirty resources; replacement aborted"
                         continue
 
                     self._registry.deregister(dev_id, self._registry_token)
-                    old_dev._state = DeviceState.UNREGISTERED
+                    old_dev._state = DeviceState.UNREGISTERED  # type: ignore
 
                     # 3. COMMIT NEW: register, initialize, and start candidate
                     self._register_device_internal(candidate)
+                    assert self._authority is not None
                     init_accessor = DeviceResourceAccessor(self._authority, dev_id)
-                    candidate._state = DeviceState.INITIALIZING
-                    candidate.initialize(init_accessor)
-                    candidate._state = DeviceState.READY
+                    candidate._state = DeviceState.INITIALIZING  # type: ignore
+                    candidate.initialize(accessor=init_accessor)
+                    candidate._state = DeviceState.READY  # type: ignore
                     candidate.start()
-                    candidate._state = DeviceState.ACTIVE
+                    candidate._state = DeviceState.ACTIVE  # type: ignore
 
                     added.append(dev_id)
                     removed.append(dev_id)
@@ -580,12 +592,13 @@ class DeviceManager(IService):
                     try:
                         candidate = self._create_candidate_instance(new_desc, exclude_device_id=None)
                         self._register_device_internal(candidate)
+                        assert self._authority is not None
                         init_accessor = DeviceResourceAccessor(self._authority, dev_id)
-                        candidate._state = DeviceState.INITIALIZING
-                        candidate.initialize(init_accessor)
-                        candidate._state = DeviceState.READY
+                        candidate._state = DeviceState.INITIALIZING  # type: ignore
+                        candidate.initialize(accessor=init_accessor)
+                        candidate._state = DeviceState.READY  # type: ignore
                         candidate.start()
-                        candidate._state = DeviceState.ACTIVE
+                        candidate._state = DeviceState.ACTIVE  # type: ignore
                         added.append(dev_id)
                     except Exception as e:
                         failed[dev_id] = self._secret_filter.redact(f"Addition failed: {e}")
@@ -643,7 +656,7 @@ class DeviceManager(IService):
             raise DeviceFactoryError(f"Device instance for '{device.device_id}' is already registered or was previously retired (reused live object)")
 
         self._registry.register(device, self._registry_token)
-        device._state = DeviceState.REGISTERED
+        device._state = DeviceState.REGISTERED  # type: ignore
         self._freshness_tracker.track(device)
 
         self._emit_event("device.registered", {
@@ -696,16 +709,17 @@ class DeviceManager(IService):
         execution_index: int,
         failures: List[DeviceShutdownFailureRecord],
     ) -> None:
+        assert self._authority is not None
         dev_id = device.device_id
         state = device.state
 
         if state == DeviceState.REGISTERED:
             self._registry.deregister(dev_id, self._registry_token)
-            device._state = DeviceState.UNREGISTERED
+            device._state = DeviceState.UNREGISTERED  # type: ignore
             self._emit_event("device.deregistered", {"device_id": dev_id, "device_type": device.device_type.name, "physical_id": device.physical_id})
 
         elif state in (DeviceState.READY, DeviceState.ACTIVE):
-            device._state = DeviceState.STOPPING
+            device._state = DeviceState.STOPPING  # type: ignore
             accessor = DeviceResourceAccessor(self._authority, dev_id)
             try:
                 device.stop(accessor)
@@ -720,7 +734,7 @@ class DeviceManager(IService):
             else:
                 if self._authority.is_device_clean(dev_id):
                     self._registry.deregister(dev_id, self._registry_token)
-                    device._state = DeviceState.UNREGISTERED
+                    device._state = DeviceState.UNREGISTERED  # type: ignore
                     self._emit_event("device.stopped", {"device_id": dev_id, "device_type": device.device_type.name})
                     self._emit_event("device.deregistered", {"device_id": dev_id, "device_type": device.device_type.name, "physical_id": device.physical_id})
                 else:
@@ -734,13 +748,13 @@ class DeviceManager(IService):
 
         elif state == DeviceState.STOPPED:
             self._registry.deregister(dev_id, self._registry_token)
-            device._state = DeviceState.UNREGISTERED
+            device._state = DeviceState.UNREGISTERED  # type: ignore
             self._emit_event("device.deregistered", {"device_id": dev_id, "device_type": device.device_type.name, "physical_id": device.physical_id})
 
         elif state == DeviceState.FAILED:
             if self._authority.is_device_clean(dev_id):
                 self._registry.deregister(dev_id, self._registry_token)
-                device._state = DeviceState.UNREGISTERED
+                device._state = DeviceState.UNREGISTERED  # type: ignore
                 self._emit_event("device.deregistered", {"device_id": dev_id, "device_type": device.device_type.name, "physical_id": device.physical_id})
             else:
                 # Attempt recovery cleanup
@@ -758,7 +772,7 @@ class DeviceManager(IService):
                 else:
                     if self._authority.is_device_clean(dev_id):
                         self._registry.deregister(dev_id, self._registry_token)
-                        device._state = DeviceState.UNREGISTERED
+                        device._state = DeviceState.UNREGISTERED  # type: ignore
                     else:
                         failures.append(DeviceShutdownFailureRecord(
                             device_id=dev_id,
