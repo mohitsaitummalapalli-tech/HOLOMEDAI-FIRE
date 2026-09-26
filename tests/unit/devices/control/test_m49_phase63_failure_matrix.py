@@ -275,8 +275,10 @@ def test_lease_failure_distinctions(shared_store_path):
     
     # A. ControlCapacityError before endpoint.acquire_lease() -> physical absence provable
     with pytest.raises(CapabilityUnauthorizedError):
+        from typing import cast
+        from holomed.devices.models import PhysicalCommand
         # Simulated endpoint requires lease for submit
-        endpoint.submit_command(None)
+        endpoint.submit_command(cast(PhysicalCommand, None))
         
     # B. endpoint.acquire_lease() throws -> FAULTED_UNKNOWN (wait, if acquire throws, it's before submit, 
     # but lease acquisition is done by the endpoint proxy).
@@ -330,7 +332,7 @@ def test_n_stale_lease_rejection(shared_store_path):
         authoritative_epoch_provider=lambda: epoch,
         rehydration_engine=MagicMock()
     )
-    manager.register_command("cmd_n", handler=lambda **kwargs: None, required_capability_id="test.cap")
+    manager.register_command("cmd_n", handler=lambda cmd, p: None, required_capability_id="test.cap")
 
     from unittest.mock import MagicMock
     ctx = MagicMock()
@@ -379,6 +381,7 @@ def test_n_stale_lease_rejection(shared_store_path):
     # Prove NO capacity mutation
     assert len(manager._active_commands) == 0
     # Prove NO physical dispatch for the target execution (the endpoint has the OTHER lease)
+    assert endpoint.active_lease is not None
     assert endpoint.active_lease.session_id == "other_session_id"
 
     # End of file

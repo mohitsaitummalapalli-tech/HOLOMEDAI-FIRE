@@ -45,7 +45,7 @@ class MockDevice(IDevice):
         return self._device_id
         
     @property
-    def endpoints(self) -> list:
+    def endpoints(self) -> list: # type: ignore
         return self._endpoints
         
     @property
@@ -55,18 +55,18 @@ class MockDevice(IDevice):
     @property
     def physical_id(self) -> str: return "phys-1"
     @property
-    def device_type(self) -> str: return "mock"
+    def device_type(self) -> str: return "mock" # type: ignore
     @property
-    def health(self) -> dict: return {}
+    def health(self) -> dict: return {} # type: ignore
     @property
-    def capabilities(self) -> list: return []
+    def capabilities(self) -> list: return [] # type: ignore
     @property
     def current_epoch(self) -> int: return self._current_epoch
     @current_epoch.setter
     def current_epoch(self, val): self._current_epoch = val
-    def initialize(self): pass
-    def start(self): pass
-    def stop(self): pass
+    def initialize(self, *args, **kwargs): pass # type: ignore
+    def start(self, *args, **kwargs): pass # type: ignore
+    def stop(self, *args, **kwargs): pass # type: ignore
 
 # The transaction crash matrix (Points A-I).
 def test_transaction_crash_matrix_a():
