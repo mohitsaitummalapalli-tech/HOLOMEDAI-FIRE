@@ -38,6 +38,10 @@ class PersistenceIdentityReuseError(PersistenceValidationError):
     """Raised when a canonical identity is reused incorrectly after termination."""
 
 
+class PersistenceIdempotencyError(PersistenceValidationError):
+    """Raised when an operation is submitted with an existing idempotency key but conflicting intent."""
+
+
 class PersistenceCapacityError(PersistenceError, PlatformCapacityError):
     """Raised when storage bounds, entry counts, or file limits are exceeded."""
 

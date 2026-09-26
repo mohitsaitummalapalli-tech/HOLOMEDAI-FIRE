@@ -67,7 +67,7 @@ def test_reject_physical_command_without_session_id(manager_and_device):
         payload={
             "device_id": "sys.test.phys",
             "command": "test.actuate",
-            "execution_id": "exec_1",
+            "execution_id": "exec_1", "command_nonce": "nonce_1", "command_nonce": "nonce_1",
             "session_lifecycle_generation": 1,
             "parameters": {},
         }
@@ -106,7 +106,7 @@ def test_reject_physical_command_without_lifecycle_generation(manager_and_device
             "device_id": "sys.test.phys",
             "command": "test.actuate",
             "session_id": "sess_1",
-            "execution_id": "exec_1",
+            "execution_id": "exec_1", "command_nonce": "nonce_1", "command_nonce": "nonce_1",
             "parameters": {},
         }
     )
@@ -125,7 +125,7 @@ def test_successful_lease_issues_sequence_number(manager_and_device):
             "device_id": "sys.test.phys",
             "command": "test.actuate",
             "session_id": "sess_1",
-            "execution_id": "exec_1",
+            "execution_id": "exec_1", "command_nonce": "nonce_1", "command_nonce": "nonce_1",
             "session_lifecycle_generation": 1,
             "parameters": {},
         }
@@ -150,7 +150,7 @@ def test_sequential_commands_increment_sequence(manager_and_device):
                 "device_id": "sys.test.phys",
                 "command": "test.actuate",
                 "session_id": "sess_1",
-                "execution_id": "exec_1",
+                "execution_id": "exec_1", "command_nonce": "nonce_1", "command_nonce": "nonce_1",
                 "session_lifecycle_generation": 1,
                 "parameters": {},
             }
@@ -174,7 +174,7 @@ def test_new_session_execution_rejected_if_lease_active(manager_and_device):
             "device_id": "sys.test.phys",
             "command": "test.actuate",
             "session_id": "sess_1",
-            "execution_id": "exec_1",
+            "execution_id": "exec_1", "command_nonce": "nonce_1", "command_nonce": "nonce_1",
             "session_lifecycle_generation": 1,
             "parameters": {},
         }
@@ -188,7 +188,7 @@ def test_new_session_execution_rejected_if_lease_active(manager_and_device):
             "device_id": "sys.test.phys",
             "command": "test.actuate",
             "session_id": "sess_2",
-            "execution_id": "exec_2",
+            "execution_id": "exec_2", "command_nonce": "nonce_1", "command_nonce": "nonce_1",
             "session_lifecycle_generation": 1,
             "parameters": {},
         }
@@ -209,7 +209,7 @@ def test_emergency_stop_revokes_lease_and_interlocks(manager_and_device):
             "device_id": "sys.test.phys",
             "command": "test.actuate",
             "session_id": "sess_1",
-            "execution_id": "exec_1",
+            "execution_id": "exec_1", "command_nonce": "nonce_1", "command_nonce": "nonce_1",
             "session_lifecycle_generation": 1,
             "parameters": {},
         }
@@ -233,7 +233,7 @@ def test_hardware_interlock_prevents_lease_acquisition(manager_and_device):
             "device_id": "sys.test.phys",
             "command": "test.actuate",
             "session_id": "sess_1",
-            "execution_id": "exec_1",
+            "execution_id": "exec_1", "command_nonce": "nonce_1", "command_nonce": "nonce_1",
             "session_lifecycle_generation": 1,
             "parameters": {},
         }
@@ -258,7 +258,7 @@ def test_verifier_rejects_missing_endpoint_for_physical_capability(manager_and_d
             "device_id": "sys.test.phys",
             "command": "test.actuate",
             "session_id": "sess_1",
-            "execution_id": "exec_1",
+            "execution_id": "exec_1", "command_nonce": "nonce_1", "command_nonce": "nonce_1",
             "session_lifecycle_generation": 1,
             "parameters": {},
         }

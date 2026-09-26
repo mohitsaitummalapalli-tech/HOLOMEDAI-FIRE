@@ -202,7 +202,7 @@ def test_concurrent_admission_race():
             "command": "test_cmd",
             "parameters": {},
             "session_id": "sess1",
-            "execution_id": "exec1",
+            "execution_id": "exec1", "command_nonce": "nonce_1", "command_nonce": "nonce_1",
             "session_lifecycle_generation": 1
         },
         metadata={}

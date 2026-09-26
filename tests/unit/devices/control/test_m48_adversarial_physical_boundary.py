@@ -154,7 +154,7 @@ def test_01_valid_command_admitted(m48_system, clinical_device):
     
     cmd = create_command(
         message_name="device.command", source="test",
-        payload={"device_id": "sys.clin", "command": "clin.actuate", "session_id": sess_id, "execution_id": "exec_1", "session_lifecycle_generation": gen, "parameters": {}}
+        payload={"device_id": "sys.clin", "command": "clin.actuate", "session_id": sess_id, "execution_id": "exec_1", "command_nonce": "nonce_1", "command_nonce": "nonce_1", "session_lifecycle_generation": gen, "parameters": {}}
     )
     res = manager.handle_command(cmd)
     if res.message_type == MessageType.ERROR:
@@ -173,7 +173,7 @@ def test_02_revoked_session_rejected(m48_system, clinical_device):
     
     cmd = create_command(
         message_name="device.command", source="test",
-        payload={"device_id": "sys.clin", "command": "clin.actuate", "session_id": sess_id, "execution_id": "exec_1", "session_lifecycle_generation": gen, "parameters": {}}
+        payload={"device_id": "sys.clin", "command": "clin.actuate", "session_id": sess_id, "execution_id": "exec_1", "command_nonce": "nonce_1", "command_nonce": "nonce_1", "session_lifecycle_generation": gen, "parameters": {}}
     )
     res = manager.handle_command(cmd)
     assert res.message_type == MessageType.ERROR
@@ -186,7 +186,7 @@ def test_03_stale_session_lifecycle_generation_rejected(m48_system, clinical_dev
     
     cmd = create_command(
         message_name="device.command", source="test",
-        payload={"device_id": "sys.clin", "command": "clin.actuate", "session_id": sess_id, "execution_id": "exec_1", "session_lifecycle_generation": gen - 1, "parameters": {}}
+        payload={"device_id": "sys.clin", "command": "clin.actuate", "session_id": sess_id, "execution_id": "exec_1", "command_nonce": "nonce_1", "command_nonce": "nonce_1", "session_lifecycle_generation": gen - 1, "parameters": {}}
     )
     res = manager.handle_command(cmd)
     assert res.message_type == MessageType.ERROR
@@ -200,7 +200,7 @@ def test_04_wrong_execution_id_rejected(m48_system, clinical_device):
     
     manager.handle_command(create_command(
         message_name="device.command", source="test",
-        payload={"device_id": "sys.clin", "command": "clin.actuate", "session_id": sess_id, "execution_id": "exec_1", "session_lifecycle_generation": gen, "parameters": {}}
+        payload={"device_id": "sys.clin", "command": "clin.actuate", "session_id": sess_id, "execution_id": "exec_1", "command_nonce": "nonce_1", "command_nonce": "nonce_1", "session_lifecycle_generation": gen, "parameters": {}}
     ))
     
     # We simulate the hardware receiving an old exec_id command
@@ -214,13 +214,13 @@ def test_06_stale_endpoint_lease_rejected(m48_system, clinical_device):
     
     manager.handle_command(create_command(
         message_name="device.command", source="test",
-        payload={"device_id": "sys.clin", "command": "clin.actuate", "session_id": sess_id, "execution_id": "exec_1", "session_lifecycle_generation": gen, "parameters": {}}
+        payload={"device_id": "sys.clin", "command": "clin.actuate", "session_id": sess_id, "execution_id": "exec_1", "command_nonce": "nonce_1", "command_nonce": "nonce_1", "session_lifecycle_generation": gen, "parameters": {}}
     ))
     lease_gen_1 = endpoint.active_lease.endpoint_lease_generation
     
     response = manager.handle_command(create_command(
         message_name="device.command", source="test",
-        payload={"device_id": "sys.clin", "command": "clin.actuate", "session_id": sess_id, "execution_id": "exec_2", "session_lifecycle_generation": gen, "parameters": {}}
+        payload={"device_id": "sys.clin", "command": "clin.actuate", "session_id": sess_id, "execution_id": "exec_2", "command_nonce": "nonce_1", "command_nonce": "nonce_1", "session_lifecycle_generation": gen, "parameters": {}}
     ))
     
     assert response.message_name == "device.command.error"
@@ -236,7 +236,7 @@ def test_08_session_a_to_b_reassignment_isolation(m48_system, clinical_device):
     
     manager.handle_command(create_command(
         message_name="device.command", source="test",
-        payload={"device_id": "sys.clin", "command": "clin.actuate", "session_id": sess_a, "execution_id": "exec_A", "session_lifecycle_generation": gen_a, "parameters": {}}
+        payload={"device_id": "sys.clin", "command": "clin.actuate", "session_id": sess_a, "execution_id": "exec_A", "command_nonce": "nonce_1", "command_nonce": "nonce_1", "session_lifecycle_generation": gen_a, "parameters": {}}
     ))
     assert endpoint.active_lease.session_id == sess_a
     
@@ -248,13 +248,13 @@ def test_08_session_a_to_b_reassignment_isolation(m48_system, clinical_device):
     
     manager.handle_command(create_command(
         message_name="device.command", source="test",
-        payload={"device_id": "sys.clin", "command": "clin.actuate", "session_id": sess_b, "execution_id": "exec_B", "session_lifecycle_generation": gen_b, "parameters": {}}
+        payload={"device_id": "sys.clin", "command": "clin.actuate", "session_id": sess_b, "execution_id": "exec_B", "command_nonce": "nonce_1", "command_nonce": "nonce_1", "session_lifecycle_generation": gen_b, "parameters": {}}
     ))
     assert endpoint.active_lease.session_id == sess_b
     
     res = manager.handle_command(create_command(
         message_name="device.command", source="test",
-        payload={"device_id": "sys.clin", "command": "clin.actuate", "session_id": sess_a, "execution_id": "exec_A", "session_lifecycle_generation": gen_a, "parameters": {}}
+        payload={"device_id": "sys.clin", "command": "clin.actuate", "session_id": sess_a, "execution_id": "exec_A", "command_nonce": "nonce_1", "command_nonce": "nonce_1", "session_lifecycle_generation": gen_a, "parameters": {}}
     ))
     print(f"RES TYPE: {res.message_type}, PAYLOAD: {res.payload}")
     assert res.message_type == MessageType.ERROR
@@ -286,7 +286,7 @@ def test_09_cross_session_isolation_under_concurrency(m48_system, clinical_devic
     def thread_a():
         manager.handle_command(create_command(
             message_name="device.command", source="test",
-            payload={"device_id": "sys.clin", "command": "clin.actuate", "session_id": sess_a, "execution_id": "exec_A", "session_lifecycle_generation": gen_a, "parameters": {}}
+            payload={"device_id": "sys.clin", "command": "clin.actuate", "session_id": sess_a, "execution_id": "exec_A", "command_nonce": "nonce_1", "command_nonce": "nonce_1", "session_lifecycle_generation": gen_a, "parameters": {}}
         ))
         
     t1 = threading.Thread(target=thread_a)
@@ -309,8 +309,8 @@ def test_10_cross_session_same_device_isolation(m48_system, multi_endpoint_devic
     sess_b = sess_manager.start_session("sess_B", epoch_id=1).session_id
     gen_b = sess_manager.get_lifecycle_gate(sess_b).generation
     
-    manager.handle_command(create_command(message_name="device.command", source="test", payload={"device_id": "sys.multi", "command": "multi.actuate1", "session_id": sess_a, "execution_id": "exec_A", "session_lifecycle_generation": gen_a, "parameters": {}}))
-    manager.handle_command(create_command(message_name="device.command", source="test", payload={"device_id": "sys.multi", "command": "multi.actuate2", "session_id": sess_b, "execution_id": "exec_B", "session_lifecycle_generation": gen_b, "parameters": {}}))
+    manager.handle_command(create_command(message_name="device.command", source="test", payload={"device_id": "sys.multi", "command": "multi.actuate1", "session_id": sess_a, "execution_id": "exec_A", "command_nonce": "nonce_1", "command_nonce": "nonce_1", "session_lifecycle_generation": gen_a, "parameters": {}}))
+    manager.handle_command(create_command(message_name="device.command", source="test", payload={"device_id": "sys.multi", "command": "multi.actuate2", "session_id": sess_b, "execution_id": "exec_B", "command_nonce": "nonce_1", "command_nonce": "nonce_1", "session_lifecycle_generation": gen_b, "parameters": {}}))
     
     assert ep1.active_lease.session_id == sess_a
     assert ep2.active_lease.session_id == sess_b
@@ -347,7 +347,7 @@ def test_15_session_stop_active_command(m48_system, clinical_device):
     def thread_a():
         manager.handle_command(create_command(
             message_name="device.command", source="test",
-            payload={"device_id": "sys.clin", "command": "clin.actuate", "session_id": sess_a, "execution_id": "exec_A", "session_lifecycle_generation": gen_a, "parameters": {}}
+            payload={"device_id": "sys.clin", "command": "clin.actuate", "session_id": sess_a, "execution_id": "exec_A", "command_nonce": "nonce_1", "command_nonce": "nonce_1", "session_lifecycle_generation": gen_a, "parameters": {}}
         ))
         
     t1 = threading.Thread(target=thread_a)
@@ -371,7 +371,7 @@ def test_18_19_emergency_stop_and_interlock(m48_system, clinical_device):
     
     manager.handle_command(create_command(
         message_name="device.command", source="test",
-        payload={"device_id": "sys.clin", "command": "clin.actuate", "session_id": sess_a, "execution_id": "exec_A", "session_lifecycle_generation": gen_a, "parameters": {}}
+        payload={"device_id": "sys.clin", "command": "clin.actuate", "session_id": sess_a, "execution_id": "exec_A", "command_nonce": "nonce_1", "command_nonce": "nonce_1", "session_lifecycle_generation": gen_a, "parameters": {}}
     ))
     
     assert endpoint.safety_state == EndpointSafetyState.ACTIVE
@@ -387,7 +387,7 @@ def test_18_19_emergency_stop_and_interlock(m48_system, clinical_device):
     
     res = manager.handle_command(create_command(
         message_name="device.command", source="test",
-        payload={"device_id": "sys.clin", "command": "clin.actuate", "session_id": sess_b, "execution_id": "exec_B", "session_lifecycle_generation": gen_b, "parameters": {}}
+        payload={"device_id": "sys.clin", "command": "clin.actuate", "session_id": sess_b, "execution_id": "exec_B", "command_nonce": "nonce_1", "command_nonce": "nonce_1", "session_lifecycle_generation": gen_b, "parameters": {}}
     ))
     assert res.message_type == MessageType.ERROR
     assert "Hardware is interlocked" in res.payload["error_message"]
@@ -411,7 +411,7 @@ def test_20_clinical_migration_gate(m48_system):
     
     cmd = create_command(
         message_name="device.command", source="test",
-        payload={"device_id": "sys.legacy", "command": "clin.legacy", "session_id": sess_id, "execution_id": "exec_1", "session_lifecycle_generation": gen, "parameters": {}}
+        payload={"device_id": "sys.legacy", "command": "clin.legacy", "session_id": sess_id, "execution_id": "exec_1", "command_nonce": "nonce_1", "command_nonce": "nonce_1", "session_lifecycle_generation": gen, "parameters": {}}
     )
     res = manager.handle_command(cmd)
     
@@ -427,7 +427,7 @@ def test_duplicate_revocation_idempotent(m48_system, clinical_device):
     
     manager.handle_command(create_command(
         message_name="device.command", source="test",
-        payload={"device_id": "sys.clin", "command": "clin.actuate", "session_id": sess_id, "execution_id": "exec_1", "session_lifecycle_generation": gen, "parameters": {}}
+        payload={"device_id": "sys.clin", "command": "clin.actuate", "session_id": sess_id, "execution_id": "exec_1", "command_nonce": "nonce_1", "command_nonce": "nonce_1", "session_lifecycle_generation": gen, "parameters": {}}
     ))
     
     sess_manager.stop_session(sess_id)

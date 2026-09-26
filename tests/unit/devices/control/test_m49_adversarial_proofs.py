@@ -219,9 +219,22 @@ def test_terminated_identity_reuse_rejection(shared_store_path):
 
     assert store.get_active_physical_operations() == 0
 
+    # Exact replay of (session, nonce) should bypass and return exact replay result
+    physical_operation_id, is_replay, resolution = store.record_operation_admitted(
+        session, "ep_t", "dev_t", 1, 1, "op_t", "nonce_t", "exec_t2", "test"
+    )
+    assert physical_operation_id == "op_t"
+    assert is_replay is True
+    assert resolution == "OPERATION_COMPLETED"
+
+    # A completely different request (new session) but same op_t physical_operation_id and nonce
+    # must be rejected because it collides with an already terminated canonical identity.
+    # We must register the new session first.
+    store.start_session("session_diff", epoch, {})
+
     with pytest.raises(PersistenceIdentityReuseError):
         store.record_operation_admitted(
-            session, "ep_t", "dev_t", 1, 1, "op_t", "nonce_t", "exec_t2", "test"
+            "session_diff", "ep_t", "dev_t", 1, 1, "op_t", "nonce_t", "exec_t3", "test"
         )
 
 # ---------------------------------------------------------
@@ -599,8 +612,9 @@ def test_submission_fence_closes_toctou(shared_store_path):
             "device_id": "dev_fence",
             "command": "test_actuate",
             "session_id": session,
+            "command_nonce": "nonce_1",
             "session_lifecycle_generation": 1,
-            "execution_id": "exec_1",
+            "execution_id": "exec_1", "command_nonce": "nonce_1", "command_nonce": "nonce_1",
             "parameters": {}
         }
     )
@@ -649,10 +663,10 @@ def test_durable_admission_closes_toctou(shared_store_path):
     store.restore_session_from_disk(session)
 
     # Process A reads epoch = E (which is `epoch`)
-    
+
     # Process B advances durable authority to E+1
     next_epoch = authority.allocate_next_epoch()
-    
+
     # Process A attempts admission using E
     with pytest.raises(PersistenceEpochMismatchError):
         store.record_operation_admitted(
@@ -666,10 +680,10 @@ def test_durable_admission_closes_toctou(shared_store_path):
             execution_id="exec_1",
             command_name="test_actuate"
         )
-        
+
     # Prove NO ADMITTED entry and NO capacity corruption
     assert store.get_active_physical_operations() == 0
-    
+
     from holomed.persistence.journal import JournalReader, JournalEntryType
     entries, _ = JournalReader.read_and_recover_journal(shared_store_path / f"{session}.jsonl")
     admissions = [e for e in entries if e.entry_type == JournalEntryType.OPERATION_ADMITTED]

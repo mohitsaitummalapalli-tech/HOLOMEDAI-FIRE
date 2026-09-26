@@ -6,8 +6,10 @@ import weakref
 from datetime import datetime, timezone
 from types import MappingProxyType
 import uuid
+import hashlib
 from typing import Any, Callable, Dict, Mapping, Optional, Tuple
 
+# serialize_canonical_bytes imported locally where needed to avoid circular import
 from holomed.core.subscription import validate_concrete_topic
 from holomed.devices.control.exceptions import (
     CommandNotFoundError,
@@ -82,7 +84,7 @@ class DeviceControlManager(IService):
         resolution_gate: Optional[IExecutionResolutionGate] = None,
         capacity_checker: Optional[Callable[[str], int]] = None,
         capacity_releaser: Optional[Callable[[str, str, int, int, str, str, str], None]] = None,
-        capacity_admitter: Optional[Callable[[str, str, str, int, int, str, str, str, str], None]] = None,
+        capacity_admitter: Optional[Callable[[str, str, str, int, int, Optional[str], str, str, str, str], tuple[str, bool, Optional[str]]]] = None,
         authoritative_epoch_provider: Optional[Callable[[], int]] = None,
         rehydration_engine: Optional["StateRehydrationEngine"] = None,
         reconciliation_daemon: Optional["ReconciliationDaemon"] = None,
@@ -127,7 +129,7 @@ class DeviceControlManager(IService):
         """Atomically records a terminal software resolution in the durable journal."""
         with self._timeout_lock:
             cmd = self._active_commands.pop(execution_id, None)
-            
+
         if not cmd or not self._capacity_releaser:
             return
 
@@ -139,7 +141,7 @@ class DeviceControlManager(IService):
                     break
             if device_id:
                 break
-                
+
         if device_id:
             val = str(getattr(terminal_state, "value", terminal_state))
             self._capacity_releaser(
@@ -204,7 +206,7 @@ class DeviceControlManager(IService):
 
         self._admission_state = AdmissionState.REHYDRATING
         self._state = ServiceState.STARTED
-        
+
         try:
             if not self._rehydration_engine:
                 raise ServiceLifecycleError("StateRehydrationEngine is mandatory for production safety")
@@ -424,12 +426,13 @@ class DeviceControlManager(IService):
             session_id = payload.get("session_id")
             lifecycle_generation = payload.get("session_lifecycle_generation")
             execution_id = payload.get("execution_id")
-            if not session_id or not execution_id or lifecycle_generation is None:
+            command_nonce = payload.get("command_nonce")
+            if not session_id or not execution_id or lifecycle_generation is None or not command_nonce:
                 return create_error_response(
                     request=envelope,
                     responder_source=self.name,
                     error_code="ERR_VALIDATION_ERROR",
-                    error_message="Payload must contain 'session_id', 'execution_id', and 'session_lifecycle_generation' for physical actuation",
+                    error_message="Payload must contain 'session_id', 'execution_id', 'command_nonce', and 'session_lifecycle_generation' for physical actuation",
                 )
 
             capability_scope = frozenset([req_cap.capability_id])  # type: ignore
@@ -488,65 +491,90 @@ class DeviceControlManager(IService):
                 c_epoch = self._authoritative_epoch_provider() if self._authoritative_epoch_provider else self._epoch_id
                 d_epoch = device.current_epoch
 
-                physical_cmd = PhysicalCommand(
-                    device_epoch=d_epoch,
-                    controller_epoch=c_epoch,
-                    physical_operation_id=str(uuid.uuid4()),
-                    command_nonce=str(uuid.uuid4()),
-                    endpoint_id=endpoint.endpoint_id,
-                    session_id=session_id,
-                    lifecycle_generation=lifecycle_generation,
-                    endpoint_lease_generation=lease.endpoint_lease_generation,
-                    execution_id=execution_id,
-                    capability_scope=capability_scope,
-                    command_sequence=seq,
-                    operation=command_name,
-                    parameters=canonical_params,
-                )
 
                 self._in_transaction = True
                 try:
                     if not isinstance(endpoint, IPhysicalEndpoint):
                         raise ControlCapacityError(f"Endpoint {endpoint.endpoint_id} does not implement IPhysicalEndpoint")
 
+                    fingerprint_dict = {
+                        "device_id": device.device_id,
+                        "endpoint_id": endpoint.endpoint_id,
+                        "command_name": command_name,
+                        "parameters": canonical_params,
+                        # Immutable intent fingerprint explicitly excludes device_epoch and controller_epoch
+                        # to allow cross-epoch replay for exactly the same intent.
+                    }
+                    from holomed.persistence.serialization import serialize_canonical_bytes
+                    fingerprint = hashlib.sha256(serialize_canonical_bytes(fingerprint_dict)).hexdigest()
+
                     # 1. Durable Admission (Acquires persistence locks internally and releases them)
                     if self._capacity_admitter:
-                        self._capacity_admitter(
+                        physical_operation_id, is_replay, resolution = self._capacity_admitter(
                             session_id,
                             endpoint.endpoint_id,
                             device.device_id,
-                            physical_cmd.device_epoch,
-                            physical_cmd.controller_epoch,
-                            physical_cmd.physical_operation_id,
-                            physical_cmd.command_nonce,
+                            d_epoch,
+                            c_epoch,
+                            None,
+                            command_nonce,
                             execution_id,
-                            command_name
+                            command_name,
+                            fingerprint
                         )
-
-                    # 2. Setup endpoint fence if supported (driver injection)
-                    if hasattr(endpoint, "set_epoch_fence") and self._authoritative_epoch_provider:
-                        endpoint.set_epoch_fence(self._authoritative_epoch_provider) # type: ignore
-
-                    # 3. Physical Submission
-                    physical_result = endpoint.submit_command(physical_cmd)
-
-                    if physical_result.status == SubmissionStatus.ACCEPTED:
-                        # Register deadline
-                        with self._timeout_lock:
-                            self._deadlines[execution_id] = (time.time() + 5.0, lifecycle_generation)
-                            self._active_commands[execution_id] = physical_cmd
                     else:
-                        # Failure Rollback (Case A: Confirmed Absent)
-                        if self._capacity_releaser:
-                            self._capacity_releaser(
-                                session_id,
-                                device.device_id,
-                                physical_cmd.device_epoch,
-                                physical_cmd.controller_epoch,
-                                physical_cmd.physical_operation_id,
-                                physical_cmd.command_nonce,
-                                "OPERATION_CONFIRMED_ABSENT"
-                            )
+                        physical_operation_id = str(uuid.uuid4())
+                        is_replay = False
+                        resolution = None
+
+                    physical_cmd = PhysicalCommand(
+                        device_epoch=d_epoch,
+                        controller_epoch=c_epoch,
+                        physical_operation_id=physical_operation_id,
+                        command_nonce=command_nonce,
+                        endpoint_id=endpoint.endpoint_id,
+                        session_id=session_id,
+                        lifecycle_generation=lifecycle_generation,
+                        endpoint_lease_generation=lease.endpoint_lease_generation,
+                        execution_id=execution_id,
+                        capability_scope=capability_scope,
+                        command_sequence=seq,
+                        operation=command_name,
+                        parameters=canonical_params,
+                    )
+
+                    if is_replay:
+                        details = {"idempotent_replay": True}
+                        if resolution is not None:
+                            details["resolution"] = resolution
+                        else:
+                            details["resolution"] = "IN_FLIGHT"
+                        physical_result = PhysicalCommandResult(status=SubmissionStatus.ACCEPTED, details=details)
+                    else:
+                        # 2. Setup endpoint fence if supported (driver injection)
+                        if hasattr(endpoint, "set_epoch_fence") and self._authoritative_epoch_provider:
+                            endpoint.set_epoch_fence(self._authoritative_epoch_provider) # type: ignore
+
+                        # 3. Physical Submission
+                        physical_result = endpoint.submit_command(physical_cmd)
+
+                        if physical_result.status == SubmissionStatus.ACCEPTED:
+                            # Register deadline
+                            with self._timeout_lock:
+                                self._deadlines[execution_id] = (time.time() + 5.0, lifecycle_generation)
+                                self._active_commands[execution_id] = physical_cmd
+                        else:
+                            # Failure Rollback (Case A: Confirmed Absent)
+                            if self._capacity_releaser:
+                                self._capacity_releaser(
+                                    session_id,
+                                    device.device_id,
+                                    physical_cmd.device_epoch,
+                                    physical_cmd.controller_epoch,
+                                    physical_cmd.physical_operation_id,
+                                    physical_cmd.command_nonce,
+                                    "OPERATION_CONFIRMED_ABSENT"
+                                )
 
                     canonical_result = self._verifier.validate_and_canonicalize_command_result(
                         dict(physical_result.details)
@@ -694,11 +722,11 @@ class DeviceControlManager(IService):
         """Handles explicit device restarts and epoch changes."""
         if not self._rehydration_engine:
             return
-            
+
         try:
             self._rehydration_engine.rehydrate_device_state(
-                current_session_id="device_restart", 
-                device_id=device_id, 
+                current_session_id="device_restart",
+                device_id=device_id,
                 new_device_epoch=new_device_epoch
             )
         except Exception as e:
@@ -807,7 +835,7 @@ class DeviceControlManager(IService):
                 _, gen = self._deadlines.pop(execution_id)
             else:
                 return
-                
+
         if self._resolution_gate:
             record = self._resolution_gate.resolve_timeout(execution_id, gen)
             if record.terminal_resolution_status:

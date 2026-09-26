@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 import glob
 import os
+import uuid
 from types import MappingProxyType
 from typing import Any, Mapping, Optional
 
@@ -18,6 +19,7 @@ from holomed.persistence.exceptions import (
     PersistenceValidationError,
     PersistenceTerminationConflictError,
     PersistenceIdentityReuseError,
+    PersistenceIdempotencyError,
 )
 from holomed.persistence.authority import ControllerAuthorityStore
 from holomed.persistence.journal import JournalReader, JournalWriter
@@ -32,19 +34,19 @@ from holomed.platform.models import CycleSummary, SessionStatus
 
 class DurableSessionStore:
     """Manages full lifecycle and durable persistence of holomed sessions.
-    
+
     Provides bounded capacity, epoch-based validation, and crash-safe journal appending.
     """
 
     def __init__(self, storage_root: Path, epoch_id: int = 0) -> None:
         self._storage_root = Path(storage_root)
         self._epoch_id = epoch_id
-        
+
         # session_id -> DurableSessionRecord
         self._sessions: dict[str, DurableSessionRecord] = {}
         # session_id -> JournalWriter
         self._writers: dict[str, JournalWriter] = {}
-        
+
         self._authority = ControllerAuthorityStore(self._storage_root)
         self._global_lock_path = self._storage_root / ".physical_admission.lock"
 
@@ -251,9 +253,15 @@ class DurableSessionStore:
                         res = payload.get("resolution")
                         if res in {"FAULTED_UNKNOWN", "QUARANTINED"}:
                             active_reservations[canon]["resolution"] = res
+                            terminated_identities[canon] = dict(active_reservations[canon])
                         else:
-                            del active_reservations[canon]
-                    terminated_identities[canon] = payload.get("resolution")
+                            admitted_payload = active_reservations.pop(canon)
+                            admitted_payload["resolution"] = res
+                            terminated_identities[canon] = admitted_payload
+                    else:
+                        payload_with_session = dict(payload)
+                        payload_with_session["_original_session_id"] = session_id
+                        terminated_identities[canon] = payload_with_session
         return active_reservations, terminated_identities
 
     def get_active_physical_operations(self) -> int:
@@ -269,7 +277,7 @@ class DurableSessionStore:
 
     def get_active_operations_snapshot(self) -> dict[tuple, dict]:
         """Returns a snapshot of all currently active physical operations.
-        
+
         Returns a dictionary mapping canonical_identity tuples to their full admission payload.
         """
         fd = self._acquire_global_lock()
@@ -286,52 +294,87 @@ class DurableSessionStore:
         device_id: str,
         device_epoch: int,
         controller_epoch: int,
-        physical_operation_id: str,
+        physical_operation_id: Optional[str],
         command_nonce: str,
         execution_id: str,
-        command_name: str
-    ) -> None:
-        """Atomically record physical operation admission in the durable journal with global lock."""
+        command_name: str,
+        request_fingerprint: str = "",
+    ) -> tuple[str, bool, Optional[str]]:
+        """Atomically record physical operation admission in the durable journal with global lock.
+
+        Returns:
+            Tuple of (physical_operation_id, is_replay, resolution).
+            If is_replay is True, resolution will be None if in-flight, or the terminal resolution string.
+        """
         if session_id not in self._sessions:
             raise PersistenceValidationError(f"Session {session_id!r} not found")
-            
+
         rec = self._sessions[session_id]
         if rec.status != SessionStatus.ACTIVE:
             raise PersistenceLifecycleError(f"Cannot record admission for inactive session {session_id!r}")
-            
-        canonical_identity = (device_id, device_epoch, controller_epoch, physical_operation_id, command_nonce)
+
         from holomed.devices.control.models import GLOBAL_PHYSICAL_OPERATION_CAPACITY, ENDPOINT_LOCAL_PHYSICAL_CAPACITY
-        
+
         with self._authority.hold_authority(controller_epoch):
             fd = self._acquire_global_lock()
             try:
                 active, terminated = self._reconstruct_reservations_locked()
-                
+
+                # 1. Durable idempotency lookup by (session_id, command_nonce)
+                existing_payload = None
+
+                # Check active
+                for c, p in active.items():
+                    if p.get("command_nonce") == command_nonce and p.get("_original_session_id") == session_id:
+                        existing_payload = p
+                        break
+
+                # Check terminated
+                if not existing_payload:
+                    for c, p in terminated.items():
+                        if p.get("command_nonce") == command_nonce and p.get("_original_session_id") == session_id:
+                            existing_payload = p
+                            break
+
+                if existing_payload:
+                    if existing_payload.get("request_fingerprint") == request_fingerprint:
+                        resolution = existing_payload.get("resolution") # Will be None if in-flight (active)
+                        return existing_payload["physical_operation_id"], True, resolution
+                    else:
+                        raise PersistenceIdempotencyError(
+                            f"Idempotency conflict for session {session_id}, nonce {command_nonce}"
+                        )
+
+                # New operation - allocate physical_operation_id if not provided
+                if not physical_operation_id:
+                    physical_operation_id = str(uuid.uuid4())
+                canonical_identity = (device_id, device_epoch, controller_epoch, physical_operation_id, command_nonce)
+
                 if canonical_identity in terminated:
                     raise PersistenceIdentityReuseError(
                         f"Canonical identity {canonical_identity} has already been terminated. Reuse is forbidden."
                     )
-                    
+
                 if canonical_identity in active:
-                    return  # Idempotent admission (already admitted globally)
-                    
+                    return physical_operation_id, True, None  # Unlikely with uuid4, but kept for structural completeness
+
                 # Verify endpoint capacity
                 endpoint_count = sum(1 for ops in active.values() if ops.get("endpoint_id") == endpoint_id)
                 if endpoint_count >= ENDPOINT_LOCAL_PHYSICAL_CAPACITY:
                     raise PersistenceCapacityError(
                         f"Endpoint {endpoint_id} already has {endpoint_count} active reservations, max is {ENDPOINT_LOCAL_PHYSICAL_CAPACITY}."
                     )
-                
+
                 # Verify global capacity
                 if len(active) >= GLOBAL_PHYSICAL_OPERATION_CAPACITY:
                     raise PersistenceCapacityError(
                         f"Global physical capacity exceeded ({GLOBAL_PHYSICAL_OPERATION_CAPACITY} max active operations)"
                     )
-                    
+
                 # Write to session journal (the tail will be reconstructed properly within JournalWriter's append_entry)
                 now_utc = datetime.now(timezone.utc).isoformat()
                 writer = self._writers[session_id]
-                
+
                 payload = {
                     "endpoint_id": endpoint_id,
                     "device_id": device_id,
@@ -340,9 +383,10 @@ class DurableSessionStore:
                     "physical_operation_id": physical_operation_id,
                     "command_nonce": command_nonce,
                     "execution_id": execution_id,
-                    "command_name": command_name
+                    "command_name": command_name,
+                    "request_fingerprint": request_fingerprint
                 }
-                
+
                 entry = writer.append_entry(
                     entry_type=JournalEntryType.OPERATION_ADMITTED,
                     sequence_number=None, # Will be ignored and reconstructed by JournalWriter
@@ -350,7 +394,7 @@ class DurableSessionStore:
                     payload=payload,
                     entry_id=physical_operation_id,
                 )
-                
+
                 updated = DurableSessionRecord(
                     session_id=rec.session_id,
                     epoch_id=rec.epoch_id,
@@ -363,6 +407,7 @@ class DurableSessionStore:
                     metadata=rec.metadata,
                 )
                 self._sessions[session_id] = updated
+                return physical_operation_id, False, None
             finally:
                 self._release_global_lock(fd)
 
@@ -386,35 +431,36 @@ class DurableSessionStore:
 
         if session_id not in self._sessions:
             raise PersistenceValidationError(f"Session {session_id!r} not found")
-            
+
         rec = self._sessions[session_id]
         if rec.status != SessionStatus.ACTIVE:
             raise PersistenceLifecycleError(f"Cannot record termination for inactive session {session_id!r}")
-            
+
         canonical_identity = (device_id, device_epoch, controller_epoch, physical_operation_id, command_nonce)
         auth_epoch = authoritative_epoch if authoritative_epoch is not None else controller_epoch
-        
+
         with self._authority.hold_authority(auth_epoch):
             fd = self._acquire_global_lock()
             try:
                 active, terminated = self._reconstruct_reservations_locked()
-                
+
                 if canonical_identity in terminated:
-                    if terminated[canonical_identity] != resolution:
+                    existing_resolution = terminated[canonical_identity].get("resolution")
+                    if existing_resolution != resolution:
                         raise PersistenceLifecycleError(
-                            f"Conflict: Operation {canonical_identity} already terminated with {terminated[canonical_identity]}, "
+                            f"Conflict: Operation {canonical_identity} already terminated with {existing_resolution}, "
                             f"cannot terminate again with {resolution}"
                         )
                     return  # Idempotent termination (already terminated globally)
-                    
+
                 if canonical_identity not in active:
                     raise PersistenceTerminationConflictError(
                         f"Cannot terminate canonical identity {canonical_identity} that is not currently admitted."
                     )
-                    
+
                 now_utc = datetime.now(timezone.utc).isoformat()
                 writer = self._writers[session_id]
-                
+
                 payload = {
                     "device_id": device_id,
                     "device_epoch": device_epoch,
@@ -423,7 +469,7 @@ class DurableSessionStore:
                     "command_nonce": command_nonce,
                     "resolution": resolution
                 }
-                
+
                 entry = writer.append_entry(
                     entry_type=JournalEntryType.OPERATION_TERMINATED,
                     sequence_number=None, # Will be ignored and reconstructed by JournalWriter
@@ -431,7 +477,7 @@ class DurableSessionStore:
                     payload=payload,
                     entry_id=physical_operation_id,
                 )
-                
+
                 updated = DurableSessionRecord(
                     session_id=rec.session_id,
                     epoch_id=rec.epoch_id,
@@ -499,7 +545,7 @@ class DurableSessionStore:
         cycle_count = 0
         status = SessionStatus.ACTIVE
         closed_ts: Optional[str] = None
-        
+
         for e in entries:
             if e.entry_type in (JournalEntryType.CYCLE_COMPLETED, JournalEntryType.CYCLE_DEGRADED, JournalEntryType.OPERATION_ADMITTED, JournalEntryType.OPERATION_TERMINATED):
                 if e.entry_type in (JournalEntryType.CYCLE_COMPLETED, JournalEntryType.CYCLE_DEGRADED):

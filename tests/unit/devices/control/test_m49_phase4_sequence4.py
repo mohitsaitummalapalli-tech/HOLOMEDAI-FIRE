@@ -612,7 +612,8 @@ def test_production_timeout_durable_outcome(tmp_path):
             "command": "cmd1",
             "session_id": session_id,
             "session_lifecycle_generation": 1,
-            "execution_id": exec_id
+            "execution_id": exec_id,
+            "command_nonce": "nonce_1"
         },
         metadata={}
     )
