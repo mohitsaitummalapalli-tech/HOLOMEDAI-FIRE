@@ -151,7 +151,7 @@ def test_stop_routing_fails_to_deliver_terminal(endpoint_and_device, manager, ga
     exec_id = "exec_fail_deliver"
     cmd = create_cmd(exec_id)
     ep.submit_command(cmd)
-    time.sleep(0.05)
+    time.sleep(0.02)
     
     # Interlock worker so it doesn't emit PREEMPTED
     ep.inject_hardware_interlock()

@@ -146,7 +146,18 @@ class JournalWriter:
                     )
 
             # Append to file with strict OS-level durability and serialization
-            with open(self._journal_path, "a+b") as f:
+            import time
+            f = None
+            for _ in range(10):
+                try:
+                    f = open(self._journal_path, "a+b")
+                    break
+                except PermissionError:
+                    time.sleep(0.01)
+            if f is None:
+                f = open(self._journal_path, "a+b")
+            
+            with f:
                 fd = f.fileno()
 
                 # A. Serialize multi-process writers
@@ -293,8 +304,19 @@ class JournalReader:
             file_obj.seek(0)
             raw_content = file_obj.read()
         else:
-            with open(journal_path, "rb") as f:
-                raw_content = f.read()
+            # Retry loop for intermittent Windows PermissionError
+            raw_content = None
+            for _ in range(10):
+                try:
+                    with open(journal_path, "rb") as f:
+                        raw_content = f.read()
+                    break
+                except PermissionError:
+                    import time
+                    time.sleep(0.01)
+            if raw_content is None:
+                with open(journal_path, "rb") as f:
+                    raw_content = f.read()
 
         if not raw_content:
             return [], 0

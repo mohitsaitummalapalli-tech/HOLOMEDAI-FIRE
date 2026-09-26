@@ -221,7 +221,8 @@ def _worker_session_journal_write(
         )
         result_queue.put(("ADMITTED", os.getpid(), operation_label))
     except Exception as e:
-        result_queue.put(("ERROR", str(e), operation_label))
+        import traceback
+        result_queue.put(("ERROR", str(e) + "\n" + traceback.format_exc(), operation_label))
 
 
 def _worker_same_session_contention(
