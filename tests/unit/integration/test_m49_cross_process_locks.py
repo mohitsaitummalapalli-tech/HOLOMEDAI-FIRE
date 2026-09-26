@@ -247,10 +247,14 @@ def _worker_same_session_contention(
     store = DurableSessionStore(storage_root, epoch_id=epoch)
 
     # Restore the existing session from disk (it was started by the parent)
-    store.restore_session_from_disk(session_id)
-
-    # Signal readiness
-    barrier_queue.put(("READY", os.getpid()))
+    try:
+        store.restore_session_from_disk(session_id)
+        # Signal readiness
+        barrier_queue.put(("READY", os.getpid()))
+    except Exception as e:
+        import traceback
+        barrier_queue.put(("READY_ERROR", str(e) + "\n" + traceback.format_exc()))
+        return
 
     # Wait until all processes are ready (parent sends GO)
     while True:
