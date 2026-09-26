@@ -171,3 +171,41 @@ def test_fsync_failure_propagation(temp_storage_root: Path, monkeypatch: pytest.
             payload={"status": "ADMITTED"},
             entry_id="op_fsync_fail"
         )
+
+import time
+import pytest
+from unittest.mock import patch, MagicMock
+
+def test_journal_transient_permission_error(temp_storage_root: Path) -> None:
+    """Verify bounded retries recover a transient PermissionError on read."""
+    writer = JournalWriter(temp_storage_root, "sess_transient", epoch_id=1)
+    writer.initialize_storage()
+    writer.append_entry(JournalEntryType.SESSION_STARTED, -1, "2026-09-01T20:00:00Z", {})
+    
+    # Mock builtins.open to throw PermissionError twice, then succeed
+    call_count = 0
+    real_open = open
+    def mock_open(*args, **kwargs):
+        nonlocal call_count
+        if call_count < 2:
+            call_count += 1
+            raise PermissionError("Transient Windows Lock")
+        return real_open(*args, **kwargs)
+        
+    with patch("builtins.open", side_effect=mock_open):
+        entries, _ = JournalReader.read_and_recover_journal(writer.journal_path)
+    
+    assert len(entries) == 1
+    assert call_count == 2
+
+
+def test_journal_persistent_permission_error(temp_storage_root: Path) -> None:
+    """Verify bounded retries surface a persistent PermissionError after exhaustion."""
+    writer = JournalWriter(temp_storage_root, "sess_persistent", epoch_id=1)
+    writer.initialize_storage()
+    writer.append_entry(JournalEntryType.SESSION_STARTED, -1, "2026-09-01T20:00:00Z", {})
+    
+    with patch("builtins.open", side_effect=PermissionError("Persistent Windows Lock")):
+        with pytest.raises(PermissionError, match="Persistent Windows Lock"):
+            JournalReader.read_and_recover_journal(writer.journal_path)
+
