@@ -29,7 +29,7 @@ from holomed.devices.control.models import (
     GLOBAL_PHYSICAL_OPERATION_CAPACITY,
     QueryHandler,
 )
-from holomed.devices.models import PhysicalCommand, SubmissionStatus
+from holomed.devices.models import PhysicalCommand, SubmissionStatus, PhysicalCommandResult
 from holomed.devices.control.lease import EndpointLeaseRegistry
 from holomed.devices.control.verifier import CommandVerifier
 import time
@@ -544,7 +544,7 @@ class DeviceControlManager(IService):
                     )
 
                     if is_replay:
-                        details = {"idempotent_replay": True}
+                        details: dict[str, Any] = {"idempotent_replay": True}
                         if resolution is not None:
                             details["resolution"] = resolution
                         else:

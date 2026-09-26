@@ -220,7 +220,7 @@ class DurableSessionStore:
         finally:
             os.close(fd)
 
-    def _reconstruct_reservations_locked(self) -> tuple[dict[tuple, dict], dict[tuple, str]]:
+    def _reconstruct_reservations_locked(self) -> tuple[dict[tuple, dict[str, Any]], dict[tuple, dict[str, Any]]]:
         """Reconstruct active reservations and terminated identities from durable journals."""
         active_reservations = {}
         terminated_identities = {}
