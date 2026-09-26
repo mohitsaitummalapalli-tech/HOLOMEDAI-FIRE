@@ -293,4 +293,92 @@ def test_lease_failure_distinctions(shared_store_path):
     assert is_replay is True
     # The resolution is None because it was never terminated, meaning FAULTED_UNKNOWN in physical layer timeout
     assert resolution is None
+
+def test_n_stale_lease_rejection(shared_store_path):
+    from holomed.devices.registry import DeviceRegistry, RegistryAuthorityToken
+    from holomed.devices.simulated import SimulatedDevice, SimulatedPhysicalEndpoint
+    from holomed.devices.models import DeviceCapability, CapabilityCategory
+    from holomed.devices.control.models import DeviceCommandDefinition
+    from holomed.devices.control.manager import DeviceControlManager
+    from holomed.protocol.models import MessageEnvelope, MessageType
+
+    authority, epoch, session = setup_test_store(shared_store_path)
+    store = DurableSessionStore(shared_store_path, epoch_id=epoch)
+    store.restore_session_from_disk(session)
+    
+    cap = DeviceCapability(capability_id="test.cap", category=CapabilityCategory.CONTROL, parameters={}, requires_physical_endpoint=True, target_endpoint_id="ep_n")
+    device = SimulatedDevice("dev_n", "phys_n", capabilities=(cap,))
+    endpoint = SimulatedPhysicalEndpoint("ep_n", "dev_n")
+    device.set_endpoints((endpoint,))
+    
+    token = RegistryAuthorityToken()
+    registry = DeviceRegistry(token)
+    registry.register(device, token)
+    
+    from holomed.devices.models import DeviceState
+    device._state = DeviceState.ACTIVE
+    
+    # Session validator that accepts the session
+    def mock_validator(session_id: str, lifecycle_gen: int) -> bool:
+        return True
+
+    from unittest.mock import MagicMock
+    manager = DeviceControlManager(
+        registry=registry,
+        session_validator=mock_validator,
+        capacity_admitter=store.record_operation_admitted,
+        authoritative_epoch_provider=lambda: epoch,
+        rehydration_engine=MagicMock()
+    )
+    manager.register_command("cmd_n", handler=lambda **kwargs: None, required_capability_id="test.cap")
+
+    from unittest.mock import MagicMock
+    ctx = MagicMock()
+    manager.initialize(ctx)
+    manager.start()
+    
+    # Pre-lease the endpoint to a DIFFERENT session/execution (Stale/Invalid Lease condition for the new command)
+    manager._lease_registry.issue_lease(
+        endpoint=endpoint,
+        session_id="other_session_id",
+        lifecycle_generation=1,
+        execution_id="other_execution_id",
+        capability_scope=frozenset(["test.cap"])
+    )
+    
+    import uuid
+    envelope = MessageEnvelope(
+        protocol_version="1.0",
+        message_id=str(uuid.uuid4()),
+        correlation_id=str(uuid.uuid4()),
+        causation_id=None,
+        message_type=MessageType.COMMAND,
+        message_name="device.command",
+        source="client",
+        target="control",
+        timestamp_utc="2026-01-01T00:00:00Z",
+        payload={
+            "session_id": session,
+            "execution_id": str(uuid.uuid4()),
+            "command_nonce": "nonce_n",
+            "session_lifecycle_generation": 1,
+            "command": "cmd_n",
+            "parameters": {},
+            "device_id": "dev_n"
+        },
+        metadata={}
+    )
+    
+    response = manager.handle_command(envelope)
+    
+    assert response.payload["error_code"] == "ERR_CONTROLCAPACITYERROR"
+    assert "currently leased to session" in response.payload["error_message"]
+    
+    # Prove NO durable admission
+    assert store.get_active_physical_operations() == 0
+    # Prove NO capacity mutation
+    assert len(manager._active_commands) == 0
+    # Prove NO physical dispatch for the target execution (the endpoint has the OTHER lease)
+    assert endpoint.active_lease.session_id == "other_session_id"
+
     # End of file
