@@ -165,69 +165,90 @@ class DurableDeviceStore:
             raise PersistenceValidationError(f"No journal records found for device {device_id!r}")
 
         from holomed.persistence.authority import DeviceEpochAuthority
-        from holomed.persistence.exceptions import PersistenceResourceIntegrityError, PersistenceLifecycleError
+        from holomed.persistence.exceptions import PersistenceResourceIntegrityError, PersistenceResourceMissingError, PersistenceLifecycleError
         import json, os
+        from datetime import datetime, timezone
 
         device_authority = DeviceEpochAuthority(self._storage_root)
-        try:
-            device_epoch = device_authority.read_current_device_epoch(device_id)
-        except PersistenceResourceIntegrityError:
-            device_epoch = None
+        
+        # We need to determine if we have a marker
+        marker_entries = [e for e in entries if e.entry_type == DeviceJournalEntryType.DEVICE_EPOCH_DOMAIN_INITIALIZED]
+        marker_entry = marker_entries[0] if marker_entries else None
+        
+        if len(marker_entries) > 1:
+            raise PersistenceLifecycleError(f"Ambiguous legacy history: {device_id} has multiple DEVICE_EPOCH_DOMAIN_INITIALIZED markers")
 
-        has_marker = any(e.entry_type == DeviceJournalEntryType.DEVICE_EPOCH_DOMAIN_INITIALIZED for e in entries)
+        lock_path = device_authority._get_lock_path(device_id)
+        if not lock_path.exists():
+            lock_path.touch()
 
-        if not has_marker:
-            if device_epoch is not None:
-                raise PersistenceLifecycleError(
-                    f"Ambiguous legacy history: {device_id} has device_epoch.json but no DEVICE_EPOCH_DOMAIN_INITIALIZED marker"
-                )
-
-            legacy_epochs = [e.epoch_id for e in entries]
-            device_epoch = max(legacy_epochs) if legacy_epochs else 0
-
-            lock_path = device_authority._get_lock_path(device_id)
-            if not lock_path.exists():
-                lock_path.touch()
-            with open(lock_path, "a") as lock_file:
-                fd = lock_file.fileno()
-                device_authority._acquire_lock(fd)
+        # The migration critical section must hold the lock
+        with open(lock_path, "a") as lock_file:
+            fd = lock_file.fileno()
+            device_authority._acquire_lock(fd)
+            try:
                 try:
-                    try:
-                        device_authority._read_current_epoch_unlocked(device_id, allow_missing=False)
-                        raise PersistenceLifecycleError(f"Ambiguous legacy history: {device_id} concurrently created device epoch")
-                    except PersistenceResourceIntegrityError:
-                        pass
+                    device_epoch = device_authority.read_current_device_epoch(device_id)
+                    authority_missing = False
+                except PersistenceResourceMissingError:
+                    device_epoch = None
+                    authority_missing = True
+                except PersistenceResourceIntegrityError as e:
+                    raise PersistenceLifecycleError(f"Corrupt device epoch authority for {device_id}: {e}") from e
+
+                if authority_missing and not marker_entry:
+                    # CASE A: Pure legacy state.
+                    # Calculate legacy epoch, persist authority, append marker, all while locked.
+                    legacy_epochs = [e.epoch_id for e in entries]
+                    device_epoch = max(legacy_epochs) if legacy_epochs else 0
                     
+                    # 1. Write authority
                     epoch_path = device_authority._get_epoch_path(device_id)
                     with open(epoch_path, "w", encoding="utf-8") as f:
                         json.dump({"device_epoch": device_epoch}, f)
                         f.flush()
                         os.fsync(f.fileno())
-                finally:
-                    device_authority._release_lock(fd)
+                        
+                    # 2. Append marker
+                    writer = DeviceJournalWriter(
+                        self._storage_root,
+                        device_id,
+                        device_epoch,
+                        authoritative_epoch_provider=None,
+                    )
+                    writer._entry_count = len(entries)
+                    writer._last_entry_hash = entries[-1].sha256_hash
+                    writer._last_sequence = entries[-1].sequence_number
 
-            writer = DeviceJournalWriter(
-                self._storage_root,
-                device_id,
-                device_epoch,
-                authoritative_epoch_provider=None,
-            )
-            writer._entry_count = len(entries)
-            writer._last_entry_hash = entries[-1].sha256_hash
-            writer._last_sequence = entries[-1].sequence_number
+                    new_marker = writer.append_entry(
+                        entry_type=DeviceJournalEntryType.DEVICE_EPOCH_DOMAIN_INITIALIZED,
+                        timestamp_utc=datetime.now(timezone.utc).isoformat(),
+                        payload={"migrated_epoch": device_epoch}
+                    )
+                    entries.append(new_marker)
+                    marker_entry = new_marker
 
-            from datetime import datetime, timezone
-            marker_entry = writer.append_entry(
-                entry_type=DeviceJournalEntryType.DEVICE_EPOCH_DOMAIN_INITIALIZED,
-                timestamp_utc=datetime.now(timezone.utc).isoformat(),
-                payload={"migrated_epoch": device_epoch}
-            )
-            entries.append(marker_entry)
-        else:
-            if device_epoch is None:
-                raise PersistenceLifecycleError(
-                    f"Ambiguous legacy history: {device_id} has DEVICE_EPOCH_DOMAIN_INITIALIZED marker but no device_epoch.json"
-                )
+                elif not authority_missing and not marker_entry:
+                    # CASE B: Authority exists, but no marker
+                    raise PersistenceLifecycleError(
+                        f"Ambiguous legacy history: {device_id} has device_epoch.json but no DEVICE_EPOCH_DOMAIN_INITIALIZED marker"
+                    )
+
+                elif authority_missing and marker_entry:
+                    # CASE C: Marker exists, authority missing
+                    raise PersistenceLifecycleError(
+                        f"Ambiguous legacy history: {device_id} has DEVICE_EPOCH_DOMAIN_INITIALIZED marker but no device_epoch.json"
+                    )
+                    
+                else:
+                    # CASE D, E, F: Both exist. Validate agreement.
+                    marker_epoch = marker_entry.payload.get("migrated_epoch")
+                    if marker_epoch != device_epoch:
+                        raise PersistenceResourceIntegrityError(
+                            f"Migration mismatch for {device_id}: marker epoch {marker_epoch} != authority epoch {device_epoch}"
+                        )
+            finally:
+                device_authority._release_lock(fd)
 
         first_entry = entries[0]
         last_seq = entries[-1].sequence_number if entries else -1

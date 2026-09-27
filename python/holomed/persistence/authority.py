@@ -12,6 +12,7 @@ from holomed.persistence.exceptions import (
     PersistenceEpochMismatchError,
     PersistenceLifecycleError,
     PersistenceResourceIntegrityError,
+    PersistenceResourceMissingError,
 )
 
 
@@ -66,7 +67,7 @@ class ControllerAuthorityStore:
         if not self._epoch_path.exists():
             if allow_missing:
                 return 0
-            raise PersistenceResourceIntegrityError("Missing epoch authority file")
+            raise PersistenceResourceMissingError("Missing epoch authority file")
         try:
             with open(self._epoch_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
@@ -231,7 +232,7 @@ class DeviceEpochAuthority:
         if not epoch_path.exists():
             if allow_missing:
                 return 0
-            raise PersistenceResourceIntegrityError(f"Missing device epoch authority file for {device_id}")
+            raise PersistenceResourceMissingError(f"Missing device epoch authority file for {device_id}")
         try:
             with open(epoch_path, "r", encoding="utf-8") as f:
                 data = json.load(f)

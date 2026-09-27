@@ -50,6 +50,10 @@ class PersistenceResourceIntegrityError(PersistenceError, PlatformResourceIntegr
     """Raised when required structural handles or underlying storage resources fail."""
 
 
+class PersistenceResourceMissingError(PersistenceResourceIntegrityError):
+    """Raised when a required file or resource is absent rather than corrupt."""
+
+
 class PersistenceShutdownError(PersistenceError, PlatformShutdownError):
     """Raised when errors occur during persistence teardown and handle release."""
 
