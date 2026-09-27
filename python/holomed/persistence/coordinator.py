@@ -87,17 +87,37 @@ class DurableGlobalCoordinator:
                 if not writer:
                     continue
 
+                # To write canonical records, we must resolve the real admitted operation identities
+                active_reservations, _ = self._session_store._reconstruct_reservations_locked()
+                # filter to only operations from this session_id
+                session_active = {k: v for k, v in active_reservations.items() if v.get("_original_session_id") == session_id}
+
                 # 4. Acquire SESSION_JOURNAL_LOCK (writer handles its own file locking during append)
                 for op_id in operation_ids:
+                    # Resolve to REAL admitted operation
+                    resolved_payload = None
+                    for k, v in session_active.items():
+                        if v.get("operation_id") == op_id or v.get("physical_operation_id") == op_id:
+                            resolved_payload = v
+                            break
+                    
+                    if not resolved_payload:
+                        from holomed.persistence.exceptions import PersistenceValidationError
+                        raise PersistenceValidationError(f"Cannot isolate non-existent or inactive physical operation {op_id!r} in session {session_id!r}")
+                    
                     # Write Tentative PREPARED (represented as OPERATION_TERMINATED with PHYSICALLY_ISOLATED
                     # but tied to the tx_id, which only becomes effective upon device commit).
-                    from datetime import datetime, timezone
                     writer.append_entry(
                         entry_type=JournalEntryType.OPERATION_TERMINATED,
                         timestamp_utc=datetime.now(timezone.utc).isoformat(),
                         payload={
-                            "operation_id": op_id,
-                            "terminal_state": "PHYSICALLY_ISOLATED",
+                            "operation_id": resolved_payload.get("operation_id"),
+                            "device_id": resolved_payload.get("device_id"),
+                            "device_epoch": resolved_payload.get("device_epoch"),
+                            "controller_epoch": resolved_payload.get("controller_epoch"),
+                            "physical_operation_id": resolved_payload.get("physical_operation_id"),
+                            "command_nonce": resolved_payload.get("command_nonce"),
+                            "resolution": "PHYSICALLY_ISOLATED",
                             "isolation_transaction_id": tx_id
                         }
                     )

@@ -470,3 +470,66 @@ class TestM49Phase63FailureMatrixCrossProcess:
         ready_entries = [e for e in entries if e.entry_type == DeviceJournalEntryType.DEVICE_READY_COMMITTED]
         assert len(ready_entries) >= 1
         assert ready_entries[-1].payload.get("new_epoch_id") == new_epoch, "Device journal reflects E2"
+
+    def test_u_adversarial_canonical_identity(self, tmp_path: Path):
+        storage = lock_storage(tmp_path)
+        epoch, session = _setup_store(storage)
+        from holomed.persistence.sessions import DurableSessionStore
+        from holomed.persistence.models import JournalEntryType
+        from datetime import datetime, timezone
+        
+        store_setup = DurableSessionStore(storage, epoch_id=epoch)
+        store_setup.restore_session_from_disk(session)
+        # Pre-admit real op
+        op_iso_id, _, _ = store_setup.record_operation_admitted(
+            session, "ep1", "dev1", 1, epoch, "op_iso", "nonce_iso", "exec_iso", "cmd_iso"
+        )
+        assert store_setup.get_active_physical_operations() == 1
+        
+        # Now artificially write an adversarial termination record sharing the same operation_id and physical_operation_id
+        # but with mismatched canonical fields (e.g., wrong device_id or nonce)
+        writer = store_setup._writers[session]
+        writer.append_entry(
+            entry_type=JournalEntryType.OPERATION_TERMINATED,
+            timestamp_utc=datetime.now(timezone.utc).isoformat(),
+            payload={
+                "operation_id": op_iso_id,
+                "physical_operation_id": op_iso_id,
+                "device_id": "WRONG_DEVICE",
+                "device_epoch": 1,
+                "controller_epoch": epoch,
+                "command_nonce": "nonce_iso",
+                "resolution": "PHYSICALLY_ISOLATED"
+            }
+        )
+        
+        # Reconstruct reservations. 
+        # The malicious record should NOT terminate the active reservation because the canon identity does not match.
+        store_check = DurableSessionStore(storage, epoch_id=epoch)
+        store_check.restore_session_from_disk(session)
+        
+        active, terminated = store_check._reconstruct_reservations_locked()
+        
+        # Should still be active, capacity should be 1
+        assert store_check.get_active_physical_operations() == 1
+        
+        # Verify the true operation remains active
+        canon = ("dev1", 1, epoch, op_iso_id, "nonce_iso")
+        assert canon in active, "Original canonical identity should still be active"
+        assert active[canon].get("resolution") is None, "Should not be terminated"
+        
+        # Now use coordinator to isolate a non-existent operation, it MUST fail closed.
+        from holomed.persistence.coordinator import DurableGlobalCoordinator
+        from holomed.persistence.authority import ControllerAuthorityStore
+        from holomed.persistence.devices import DurableDeviceStore
+        from holomed.persistence.exceptions import PersistenceValidationError
+        
+        authority = ControllerAuthorityStore(storage)
+        devices = DurableDeviceStore(storage / "devices", epoch_id=epoch)
+        devices.restore_device_from_disk("dev1")
+        coordinator = DurableGlobalCoordinator(authority, devices, store_setup)
+        
+        import pytest
+        with pytest.raises(PersistenceValidationError, match="Cannot isolate non-existent"):
+            coordinator.isolate_device("dev1", {session: ["WRONG_OP_ID"]})
+

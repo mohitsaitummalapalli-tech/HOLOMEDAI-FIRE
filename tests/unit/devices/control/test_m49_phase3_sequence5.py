@@ -9,6 +9,7 @@ from holomed.persistence.sessions import DurableSessionStore
 from holomed.persistence.authority import ControllerAuthorityStore
 from holomed.persistence.devices import DurableDeviceStore
 from holomed.persistence.coordinator import DurableGlobalCoordinator
+from holomed.persistence.journal import JournalEntryType
 from holomed.devices.control.manager import DeviceControlManager, AdmissionState
 from holomed.devices.registry import DeviceRegistry
 from holomed.devices.simulated import SimulatedPhysicalEndpoint
@@ -17,10 +18,10 @@ from holomed.devices.models import CommandState, DeviceState
 
 @pytest.fixture
 def stores(tmp_path):
-    auth = ControllerAuthorityStore(tmp_path)
+    auth = ControllerAuthorityStore(tmp_path / "auth")
     epoch = auth.allocate_next_epoch()
-    dev_store = DurableDeviceStore(tmp_path, epoch_id=epoch)
-    session_store = DurableSessionStore(tmp_path, epoch_id=epoch)
+    dev_store = DurableDeviceStore(tmp_path / "devices", epoch_id=epoch)
+    session_store = DurableSessionStore(tmp_path / "sessions", epoch_id=epoch)
     return auth, dev_store, session_store
 
 @pytest.fixture
@@ -94,6 +95,21 @@ def test_aborted_transaction_safety(coordinator, stores):
     auth, dev_store, session_store = stores
     session_store.start_session("session-1", 1)
     dev_store.initialize_device("test-dev", epoch_id=1)
+    
+    # Admit the operation first so it exists
+    writer = session_store._writers["session-1"]
+    writer.append_entry(
+        entry_type=JournalEntryType.OPERATION_ADMITTED,
+        timestamp_utc="2024-01-01T00:00:00Z",
+        payload={
+            "device_id": "test-dev",
+            "device_epoch": 1,
+            "controller_epoch": 1,
+            "physical_operation_id": "op-1",
+            "command_nonce": "nonce-1"
+        }
+    )
+
     # Simulate a transaction that aborts
     tx_id = coordinator.isolate_device("test-dev", {"session-1": ["op-1"]})
     assert tx_id is not None
