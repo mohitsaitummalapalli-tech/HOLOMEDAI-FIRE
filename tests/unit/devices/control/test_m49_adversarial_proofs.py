@@ -327,11 +327,16 @@ def test_admission_termination_race(shared_store_path):
     init_device_auth(store, "dev_t")
     store.record_operation_admitted(session, "ep_t", "dev_t", 1, 1, "op_t", "nonce_t", "exec_t", "test")
 
-    pa = subprocess.Popen([sys.executable, str(HELPER_SCRIPT), "adm_term_race_a", str(shared_store_path), str(epoch), "op_a"], stdout=subprocess.PIPE)
-    pb = subprocess.Popen([sys.executable, str(HELPER_SCRIPT), "adm_term_race_b", str(shared_store_path), str(epoch), "op_a"], stdout=subprocess.PIPE)
+    pa = subprocess.Popen([sys.executable, str(HELPER_SCRIPT), "adm_term_race_a", str(shared_store_path), str(epoch), "op_a"], stdout=subprocess.PIPE, text=True)
+    pb = subprocess.Popen([sys.executable, str(HELPER_SCRIPT), "adm_term_race_b", str(shared_store_path), str(epoch), "op_a"], stdout=subprocess.PIPE, text=True)
 
-    pa.communicate()
-    pb.communicate()
+    out_a, _ = pa.communicate()
+    out_b, _ = pb.communicate()
+
+    assert pa.returncode == 0, f"Termination worker failed (rc={pa.returncode}): {out_a}"
+    assert pb.returncode == 0, f"Admission worker failed (rc={pb.returncode}): {out_b}"
+    assert "TERMINATED" in out_a, f"Termination worker did not prove TERMINATED: {out_a}"
+    assert "ADMITTED" in out_b, f"Admission worker did not prove ADMITTED: {out_b}"
 
     store2 = DurableSessionStore(shared_store_path, epoch_id=epoch)
     store2.restore_session_from_disk(session)

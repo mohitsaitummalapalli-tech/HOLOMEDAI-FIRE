@@ -36,7 +36,8 @@ def run_epoch_race_worker_a(store_path: str, epoch: int):
         from holomed.persistence.authority import DeviceEpochAuthority
         (path / "devices").mkdir(parents=True, exist_ok=True)
         dev_auth = DeviceEpochAuthority(path / "devices")
-        dev_auth.allocate_next_device_epoch("dev_a") #("dev_a")
+        device_epoch = dev_auth.allocate_next_device_epoch("dev_a")
+        assert device_epoch == 1, f"Expected initial device epoch 1, got {device_epoch}"
         
         store.record_operation_admitted(
             "proof_session", "ep_a", "dev_a", 1, epoch, "op_a", "nonce_a", "exec_a", "test"
@@ -108,14 +109,16 @@ def run_capacity_worker(store_path: str, epoch: int, endpoint_id: str, op_id: st
         except PermissionError:
             time.sleep(0.01)
     
+    # Allocate device epoch exactly once before the retry loop
+    from holomed.persistence.authority import DeviceEpochAuthority
+    (path / "devices").mkdir(parents=True, exist_ok=True)
+    dev_auth = DeviceEpochAuthority(path / "devices")
+    device_epoch = dev_auth.allocate_next_device_epoch(f"dev_{op_id}")
+    assert device_epoch == 1, f"Expected initial device epoch 1, got {device_epoch}"
     
+    # Retry only admission — never re-allocate device epoch
     while True:
         try:
-            from holomed.persistence.authority import DeviceEpochAuthority
-            (path / "devices").mkdir(parents=True, exist_ok=True)
-            dev_auth = DeviceEpochAuthority(path / "devices")
-            dev_auth.allocate_next_device_epoch(f"dev_{op_id}")
-
             store.record_operation_admitted(
                 "proof_session", endpoint_id, f"dev_{op_id}", 1, 1, op_id, f"nonce_{op_id}", f"exec_{op_id}", "test"
             )
@@ -125,11 +128,8 @@ def run_capacity_worker(store_path: str, epoch: int, endpoint_id: str, op_id: st
             print("CAPACITY_REJECTED")
             break
         except PermissionError:
-            # High contention timeout, retry
+            # File-lock contention, retry admission only
             time.sleep(0.1)
-        except Exception as e:
-            print(f"UNEXPECTED_ERROR {e}")
-            break
 
 def run_concurrency_worker(store_path: str, epoch: int, op_id: str):
     path = Path(store_path)
@@ -140,17 +140,18 @@ def run_concurrency_worker(store_path: str, epoch: int, op_id: str):
             break
         except PermissionError:
             time.sleep(0.01)
-    try:
-        from holomed.persistence.authority import DeviceEpochAuthority
-        (path / "devices").mkdir(parents=True, exist_ok=True)
-        DeviceEpochAuthority(path / "devices").allocate_next_device_epoch(f"dev_{op_id}")
-    except Exception:
-        pass
+    
+    # Allocate device epoch exactly once — failure must propagate
+    from holomed.persistence.authority import DeviceEpochAuthority
+    (path / "devices").mkdir(parents=True, exist_ok=True)
+    dev_auth = DeviceEpochAuthority(path / "devices")
+    device_epoch = dev_auth.allocate_next_device_epoch(f"dev_{op_id}")
+    assert device_epoch == 1, f"Expected initial device epoch 1, got {device_epoch}"
+    
     for i in range(3):
         success = False
-        for _ in range(200): # High retry count for heavy contention
+        for _ in range(200):  # High retry count for heavy contention
             try:
-
                 store.record_operation_admitted(
                     "proof_session", f"ep_{op_id}_{i}", f"dev_{op_id}", 1, 1, f"op_{op_id}_{i}", f"nonce_{op_id}_{i}", f"exec_{op_id}_{i}", "test"
                 )
@@ -159,13 +160,17 @@ def run_concurrency_worker(store_path: str, epoch: int, op_id: str):
                 break
             except PersistenceLifecycleError:
                 time.sleep(0.01)
-            except Exception as e:
-                print(f"FAILED {type(e).__name__}: {e}")
-                break
+            except PermissionError:
+                time.sleep(0.01)
         if not success:
             print("FAILED Timeout resolving concurrency")
 
 def run_admission_termination_race_a(store_path: str, epoch: int, op_id: str):
+    """Termination worker for dev_t / op_t.
+    
+    The parent test already established dev_t authority and admitted op_t.
+    This worker reads/verifies the existing authority — does NOT allocate.
+    """
     path = Path(store_path)
     store = DurableSessionStore(path, epoch_id=epoch)
     while True:
@@ -174,21 +179,58 @@ def run_admission_termination_race_a(store_path: str, epoch: int, op_id: str):
             break
         except PermissionError:
             time.sleep(0.01)
-    try:
-        from holomed.persistence.authority import DeviceEpochAuthority
-        (path / "devices").mkdir(parents=True, exist_ok=True)
-        DeviceEpochAuthority(path / "devices").allocate_next_device_epoch("dev_t")
-    except Exception:
-        pass
+    
+    # Verify existing authority — do NOT allocate a new epoch
+    from holomed.persistence.authority import DeviceEpochAuthority
+    dev_auth = DeviceEpochAuthority(path / "devices")
+    current_epoch = dev_auth.read_current_device_epoch("dev_t")
+    assert current_epoch == 1, f"Expected dev_t authority epoch 1, got {current_epoch}"
+    
     for _ in range(10):
         try:
+            store.record_operation_terminated(
+                "proof_session", "dev_t", 1, 1, "op_t", "nonce_t", "OPERATION_COMPLETED"
+            )
+            print("TERMINATED")
+        except PersistenceLifecycleError:
+            # Already terminated or conflict — expected in race
+            pass
+        except PermissionError:
+            time.sleep(0.01)
+        time.sleep(0.01)
 
+def run_admission_termination_race_b(store_path: str, epoch: int, op_id: str):
+    """Admission worker for dev_a / op_a.
+    
+    Allocates dev_a authority exactly once, then retries admission.
+    """
+    path = Path(store_path)
+    store = DurableSessionStore(path, epoch_id=epoch)
+    while True:
+        try:
+            store.restore_session_from_disk("proof_session")
+            break
+        except PermissionError:
+            time.sleep(0.01)
+    
+    # Allocate dev_a authority exactly once — failure must propagate
+    from holomed.persistence.authority import DeviceEpochAuthority
+    (path / "devices").mkdir(parents=True, exist_ok=True)
+    dev_auth = DeviceEpochAuthority(path / "devices")
+    device_epoch = dev_auth.allocate_next_device_epoch("dev_a")
+    assert device_epoch == 1, f"Expected initial device epoch 1, got {device_epoch}"
+    
+    for _ in range(10):
+        try:
             store.record_operation_admitted(
                 "proof_session", "ep_a", "dev_a", 1, 1, op_id, "nonce_a", "exec_a", "test"
             )
             print("ADMITTED")
-        except Exception as e:
-            print(f"FAILED {type(e).__name__}: {e}")
+        except PersistenceLifecycleError:
+            # Contention with termination worker — expected in race
+            pass
+        except PermissionError:
+            time.sleep(0.01)
         time.sleep(0.01)
 
 if __name__ == '__main__':
