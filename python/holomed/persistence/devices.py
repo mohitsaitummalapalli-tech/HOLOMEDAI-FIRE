@@ -33,6 +33,9 @@ class DurableDeviceStore:
         
         self._devices: dict[str, DurableDeviceRecord] = {}
         self._writers: dict[str, DeviceJournalWriter] = {}
+        # Test-only instrumentation seam. None in production.
+        # When set, called with a phase name string at migration boundaries.
+        self._migration_test_hook: Any = None
 
         if not self._storage_root.exists():
             self._storage_root.mkdir(parents=True)
@@ -208,7 +211,10 @@ class DurableDeviceStore:
                         json.dump({"device_epoch": device_epoch}, f)
                         f.flush()
                         os.fsync(f.fileno())
-                        
+
+                    if self._migration_test_hook is not None:
+                        self._migration_test_hook("after_authority_fsync")
+
                     # 2. Append marker
                     writer = DeviceJournalWriter(
                         self._storage_root,
@@ -228,6 +234,30 @@ class DurableDeviceStore:
                     entries.append(new_marker)
                     marker_entry = new_marker
 
+                    if self._migration_test_hook is not None:
+                        self._migration_test_hook("after_marker_append")
+
+                    # --- Durable post-migration verification ---
+                    # Re-read both durable sources while still holding the lock.
+                    verified_epoch = device_authority._read_current_epoch_unlocked(device_id, allow_missing=False)
+                    verified_journal_path = self._storage_root / f"{device_id}.jsonl"
+                    verified_entries, _ = DeviceJournalReader.read_and_recover_journal(verified_journal_path)
+                    verified_markers = [
+                        e for e in verified_entries
+                        if e.entry_type == DeviceJournalEntryType.DEVICE_EPOCH_DOMAIN_INITIALIZED
+                    ]
+                    if len(verified_markers) != 1:
+                        raise PersistenceResourceIntegrityError(
+                            f"Post-migration verification failed for {device_id}: "
+                            f"expected exactly 1 DEVICE_EPOCH_DOMAIN_INITIALIZED marker, found {len(verified_markers)}"
+                        )
+                    verified_marker_epoch = verified_markers[0].payload.get("migrated_epoch")
+                    if verified_epoch != verified_marker_epoch:
+                        raise PersistenceResourceIntegrityError(
+                            f"Post-migration verification failed for {device_id}: "
+                            f"authority epoch {verified_epoch} != marker epoch {verified_marker_epoch}"
+                        )
+
                 elif not authority_missing and not marker_entry:
                     # CASE B: Authority exists, but no marker
                     raise PersistenceLifecycleError(
@@ -242,6 +272,7 @@ class DurableDeviceStore:
                     
                 else:
                     # CASE D, E, F: Both exist. Validate agreement.
+                    assert marker_entry is not None  # guaranteed by control flow
                     marker_epoch = marker_entry.payload.get("migrated_epoch")
                     if marker_epoch != device_epoch:
                         raise PersistenceResourceIntegrityError(
@@ -267,6 +298,9 @@ class DurableDeviceStore:
                 tx_id = entry.payload.get("transaction_id")
                 if tx_id:
                     isolation_transactions[tx_id] = TransactionState.COMMITTED
+
+        # All branches above either assign device_epoch or raise.
+        assert device_epoch is not None
 
         record = DurableDeviceRecord(
             device_id=device_id,
