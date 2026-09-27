@@ -1,4 +1,16 @@
 import pytest
+
+def _ensure_device_auth(store, device_id: str = "dev1"):
+    from holomed.persistence.authority import DeviceEpochAuthority
+    try:
+        if hasattr(store, "_storage_root"):
+            root = store._storage_root / "devices"
+        else:
+            root = store / "devices"
+        DeviceEpochAuthority(root).read_current_device_epoch(device_id)
+    except Exception:
+        DeviceEpochAuthority(root).allocate_next_device_epoch(device_id)
+
 import os
 import json
 import time
@@ -20,6 +32,7 @@ def test_rehydration_active_capacity(tmp_path):
     session = store.start_session("sess1", epoch)
 
     # Admit one operation
+    _ensure_device_auth(store, "dev1")
     store.record_operation_admitted(
         session_id=session.session_id,
         endpoint_id="end1",
@@ -68,6 +81,7 @@ def test_rehydration_terminal_capacity(tmp_path):
 
     session = store.start_session("sess1", epoch)
 
+    _ensure_device_auth(store, "dev1")
     store.record_operation_admitted(
         session_id=session.session_id,
         endpoint_id="end1",
@@ -117,6 +131,7 @@ def test_journal_tail_failure(tmp_path):
     store = DurableSessionStore(store_dir, epoch)
     session = store.start_session("sess1", epoch)
 
+    _ensure_device_auth(store, "dev1")
     store.record_operation_admitted(
         session_id=session.session_id,
         endpoint_id="end1",
@@ -156,6 +171,7 @@ def test_old_operation_wrong_authority_rejection(tmp_path):
     store1 = DurableSessionStore(store_dir, epoch1)
 
     session1 = store1.start_session("sess1", epoch1)
+    _ensure_device_auth(store1, "dev1")
     store1.record_operation_admitted(
         session_id=session1.session_id,
         endpoint_id="end1",
@@ -196,6 +212,7 @@ def test_old_operation_new_authority_recovery(tmp_path):
     store1 = DurableSessionStore(store_dir, epoch1)
 
     session1 = store1.start_session("sess1", epoch1)
+    _ensure_device_auth(store1, "dev1")
     store1.record_operation_admitted(
         session_id=session1.session_id,
         endpoint_id="end1",
@@ -247,6 +264,7 @@ def test_journal_middle_corruption_fail_closed(tmp_path):
     store = DurableSessionStore(store_dir, epoch)
     session = store.start_session("sess1", epoch)
 
+    _ensure_device_auth(store, "dev1")
     store.record_operation_admitted(
         session_id=session.session_id,
         endpoint_id="end1",
@@ -259,6 +277,7 @@ def test_journal_middle_corruption_fail_closed(tmp_path):
         command_name="test.cmd"
     )
 
+    _ensure_device_auth(store, "dev1")
     store.record_operation_admitted(
         session_id=session.session_id,
         endpoint_id="end2",
@@ -300,6 +319,7 @@ def test_end_to_end_recovery_engine(tmp_path):
     store1 = DurableSessionStore(store_dir, epoch1)
 
     session1 = store1.start_session("sess1", epoch1)
+    _ensure_device_auth(store1, "dev1")
     store1.record_operation_admitted(
         session_id=session1.session_id,
         endpoint_id="end1",

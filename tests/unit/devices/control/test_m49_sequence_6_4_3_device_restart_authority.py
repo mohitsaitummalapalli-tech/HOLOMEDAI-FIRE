@@ -88,7 +88,7 @@ def test_04_device_ready_commit_uses_independent_device_epoch(coordinator, store
     initial_controller_epoch = auth_store.read_current_epoch()
     
     new_device_epoch = coordinator.allocate_device_restart_epoch("dev1")
-    epoch = coordinator.commit_device_ready("dev1", {"hw": "proof"}, new_device_epoch)
+    epoch = coordinator.commit_device_ready("dev1", {"hw": "proof"})
     
     # The controller epoch should not have changed
     assert auth_store.read_current_epoch() == initial_controller_epoch
@@ -124,7 +124,11 @@ def test_06_device_ready_commit_serialization(coordinator):
     coordinator._authority_store._get_global_transaction_lock.return_value.__enter__ = Mock()
     coordinator._authority_store._get_global_transaction_lock.return_value.__exit__ = Mock()
     
-    coordinator.commit_device_ready("dev1", {}, 1)
+    # Explicitly allocate device epoch authority
+    from holomed.persistence.authority import DeviceEpochAuthority
+    DeviceEpochAuthority(coordinator._device_store._storage_root).allocate_next_device_epoch("dev1")
+    
+    coordinator.commit_device_ready("dev1", {})
     
     assert coordinator._authority_store._get_global_transaction_lock.called
 
@@ -176,7 +180,7 @@ def test_11_commit_device_ready_records_journal_entry(coordinator, stores):
     
     device_id = "dev1"
     new_epoch = coordinator.allocate_device_restart_epoch(device_id)
-    epoch = coordinator.commit_device_ready(device_id, {"hw": "proof"}, new_epoch)
+    epoch = coordinator.commit_device_ready(device_id, {"hw": "proof"})
     
     rec = dev_store.get_device(device_id)
     # If a new entry was appended, last_sequence should be > 0.
@@ -191,3 +195,30 @@ def test_12_stale_device_epoch_request_rejected(coordinator, stores):
     # The second param should not be new_device_epoch: int
     assert "new_device_epoch" not in sig.parameters
     assert "coordinator" in sig.parameters
+
+def test_13_advance_device_epoch_dynamically_reads_authority(stores):
+    """Proves advance_device_epoch dynamically reads the updated epoch even if writer was created with a stale value."""
+    _, dev_store = stores
+    device_id = "dev_dynamic"
+    
+    # 1. Initialize device "dev_dynamic"
+    dev_store.initialize_device(device_id, epoch_id=1)
+    
+    # 2. Simulate another process/coordinator allocating a new epoch via authority
+    from holomed.persistence.authority import DeviceEpochAuthority
+    auth = DeviceEpochAuthority(dev_store._storage_root)
+    _ = auth.allocate_next_device_epoch(device_id)
+    new_epoch = auth.allocate_next_device_epoch(device_id)
+    assert new_epoch == 2
+    
+    # 3. Advance device epoch in the store. 
+    # It must pick up `2` directly from the authority file.
+    dev_store.advance_device_epoch(device_id, 2)
+    
+    # 4. Check the device record. It should have the new epoch.
+    rec = dev_store.get_device(device_id)
+    assert rec.epoch_id == 2
+    
+    # 5. Check the writer explicitly
+    writer = dev_store._writers[device_id]
+    assert writer._epoch_id == 2

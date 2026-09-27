@@ -1,4 +1,16 @@
 import pytest
+
+def _ensure_device_auth(store, device_id: str = "dev1"):
+    from holomed.persistence.authority import DeviceEpochAuthority
+    try:
+        if hasattr(store, "_storage_root"):
+            root = store._storage_root / "devices"
+        else:
+            root = store / "devices"
+        DeviceEpochAuthority(root).read_current_device_epoch(device_id)
+    except Exception:
+        DeviceEpochAuthority(root).allocate_next_device_epoch(device_id)
+
 import uuid
 import threading
 from typing import Optional
@@ -133,6 +145,7 @@ def test_terminal_resolution_capacity(components):
     execution_id = "exec-term-1"
     
     # 1. Admit an operation in session_store
+    _ensure_device_auth(session_store, "dev-1")
     session_store.record_operation_admitted(
         endpoint_id="end-1",
         session_id=session_id,
@@ -303,6 +316,7 @@ def test_duplicate_telemetry_concurrently(components):
     session_id = session_store.start_session("dup-concurrent", epoch).session_id
     execution_id = "dup-concurrent-exec"
 
+    _ensure_device_auth(session_store, "dev-1")
     session_store.record_operation_admitted(
         endpoint_id="end-1",
         session_id=session_id,
@@ -392,6 +406,7 @@ def test_reconciliation_vs_admission(components):
     exec_2 = "recon-admit-2"
 
     # Admit exec_1
+    _ensure_device_auth(session_store, "dev-ra")
     session_store.record_operation_admitted(
         endpoint_id="end-1", session_id=session_id, device_id="dev-ra",
         device_epoch=1, controller_epoch=epoch, physical_operation_id="op-ra-1",
@@ -411,6 +426,7 @@ def test_reconciliation_vs_admission(components):
     def do_admit():
         barrier.wait()
         try:
+            _ensure_device_auth(session_store, "dev-ra")
             session_store.record_operation_admitted(
                 endpoint_id="end-2", session_id=session_id, device_id="dev-ra",
                 device_epoch=1, controller_epoch=epoch, physical_operation_id="op-ra-2",
@@ -456,6 +472,7 @@ def test_reconciliation_vs_recovery(components):
     new_exec = "new-exec-recovery"
 
     # 1. Admit old operation
+    _ensure_device_auth(session_store, "dev-1")
     session_store.record_operation_admitted(
         endpoint_id="end-1", session_id=session_id, device_id="dev-1",
         device_epoch=1, controller_epoch=epoch, physical_operation_id="op-1",
@@ -478,6 +495,7 @@ def test_reconciliation_vs_recovery(components):
     dev_auth_flat.allocate_next_device_epoch("dev-1")
 
     # 3. Admit new operation (recovery scenario)
+    _ensure_device_auth(session_store, "dev-1")
     session_store.record_operation_admitted(
         endpoint_id="end-1", session_id=session_id, device_id="dev-1",
         device_epoch=2, controller_epoch=epoch, physical_operation_id="op-new",
@@ -527,6 +545,7 @@ def test_faulted_unknown_capacity_preserved(components):
     execution_id = "exec-faulted"
 
     # 1. Admit
+    _ensure_device_auth(session_store, "dev-f")
     session_store.record_operation_admitted(
         endpoint_id="end-1", session_id=session_id, device_id="dev-f",
         device_epoch=1, controller_epoch=epoch, physical_operation_id="op-f",
@@ -565,6 +584,7 @@ def test_operation_completed_releases_exactly_once(components):
     session_id = session_store.start_session("release-once", epoch).session_id
     execution_id = "exec-release-once"
 
+    _ensure_device_auth(session_store, "dev-1")
     session_store.record_operation_admitted(
         endpoint_id="end-1", session_id=session_id, device_id="dev-1",
         device_epoch=1, controller_epoch=epoch, physical_operation_id="op-1",
@@ -588,6 +608,7 @@ def test_evidence_identity_mismatch_rejection(components):
     session_id = session_store.start_session("evidence-mismatch", epoch).session_id
     execution_id = "exec-evidence"
     
+    _ensure_device_auth(session_store, "dev-ev")
     session_store.record_operation_admitted(
         endpoint_id="end-1", session_id=session_id, device_id="dev-ev",
         device_epoch=1, controller_epoch=epoch, physical_operation_id="op-ev",
@@ -598,6 +619,7 @@ def test_evidence_identity_mismatch_rejection(components):
     import pytest
     
     # Try to terminate with wrong device_id
+    _ensure_device_auth(session_store, "WRONG_DEVICE")
     with pytest.raises(PersistenceTerminationConflictError, match="not currently admitted"):
         session_store.record_operation_terminated(
             session_id=session_id, device_id="WRONG_DEVICE", device_epoch=1,
@@ -622,6 +644,7 @@ def test_real_g8_telemetry_trust_path(components):
     session_id = session_store.start_session("g8-trust", epoch).session_id
     execution_id = "exec-g8"
     
+    _ensure_device_auth(session_store, "dev-g8")
     session_store.record_operation_admitted(
         endpoint_id="end-1", session_id=session_id, device_id="dev-g8",
         device_epoch=1, controller_epoch=epoch, physical_operation_id="op-g8",
@@ -708,6 +731,7 @@ def test_real_g8_telemetry_trust_path(components):
 
     # 11. Acceptance: Valid Evidence correctly bound
     valid_exec_id = "exec-valid"
+    _ensure_device_auth(session_store, "dev-g8-valid")
     session_store.record_operation_admitted(
         endpoint_id="end-2", session_id=session_id, device_id="dev-g8-valid",
         device_epoch=1, controller_epoch=epoch, physical_operation_id="op-g8-valid",
@@ -733,6 +757,7 @@ def test_real_g8_telemetry_trust_path(components):
 
     # 13. Rejection: Unknown/Missing telemetry identity fails closed
     missing_id_exec = "exec-missing"
+    _ensure_device_auth(session_store, "dev-g8-missing")
     session_store.record_operation_admitted(
         endpoint_id="end-3", session_id=session_id, device_id="dev-g8-missing",
         device_epoch=1, controller_epoch=epoch, physical_operation_id="op-g8-missing",
@@ -749,6 +774,7 @@ def test_real_g8_telemetry_trust_path(components):
 
     # 14. Acceptance & Rejection: Historical controller epoch is immutable
     bad_hist_exec = "exec-hist-bad"
+    _ensure_device_auth(session_store, "dev-g8-bad")
     session_store.record_operation_admitted(
         endpoint_id="end-4", session_id=session_id, device_id="dev-g8-bad",
         device_epoch=1, controller_epoch=epoch, physical_operation_id="op-g8-bad",
@@ -756,6 +782,7 @@ def test_real_g8_telemetry_trust_path(components):
     )
     
     good_hist_exec = "exec-hist-good"
+    _ensure_device_auth(session_store, "dev-g8-good")
     session_store.record_operation_admitted(
         endpoint_id="end-5", session_id=session_id, device_id="dev-g8-good",
         device_epoch=1, controller_epoch=epoch, physical_operation_id="op-g8-good",

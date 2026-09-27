@@ -28,15 +28,21 @@ def test_device_epoch_concurrency_proof(tmp_path):
     for p in processes:
         p.join()
         
+    import queue as q
+    
     epochs = set()
     errors = []
     
-    while not queue.empty():
-        status, val = queue.get()
-        if status == "success":
-            epochs.add(val)
-        else:
-            errors.append(val)
+    for _ in range(10):
+        try:
+            status, val = queue.get(timeout=2)
+            if status == "success":
+                epochs.add(val)
+            else:
+                errors.append(val)
+        except q.Empty:
+            import pytest
+            pytest.fail("Timeout waiting for child process result in concurrency test")
             
     assert not errors, f"Errors occurred during concurrent allocation: {errors}"
     assert len(epochs) == 10, f"Expected 10 distinct epochs, got {len(epochs)}: {epochs}"

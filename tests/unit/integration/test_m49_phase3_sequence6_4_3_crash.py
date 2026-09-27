@@ -38,20 +38,8 @@ def test_device_epoch_crash_boundary(tmp_path):
     
     # Also verify that no DEVICE_READY state exists in the device journal!
     # Because allocating an epoch does NOT make the device READY.
-    from holomed.persistence.devices import DurableDeviceStore
-    # We must mock or create a device store to check this
-    store = DurableDeviceStore(storage_root.parent)
-    try:
-        device_state = store.get_device_state(device_id)
-        # Should NOT be READY! Wait, if get_device_state is called, and there is NO READY record, what is the state?
-        # A device without a READY record after initialization might be in INITIALIZING, or if it doesn't even have a journal it might fail.
-        # But wait, allocate_next_device_epoch modifies the `DEVICE_EPOCH_DOMAIN_INITIALIZED` and creates a file.
-        # Is there any READY event? No.
-        assert device_state is not None
-        from holomed.devices.control.models import AdmissionState
-        assert hasattr(device_state, "admission_state")
-        # In Sequence 5, it should not be READY
-        assert device_state.admission_state != AdmissionState.READY
-    except Exception as e:
-        # If it raises because there is no journal, that's fine. It means it's not ready!
-        pass
+    
+    # The journal file should not even exist because commit_device_ready (which initializes/writes) was never called.
+    journal_path = storage_root.parent / f"{device_id}.jsonl"
+    assert not journal_path.exists(), f"Journal {journal_path} must not exist without commit_device_ready"
+

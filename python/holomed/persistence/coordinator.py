@@ -163,8 +163,8 @@ class DurableGlobalCoordinator:
                 return True
         return False
 
-    def commit_device_ready(self, device_id: str, hardware_evidence: dict, new_epoch_id: int) -> int:
-        """Allocate a new epoch and commit DEVICE_READY to the device journal.
+    def commit_device_ready(self, device_id: str, hardware_evidence: dict) -> int:
+        """Commit DEVICE_READY to the device journal for the current authoritative epoch.
 
         Implements lock hierarchy: 1. GLOBAL_TRANSACTION_LOCK -> 2. EPOCH AUTHORITY LOCK.
 
@@ -173,13 +173,14 @@ class DurableGlobalCoordinator:
             hardware_evidence: Unforgeable hardware evidence proving physical state safety.
 
         Returns:
-            The newly allocated epoch_id.
+            The authoritative epoch_id.
         """
         from holomed.persistence.authority import DeviceEpochAuthority
         device_authority = DeviceEpochAuthority(self._device_store._storage_root)
 
         with self._authority_store._get_global_transaction_lock():
             # The epoch must have been allocated via allocate_device_restart_epoch already.
+            new_epoch_id = device_authority.read_current_device_epoch(device_id)
             
             # Update writer epoch so it doesn't fail validation
             self._device_store.advance_device_epoch(device_id, new_epoch_id)

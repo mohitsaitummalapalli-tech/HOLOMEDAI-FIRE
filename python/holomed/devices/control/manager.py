@@ -776,7 +776,7 @@ class DeviceControlManager(IService):
         new_epoch = coordinator.allocate_device_restart_epoch(device_id)
 
         # 2. DEVICE_READY(E2) durable commit
-        coordinator.commit_device_ready(device_id, hardware_evidence, new_epoch)
+        coordinator.commit_device_ready(device_id, hardware_evidence)
 
         # 3. Runtime projection updated (update device object's epoch in registry)
         # Note: In a real flow, the device registry or object needs its epoch updated.

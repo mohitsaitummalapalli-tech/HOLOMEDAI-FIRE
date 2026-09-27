@@ -203,7 +203,7 @@ def _worker_t_reinit_e2(storage_str: str, q_res: multiprocessing.Queue, q_sync_e
             return
 
         new_device_epoch = coordinator.allocate_device_restart_epoch("dev1")
-        new_epoch = coordinator.commit_device_ready("dev1", {}, new_device_epoch)
+        new_epoch = coordinator.commit_device_ready("dev1", {})
         q_res.put(("REINIT_DONE", new_epoch))
 
         # Signal E1 to proceed

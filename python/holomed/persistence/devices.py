@@ -94,11 +94,16 @@ class DurableDeviceStore:
         
         # Re-initialize the writer with the new epoch so append_entry validations pass
         old_writer = self._writers[device_id]
+        
+        def _get_authoritative_device_epoch() -> int:
+            from holomed.persistence.authority import DeviceEpochAuthority
+            return DeviceEpochAuthority(self._storage_root).read_current_device_epoch(device_id)
+            
         new_writer = DeviceJournalWriter(
             self._storage_root,
             device_id,
             new_epoch,
-            authoritative_epoch_provider=old_writer._get_authoritative_epoch
+            authoritative_epoch_provider=_get_authoritative_device_epoch
         )
         new_writer._entry_count = old_writer._entry_count
         new_writer._last_entry_hash = old_writer._last_entry_hash

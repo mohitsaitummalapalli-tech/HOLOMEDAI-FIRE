@@ -2,6 +2,18 @@ import os
 import json
 import time
 import pytest
+
+def _ensure_device_auth(store, device_id: str = "dev1"):
+    from holomed.persistence.authority import DeviceEpochAuthority
+    try:
+        if hasattr(store, "_storage_root"):
+            root = store._storage_root / "devices"
+        else:
+            root = store / "devices"
+        DeviceEpochAuthority(root).read_current_device_epoch(device_id)
+    except Exception:
+        DeviceEpochAuthority(root).allocate_next_device_epoch(device_id)
+
 import subprocess
 import sys
 from pathlib import Path
@@ -65,6 +77,7 @@ def test_stale_epoch_rejection(shared_store_path):
     assert epoch_2 > epoch
 
     with pytest.raises(PersistenceEpochMismatchError):
+        _ensure_device_auth(store_a, "dev_a")
         store_a.record_operation_admitted(
             session, "ep_a", "dev_a", 1, 1, "op_a", "nonce_a", "exec_a", "test"
         )
@@ -158,6 +171,7 @@ def test_crash_tail_recovery_proof(shared_store_path):
 
     store = DurableSessionStore(shared_store_path, epoch_id=epoch)
     store.restore_session_from_disk(session)
+    _ensure_device_auth(store, "dev_c")
     store.record_operation_admitted(
         session, "ep_c", "dev_c", 1, 1, "op_c", "nonce_c", "exec_c", "test"
     )
@@ -169,6 +183,7 @@ def test_crash_tail_recovery_proof(shared_store_path):
     # Recovery should strip the corrupt tail and allow the next admission
     store2 = DurableSessionStore(shared_store_path, epoch_id=epoch)
     store2.restore_session_from_disk(session)
+    _ensure_device_auth(store2, "dev_c2")
     store2.record_operation_admitted(
         session, "ep_c2", "dev_c2", 1, 1, "op_c2", "nonce_c2", "exec_c2", "test"
     )
@@ -187,10 +202,12 @@ def test_active_duplicate_canonical_admission(shared_store_path):
     store = DurableSessionStore(shared_store_path, epoch_id=epoch)
     store.restore_session_from_disk(session)
 
+    _ensure_device_auth(store, "dev_d")
     store.record_operation_admitted(
         session, "ep_d", "dev_d", 1, 1, "op_d", "nonce_d", "exec_d1", "test"
     )
 
+    _ensure_device_auth(store, "dev_d")
     store.record_operation_admitted(
         session, "ep_d", "dev_d", 1, 1, "op_d", "nonce_d", "exec_d2", "test"
     )
@@ -211,6 +228,7 @@ def test_terminated_identity_reuse_rejection(shared_store_path):
     store = DurableSessionStore(shared_store_path, epoch_id=epoch)
     store.restore_session_from_disk(session)
 
+    _ensure_device_auth(store, "dev_t")
     store.record_operation_admitted(
         session, "ep_t", "dev_t", 1, 1, "op_t", "nonce_t", "exec_t1", "test"
     )
@@ -234,6 +252,7 @@ def test_terminated_identity_reuse_rejection(shared_store_path):
     store.start_session("session_diff", epoch, {})
 
     with pytest.raises(PersistenceIdentityReuseError):
+        _ensure_device_auth(store, "dev_t")
         store.record_operation_admitted(
             "session_diff", "ep_t", "dev_t", 1, 1, "op_t", "nonce_t", "exec_t3", "test"
         )
@@ -246,6 +265,7 @@ def test_non_terminal_resolution_rejection(shared_store_path):
     store = DurableSessionStore(shared_store_path, epoch_id=epoch)
     store.restore_session_from_disk(session)
 
+    _ensure_device_auth(store, "dev_n")
     store.record_operation_admitted(
         session, "ep_n", "dev_n", 1, 1, "op_n", "nonce_n", "exec_n", "test"
     )
@@ -267,6 +287,7 @@ def test_valid_terminal_release(shared_store_path):
         authority, epoch, session = setup_test_store(shared_store_path / state)
         store = DurableSessionStore(shared_store_path / state, epoch_id=epoch)
         store.restore_session_from_disk(session)
+        _ensure_device_auth(store, "dev_v")
         store.record_operation_admitted(session, "ep_v", "dev_v", 1, 1, "op_v", "nonce_v", "exec_v", "test")
 
         store.record_operation_terminated(session, "dev_v", 1, 1, "op_v", "nonce_v", state)
@@ -280,6 +301,7 @@ def test_conflicting_terminal_resolution_rejection(shared_store_path):
     store = DurableSessionStore(shared_store_path, epoch_id=epoch)
     store.restore_session_from_disk(session)
 
+    _ensure_device_auth(store, "dev_c")
     store.record_operation_admitted(session, "ep_c", "dev_c", 1, 1, "op_c", "nonce_c", "exec_c", "test")
     store.record_operation_terminated(session, "dev_c", 1, 1, "op_c", "nonce_c", "OPERATION_COMPLETED")
 
@@ -294,6 +316,7 @@ def test_duplicate_identical_terminal_idempotency(shared_store_path):
     store = DurableSessionStore(shared_store_path, epoch_id=epoch)
     store.restore_session_from_disk(session)
 
+    _ensure_device_auth(store, "dev_i")
     store.record_operation_admitted(session, "ep_i", "dev_i", 1, 1, "op_i", "nonce_i", "exec_i", "test")
     store.record_operation_terminated(session, "dev_i", 1, 1, "op_i", "nonce_i", "OPERATION_COMPLETED")
     store.record_operation_terminated(session, "dev_i", 1, 1, "op_i", "nonce_i", "OPERATION_COMPLETED")
@@ -310,6 +333,7 @@ def test_admission_termination_race(shared_store_path):
     authority, epoch, session = setup_test_store(shared_store_path)
     store = DurableSessionStore(shared_store_path, epoch_id=epoch)
     store.restore_session_from_disk(session)
+    _ensure_device_auth(store, "dev_t")
     store.record_operation_admitted(session, "ep_t", "dev_t", 1, 1, "op_t", "nonce_t", "exec_t", "test")
 
     pa = subprocess.Popen([sys.executable, str(HELPER_SCRIPT), "adm_term_race_a", str(shared_store_path), str(epoch), "op_a"], stdout=subprocess.PIPE)
@@ -330,6 +354,7 @@ def test_restart_only_durable_routing(shared_store_path):
     authority, epoch, session = setup_test_store(shared_store_path)
     store = DurableSessionStore(shared_store_path, epoch_id=epoch)
     store.restore_session_from_disk(session)
+    _ensure_device_auth(store, "dev_r")
     store.record_operation_admitted(session, "ep_r", "dev_r", 1, 1, "op_r", "nonce_r", "exec_r", "test")
     assert store.get_active_physical_operations() == 1
 
@@ -361,6 +386,7 @@ def test_evidence_identity_generation_mismatch_rejection(shared_store_path):
     authority, epoch, session = setup_test_store(shared_store_path)
     store = DurableSessionStore(shared_store_path, epoch_id=epoch)
     store.restore_session_from_disk(session)
+    _ensure_device_auth(store, "dev_e")
     store.record_operation_admitted(session, "ep_e", "dev_e", 1, epoch, "op_e", "nonce_e", "exec_e", "test")
 
     # 1. Setup production path components
@@ -567,6 +593,7 @@ def test_submission_fence_closes_toctou(shared_store_path):
     dev = FencedDevice()
     registry.register(dev, token)
     dev.state = DeviceState.ACTIVE
+    _ensure_device_auth(store, "dev_fence")
 
     manager = DeviceControlManager(
         registry=registry,
@@ -670,6 +697,7 @@ def test_durable_admission_closes_toctou(shared_store_path):
 
     # Process A attempts admission using E
     with pytest.raises(PersistenceEpochMismatchError):
+        _ensure_device_auth(store, "dev_fence")
         store.record_operation_admitted(
             session_id=session,
             endpoint_id="ep_admission_fence",

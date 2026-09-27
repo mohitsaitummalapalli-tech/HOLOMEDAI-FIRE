@@ -3,6 +3,18 @@ import threading
 import time
 import uuid
 import pytest
+
+def _ensure_device_auth(store, device_id: str = "dev1"):
+    from holomed.persistence.authority import DeviceEpochAuthority
+    try:
+        if hasattr(store, "_storage_root"):
+            root = store._storage_root / "devices"
+        else:
+            root = store / "devices"
+        DeviceEpochAuthority(root).read_current_device_epoch(device_id)
+    except Exception:
+        DeviceEpochAuthority(root).allocate_next_device_epoch(device_id)
+
 from pathlib import Path
 from holomed.persistence.sessions import DurableSessionStore
 from holomed.persistence.models import SessionStatus, JournalEntryType
@@ -26,6 +38,7 @@ def test_atomic_capacity_admission(tmp_path: Path):
         
     # Fill N-1 ops
     for i in range(GLOBAL_PHYSICAL_OPERATION_CAPACITY - 1):
+        _ensure_device_auth(store, f"dev_{i}")
         store.record_operation_admitted(
             session_id=s.session_id,
             endpoint_id=f"ep_{i}",
@@ -45,6 +58,7 @@ def test_atomic_capacity_admission(tmp_path: Path):
     
     def admit_worker(idx: int):
         try:
+            _ensure_device_auth(store, f"dev_concurrent_{idx}")
             store.record_operation_admitted(
                 session_id=s.session_id,
                 endpoint_id=f"ep_concurrent_{idx}",
@@ -82,6 +96,7 @@ def test_status_query_unknown(tmp_path: Path):
     """
     store = create_store(tmp_path)
     store.start_session("session_1", store._epoch_id)
+    _ensure_device_auth(store, "dev_1")
     store.record_operation_admitted(
         "session_1", "ep_1", "dev_1", 1, 1, "op_1", "nonce_1", "exec_1", "test"
     )
@@ -97,6 +112,7 @@ def test_operation_specific_idle_proof(tmp_path: Path):
     """
     store = create_store(tmp_path)
     store.start_session("session_1", store._epoch_id)
+    _ensure_device_auth(store, "dev_1")
     store.record_operation_admitted(
         "session_1", "ep_1", "dev_1", 1, 1, "op_1", "nonce_1", "exec_1", "test"
     )
@@ -114,12 +130,14 @@ def test_atomic_terminal_commit(tmp_path: Path):
     """
     store = create_store(tmp_path)
     store.start_session("session_1", store._epoch_id)
+    _ensure_device_auth(store, "dev_1")
     store.record_operation_admitted(
         "session_1", "ep_1", "dev_1", 1, 1, "op_1", "nonce_1", "exec_1", "test"
     )
     assert store.get_active_physical_operations() == 1
     
     # Idempotent admission test
+    _ensure_device_auth(store, "dev_1")
     store.record_operation_admitted(
         "session_1", "ep_1", "dev_1", 1, 1, "op_1", "nonce_1", "exec_1", "test"
     )
@@ -139,12 +157,14 @@ def test_quarantine_retains_capacity(tmp_path: Path):
     store = create_store(tmp_path)
     store.start_session("session_1", store._epoch_id)
     for i in range(GLOBAL_PHYSICAL_OPERATION_CAPACITY):
+        _ensure_device_auth(store, f"dev_{i}")
         store.record_operation_admitted(
             "session_1", f"ep_{i}", f"dev_{i}", 1, 1, f"op_{i}", f"nonce_{i}", f"exec_{i}", "test"
         )
     assert store.get_active_physical_operations() == GLOBAL_PHYSICAL_OPERATION_CAPACITY
     
     with pytest.raises(PersistenceCapacityError):
+        _ensure_device_auth(store, f"dev_{GLOBAL_PHYSICAL_OPERATION_CAPACITY}")
         store.record_operation_admitted(
             "session_1", f"ep_{GLOBAL_PHYSICAL_OPERATION_CAPACITY}", f"dev_{GLOBAL_PHYSICAL_OPERATION_CAPACITY}", 1, 1, f"op_{GLOBAL_PHYSICAL_OPERATION_CAPACITY}", f"nonce_{GLOBAL_PHYSICAL_OPERATION_CAPACITY}", f"exec_{GLOBAL_PHYSICAL_OPERATION_CAPACITY}", "test"
         )
