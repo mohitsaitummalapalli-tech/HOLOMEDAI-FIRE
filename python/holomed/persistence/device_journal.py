@@ -42,6 +42,7 @@ META_ENTRY_TYPES: tuple[DeviceJournalEntryType, ...] = (
     DeviceJournalEntryType.ISOLATION_TRANSACTION_COMMITTED,
     DeviceJournalEntryType.ISOLATION_TRANSACTION_ABORTED,
     DeviceJournalEntryType.DEVICE_READY_COMMITTED,
+    DeviceJournalEntryType.DEVICE_EPOCH_DOMAIN_INITIALIZED,
 )
 
 META_ENTRY_TYPE_VALUES: tuple[str, ...] = tuple(e.value for e in META_ENTRY_TYPES)

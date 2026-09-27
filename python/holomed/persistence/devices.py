@@ -164,6 +164,71 @@ class DurableDeviceStore:
         if not entries:
             raise PersistenceValidationError(f"No journal records found for device {device_id!r}")
 
+        from holomed.persistence.authority import DeviceEpochAuthority
+        from holomed.persistence.exceptions import PersistenceResourceIntegrityError, PersistenceLifecycleError
+        import json, os
+
+        device_authority = DeviceEpochAuthority(self._storage_root)
+        try:
+            device_epoch = device_authority.read_current_device_epoch(device_id)
+        except PersistenceResourceIntegrityError:
+            device_epoch = None
+
+        has_marker = any(e.entry_type == DeviceJournalEntryType.DEVICE_EPOCH_DOMAIN_INITIALIZED for e in entries)
+
+        if not has_marker:
+            if device_epoch is not None:
+                raise PersistenceLifecycleError(
+                    f"Ambiguous legacy history: {device_id} has device_epoch.json but no DEVICE_EPOCH_DOMAIN_INITIALIZED marker"
+                )
+
+            legacy_epochs = [e.epoch_id for e in entries]
+            device_epoch = max(legacy_epochs) if legacy_epochs else 0
+
+            lock_path = device_authority._get_lock_path(device_id)
+            if not lock_path.exists():
+                lock_path.touch()
+            with open(lock_path, "a") as lock_file:
+                fd = lock_file.fileno()
+                device_authority._acquire_lock(fd)
+                try:
+                    try:
+                        device_authority._read_current_epoch_unlocked(device_id, allow_missing=False)
+                        raise PersistenceLifecycleError(f"Ambiguous legacy history: {device_id} concurrently created device epoch")
+                    except PersistenceResourceIntegrityError:
+                        pass
+                    
+                    epoch_path = device_authority._get_epoch_path(device_id)
+                    with open(epoch_path, "w", encoding="utf-8") as f:
+                        json.dump({"device_epoch": device_epoch}, f)
+                        f.flush()
+                        os.fsync(f.fileno())
+                finally:
+                    device_authority._release_lock(fd)
+
+            writer = DeviceJournalWriter(
+                self._storage_root,
+                device_id,
+                device_epoch,
+                authoritative_epoch_provider=None,
+            )
+            writer._entry_count = len(entries)
+            writer._last_entry_hash = entries[-1].sha256_hash
+            writer._last_sequence = entries[-1].sequence_number
+
+            from datetime import datetime, timezone
+            marker_entry = writer.append_entry(
+                entry_type=DeviceJournalEntryType.DEVICE_EPOCH_DOMAIN_INITIALIZED,
+                timestamp_utc=datetime.now(timezone.utc).isoformat(),
+                payload={"migrated_epoch": device_epoch}
+            )
+            entries.append(marker_entry)
+        else:
+            if device_epoch is None:
+                raise PersistenceLifecycleError(
+                    f"Ambiguous legacy history: {device_id} has DEVICE_EPOCH_DOMAIN_INITIALIZED marker but no device_epoch.json"
+                )
+
         first_entry = entries[0]
         last_seq = entries[-1].sequence_number if entries else -1
 
@@ -184,7 +249,7 @@ class DurableDeviceStore:
 
         record = DurableDeviceRecord(
             device_id=device_id,
-            epoch_id=first_entry.epoch_id,
+            epoch_id=device_epoch,
             created_timestamp_utc=first_entry.timestamp_utc,
             last_sequence=last_seq,
             schema_version=PERSISTENCE_SCHEMA_VERSION,
@@ -194,8 +259,8 @@ class DurableDeviceStore:
         writer = DeviceJournalWriter(
             self._storage_root,
             device_id,
-            self._epoch_id,
-            authoritative_epoch_provider=lambda: self._epoch_id,
+            device_epoch,
+            authoritative_epoch_provider=lambda: DeviceEpochAuthority(self._storage_root).read_current_device_epoch(device_id),
         )
         writer._entry_count = len(entries)
         writer._last_entry_hash = entries[-1].sha256_hash
