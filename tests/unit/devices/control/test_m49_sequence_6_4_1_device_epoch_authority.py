@@ -38,9 +38,14 @@ def _hold_authority_and_wait(storage_root, device_id, epoch, lock_held_event, ac
 def _allocate_while_held(storage_root, device_id, lock_held_event, acquire_attempted_event, queue):
     try:
         authority = DeviceEpochAuthority(storage_root)
+
+        original_acquire = authority._acquire_lock
+        def _instrumented_acquire(fd):
+            acquire_attempted_event.set()
+            original_acquire(fd)
+        authority._acquire_lock = _instrumented_acquire
+
         lock_held_event.wait(timeout=5)
-        # Signal that we are about to block on the lock
-        acquire_attempted_event.set()
 
         # This will block until the holding process releases the lock
         epoch = authority.allocate_next_device_epoch(device_id)
