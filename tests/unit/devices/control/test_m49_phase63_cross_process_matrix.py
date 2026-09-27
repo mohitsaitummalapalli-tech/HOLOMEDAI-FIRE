@@ -119,18 +119,24 @@ def _worker_s_isolation(storage_str: str, session: str, op_iso_id: str, q_res: m
 
         coordinator = DurableGlobalCoordinator(authority, device_store, session_store)
 
-        original_has_session = session_store.has_session
-        def _mock_has_session(session_id):
-            # This is called exactly AFTER _get_global_admission_lock is released
-            # and BEFORE session file locks are acquired.
-            # We signal admission to proceed, and wait for it to finish.
-            q_sync_adm_start.put(True)
-            msg = q_sync_adm_done.get(timeout=5)
-            if not msg:
-                raise RuntimeError("Admission did not complete properly")
-            return original_has_session(session_id)
+        from holomed.persistence.journal import JournalWriter
 
-        with patch.object(session_store, 'has_session', side_effect=_mock_has_session):
+        original_append = JournalWriter.append_entry
+        def _mock_append(self_inst, *args, **kwargs):
+            payload = kwargs.get("payload")
+            if not payload and len(args) >= 3:
+                payload = args[2]
+            
+            if payload and payload.get("resolution") == "PHYSICALLY_ISOLATED":
+                # This is called exactly AFTER _get_global_admission_lock is released
+                # We signal admission to proceed, and wait for it to finish.
+                q_sync_adm_start.put(True)
+                msg = q_sync_adm_done.get(timeout=5)
+                if not msg:
+                    raise RuntimeError("Admission did not complete properly")
+            return original_append(self_inst, *args, **kwargs)
+
+        with patch.object(JournalWriter, 'append_entry', new=_mock_append):
             tx_id = coordinator.isolate_device("dev1", {session: [op_iso_id]})
             q_res.put(("ISOLATED", tx_id))
     except Exception as e:
@@ -486,9 +492,11 @@ class TestM49Phase63FailureMatrixCrossProcess:
         )
         assert store_setup.get_active_physical_operations() == 1
         
-        # Now artificially write an adversarial termination record sharing the same operation_id and physical_operation_id
-        # but with mismatched canonical fields (e.g., wrong device_id or nonce)
+        # Now artificially write adversarial termination records sharing the same operation_id and physical_operation_id
+        # but with mismatched canonical fields.
         writer = store_setup._writers[session]
+        
+        # 1. Wrong device_id
         writer.append_entry(
             entry_type=JournalEntryType.OPERATION_TERMINATED,
             timestamp_utc=datetime.now(timezone.utc).isoformat(),
@@ -499,6 +507,48 @@ class TestM49Phase63FailureMatrixCrossProcess:
                 "device_epoch": 1,
                 "controller_epoch": epoch,
                 "command_nonce": "nonce_iso",
+                "resolution": "PHYSICALLY_ISOLATED"
+            }
+        )
+        # 2. Wrong device_epoch
+        writer.append_entry(
+            entry_type=JournalEntryType.OPERATION_TERMINATED,
+            timestamp_utc=datetime.now(timezone.utc).isoformat(),
+            payload={
+                "operation_id": op_iso_id,
+                "physical_operation_id": op_iso_id,
+                "device_id": "dev1",
+                "device_epoch": 999,
+                "controller_epoch": epoch,
+                "command_nonce": "nonce_iso",
+                "resolution": "PHYSICALLY_ISOLATED"
+            }
+        )
+        # 3. Wrong controller_epoch
+        writer.append_entry(
+            entry_type=JournalEntryType.OPERATION_TERMINATED,
+            timestamp_utc=datetime.now(timezone.utc).isoformat(),
+            payload={
+                "operation_id": op_iso_id,
+                "physical_operation_id": op_iso_id,
+                "device_id": "dev1",
+                "device_epoch": 1,
+                "controller_epoch": 999,
+                "command_nonce": "nonce_iso",
+                "resolution": "PHYSICALLY_ISOLATED"
+            }
+        )
+        # 4. Wrong command_nonce
+        writer.append_entry(
+            entry_type=JournalEntryType.OPERATION_TERMINATED,
+            timestamp_utc=datetime.now(timezone.utc).isoformat(),
+            payload={
+                "operation_id": op_iso_id,
+                "physical_operation_id": op_iso_id,
+                "device_id": "dev1",
+                "device_epoch": 1,
+                "controller_epoch": epoch,
+                "command_nonce": "WRONG_NONCE",
                 "resolution": "PHYSICALLY_ISOLATED"
             }
         )

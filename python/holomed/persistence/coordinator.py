@@ -65,10 +65,33 @@ class DurableGlobalCoordinator:
 
         # 1. Acquire GLOBAL_TRANSACTION_LOCK
         with self._authority_store._get_global_transaction_lock():
+            frozen_participants = {}
+
             # 2. Acquire GLOBAL PHYSICAL ADMISSION LOCK (to freeze set conceptually or assert state)
-            # In our implementation, the caller may have passed the snapshot, but we re-acquire
-            # to ensure admission barrier is maintained during intent write if necessary.
             with self._authority_store._get_global_admission_lock():
+                active_reservations, _ = self._session_store._reconstruct_reservations_locked()
+
+                for session_id, operation_ids in affected_operations_map.items():
+                    if not self._session_store.has_session(session_id):
+                        from holomed.persistence.exceptions import PersistenceValidationError
+                        raise PersistenceValidationError(f"Cannot isolate non-existent session {session_id!r}")
+                    
+                    frozen_participants[session_id] = []
+                    session_active = {k: v for k, v in active_reservations.items() if v.get("_original_session_id") == session_id}
+                    
+                    for op_id in operation_ids:
+                        resolved_payload = None
+                        for k, v in session_active.items():
+                            if v.get("operation_id") == op_id or v.get("physical_operation_id") == op_id:
+                                resolved_payload = v
+                                break
+                        
+                        if not resolved_payload:
+                            from holomed.persistence.exceptions import PersistenceValidationError
+                            raise PersistenceValidationError(f"Cannot isolate non-existent or inactive physical operation {op_id!r} in session {session_id!r}")
+                        
+                        frozen_participants[session_id].append(resolved_payload)
+
                 # Write INTENT to device journal
                 self._device_store._record_device_journal(
                     device_id=device_id,
@@ -77,36 +100,13 @@ class DurableGlobalCoordinator:
                 )
 
             # 3. Admission Lock is released. Now acquire SESSION_JOURNAL_LOCK per session.
-            # (In our system, writers are locked per session automatically by the writer mechanism,
-            # or we explicitly grab the session writer).
-            for session_id, operation_ids in affected_operations_map.items():
-                if not self._session_store.has_session(session_id):
-                    continue
-
+            # We use ONLY the frozen identities to write termination records.
+            for session_id, participants in frozen_participants.items():
                 writer = self._session_store._writers.get(session_id)
                 if not writer:
                     continue
 
-                # To write canonical records, we must resolve the real admitted operation identities
-                active_reservations, _ = self._session_store._reconstruct_reservations_locked()
-                # filter to only operations from this session_id
-                session_active = {k: v for k, v in active_reservations.items() if v.get("_original_session_id") == session_id}
-
-                # 4. Acquire SESSION_JOURNAL_LOCK (writer handles its own file locking during append)
-                for op_id in operation_ids:
-                    # Resolve to REAL admitted operation
-                    resolved_payload = None
-                    for k, v in session_active.items():
-                        if v.get("operation_id") == op_id or v.get("physical_operation_id") == op_id:
-                            resolved_payload = v
-                            break
-                    
-                    if not resolved_payload:
-                        from holomed.persistence.exceptions import PersistenceValidationError
-                        raise PersistenceValidationError(f"Cannot isolate non-existent or inactive physical operation {op_id!r} in session {session_id!r}")
-                    
-                    # Write Tentative PREPARED (represented as OPERATION_TERMINATED with PHYSICALLY_ISOLATED
-                    # but tied to the tx_id, which only becomes effective upon device commit).
+                for resolved_payload in participants:
                     writer.append_entry(
                         entry_type=JournalEntryType.OPERATION_TERMINATED,
                         timestamp_utc=datetime.now(timezone.utc).isoformat(),
