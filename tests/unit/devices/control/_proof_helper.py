@@ -36,8 +36,7 @@ def run_epoch_race_worker_a(store_path: str, epoch: int):
         from holomed.persistence.authority import DeviceEpochAuthority
         (path / "devices").mkdir(parents=True, exist_ok=True)
         dev_auth = DeviceEpochAuthority(path / "devices")
-        try: dev_auth.read_current_device_epoch("dev_a")
-        except Exception: dev_auth.allocate_next_device_epoch("dev_a")
+        dev_auth.allocate_next_device_epoch("dev_a") #("dev_a")
         
         store.record_operation_admitted(
             "proof_session", "ep_a", "dev_a", 1, epoch, "op_a", "nonce_a", "exec_a", "test"
@@ -115,8 +114,7 @@ def run_capacity_worker(store_path: str, epoch: int, endpoint_id: str, op_id: st
             from holomed.persistence.authority import DeviceEpochAuthority
             (path / "devices").mkdir(parents=True, exist_ok=True)
             dev_auth = DeviceEpochAuthority(path / "devices")
-            try: dev_auth.read_current_device_epoch(f"dev_{op_id}")
-            except Exception: dev_auth.allocate_next_device_epoch(f"dev_{op_id}")
+            dev_auth.allocate_next_device_epoch(f"dev_{op_id}")
 
             store.record_operation_admitted(
                 "proof_session", endpoint_id, f"dev_{op_id}", 1, 1, op_id, f"nonce_{op_id}", f"exec_{op_id}", "test"
@@ -142,15 +140,16 @@ def run_concurrency_worker(store_path: str, epoch: int, op_id: str):
             break
         except PermissionError:
             time.sleep(0.01)
+    try:
+        from holomed.persistence.authority import DeviceEpochAuthority
+        (path / "devices").mkdir(parents=True, exist_ok=True)
+        DeviceEpochAuthority(path / "devices").allocate_next_device_epoch(f"dev_{op_id}")
+    except Exception:
+        pass
     for i in range(3):
         success = False
         for _ in range(200): # High retry count for heavy contention
             try:
-                from holomed.persistence.authority import DeviceEpochAuthority
-                (path / "devices").mkdir(parents=True, exist_ok=True)
-                dev_auth = DeviceEpochAuthority(path / "devices")
-                try: dev_auth.read_current_device_epoch(f"dev_{op_id}")
-                except Exception: dev_auth.allocate_next_device_epoch(f"dev_{op_id}")
 
                 store.record_operation_admitted(
                     "proof_session", f"ep_{op_id}_{i}", f"dev_{op_id}", 1, 1, f"op_{op_id}_{i}", f"nonce_{op_id}_{i}", f"exec_{op_id}_{i}", "test"
@@ -175,35 +174,14 @@ def run_admission_termination_race_a(store_path: str, epoch: int, op_id: str):
             break
         except PermissionError:
             time.sleep(0.01)
+    try:
+        from holomed.persistence.authority import DeviceEpochAuthority
+        (path / "devices").mkdir(parents=True, exist_ok=True)
+        DeviceEpochAuthority(path / "devices").allocate_next_device_epoch("dev_t")
+    except Exception:
+        pass
     for _ in range(10):
         try:
-            from holomed.persistence.authority import DeviceEpochAuthority
-            dev_auth = DeviceEpochAuthority(path)
-            try: dev_auth.read_current_device_epoch("dev_t")
-            except Exception: dev_auth.allocate_next_device_epoch("dev_t")
-
-            store.record_operation_terminated("proof_session", "dev_t", 1, 1, "op_t", "nonce_t", "OPERATION_COMPLETED")
-            print("TERMINATED")
-        except Exception as e:
-            print(f"FAILED {type(e).__name__}: {e}")
-        time.sleep(0.01)
-
-def run_admission_termination_race_b(store_path: str, epoch: int, op_id: str):
-    path = Path(store_path)
-    store = DurableSessionStore(path, epoch_id=epoch)
-    while True:
-        try:
-            store.restore_session_from_disk("proof_session")
-            break
-        except PermissionError:
-            time.sleep(0.01)
-    for _ in range(10):
-        try:
-            from holomed.persistence.authority import DeviceEpochAuthority
-            (path / "devices").mkdir(parents=True, exist_ok=True)
-            dev_auth = DeviceEpochAuthority(path / "devices")
-            try: dev_auth.read_current_device_epoch("dev_a")
-            except Exception: dev_auth.allocate_next_device_epoch("dev_a")
 
             store.record_operation_admitted(
                 "proof_session", "ep_a", "dev_a", 1, 1, op_id, "nonce_a", "exec_a", "test"

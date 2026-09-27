@@ -52,8 +52,7 @@ if __name__ == "__main__":
             
         from holomed.persistence.authority import DeviceEpochAuthority
         dev_auth = DeviceEpochAuthority(store_path / "devices")
-        try: dev_auth.read_current_device_epoch("dev_e")
-        except Exception: dev_auth.allocate_next_device_epoch("dev_e")
+        dev_auth.allocate_next_device_epoch("dev_e") #("dev_e")
         
         os.fsync = mocked_fsync
         
@@ -74,8 +73,7 @@ if __name__ == "__main__":
             
         from holomed.persistence.authority import DeviceEpochAuthority
         dev_auth = DeviceEpochAuthority(store_path / "devices")
-        try: dev_auth.read_current_device_epoch("dev_f")
-        except Exception: dev_auth.allocate_next_device_epoch("dev_f")
+        dev_auth.allocate_next_device_epoch("dev_f") #("dev_f")
         
         os.fsync = mocked_fsync
 

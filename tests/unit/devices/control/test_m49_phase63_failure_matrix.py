@@ -4,16 +4,13 @@ import json
 import uuid
 import pytest
 
-def _ensure_device_auth(store, device_id: str = "dev1"):
+def init_device_auth(store, device_id: str = "dev1"):
     from holomed.persistence.authority import DeviceEpochAuthority
-    try:
-        if hasattr(store, "_storage_root"):
-            root = store._storage_root / "devices"
-        else:
-            root = store / "devices"
-        DeviceEpochAuthority(root).read_current_device_epoch(device_id)
-    except Exception:
-        DeviceEpochAuthority(root).allocate_next_device_epoch(device_id)
+    if hasattr(store, "_storage_root"):
+        root = store._storage_root / "devices"
+    else:
+        root = store / "devices"
+    DeviceEpochAuthority(root).allocate_next_device_epoch(device_id)
 
 import subprocess
 import sys
@@ -140,8 +137,8 @@ def test_h_i_epoch_rollover_races(shared_store_path):
     next_epoch = authority.allocate_next_epoch()
     
     # I. Process attempts admission using E. It gets inside the method but is rejected durably.
+    init_device_auth(store, "dev_h")
     with pytest.raises(PersistenceEpochMismatchError):
-        _ensure_device_auth(store, "dev_h")
         store.record_operation_admitted(
             session_id=session, endpoint_id="ep_h", device_id="dev_h",
             device_epoch=1, controller_epoch=epoch, # Stale!
@@ -166,7 +163,6 @@ def test_t_reinitialization_race_stale_controller(shared_store_path):
     
     # Stale controller tries to use old device epoch (e.g. 1, while new is new_device_epoch)
     with pytest.raises(PersistenceEpochMismatchError):
-        _ensure_device_auth(store, "dev_t")
         store.record_operation_admitted(
             session_id=session, endpoint_id="ep_t", device_id="dev_t",
             device_epoch=new_device_epoch - 1, controller_epoch=epoch,
@@ -183,7 +179,7 @@ def test_j_duplicate_command_race(shared_store_path):
     store.restore_session_from_disk(session)
     
     # J: Admit the first
-    _ensure_device_auth(store, "dev_j")
+    init_device_auth(store, "dev_j")
     store.record_operation_admitted(
         session, "ep_j", "dev_j", 1, epoch, "op_j", "nonce_j", "exec_j", "cmd_j", request_fingerprint="fp1"
     )
@@ -191,7 +187,6 @@ def test_j_duplicate_command_race(shared_store_path):
     # Check duplicate admission (which simulates process 2 waking up after wait)
     # The existing physical_operation_id is "op_j". If Process 2 tries to admit again with DIFFERENT op_id but SAME nonce and DIFFERENT fingerprint, it fails.
     with pytest.raises(PersistenceIdempotencyError):
-        _ensure_device_auth(store, "dev_j")
         store.record_operation_admitted(
             session, "ep_j", "dev_j", 1, epoch, "op_j_different", "nonce_j", "exec_j", "cmd_j_different", request_fingerprint="fp2"
         )
@@ -202,7 +197,7 @@ def test_k_l_duplicate_after_restart_and_completion(shared_store_path):
     store.restore_session_from_disk(session)
     
     # L. Duplicate after terminal completion
-    _ensure_device_auth(store, "dev_l")
+    init_device_auth(store, "dev_l")
     store.record_operation_admitted(session, "ep_l", "dev_l", 1, epoch, "op_l", "nonce_l", "exec_l", "cmd_l")
     store.record_operation_terminated(session, "dev_l", 1, epoch, "op_l", "nonce_l", CommandState.COMPLETED)
     
@@ -223,7 +218,7 @@ def test_m_stale_telemetry(shared_store_path):
     store = DurableSessionStore(shared_store_path, epoch_id=epoch)
     store.restore_session_from_disk(session)
     
-    _ensure_device_auth(store, "dev_m")
+    init_device_auth(store, "dev_m")
     store.record_operation_admitted(session, "ep_m", "dev_m", 1, epoch, "op_m", "nonce_m", "exec_m", "cmd_m")
     store.record_operation_terminated(session, "dev_m", 1, epoch, "op_m", "nonce_m", CommandState.COMPLETED)
     
@@ -249,13 +244,13 @@ def test_r_capacity_contention(shared_store_path):
     # but global limits are).
     # Fill global capacity:
     for i in range(GLOBAL_PHYSICAL_OPERATION_CAPACITY):
-        _ensure_device_auth(store, f"dev_{i}")
+        init_device_auth(store, f"dev_{i}")
         store.record_operation_admitted(
             session, f"ep_{i}", f"dev_{i}", 1, epoch, f"op_{i}", f"nonce_{i}", f"exec_{i}", "cmd"
         )
         
     with pytest.raises(PersistenceCapacityError):
-        _ensure_device_auth(store, "dev_overflow")
+        init_device_auth(store, "dev_overflow")
         store.record_operation_admitted(
             session, "ep_overflow", "dev_overflow", 1, epoch, "op_overflow", "nonce_overflow", "exec_overflow", "cmd"
         )
@@ -305,7 +300,7 @@ def test_lease_failure_distinctions(shared_store_path):
     # but lease acquisition is done by the endpoint proxy).
     # If the process crashes *after* lease succeeds, before dispatch -> FAULTED_UNKNOWN.
     # We verify that if an operation is admitted and never terminated, it resolves to FAULTED_UNKNOWN on restart.
-    _ensure_device_auth(store, "dev_l")
+    init_device_auth(store, "dev_l")
     store.record_operation_admitted(session, "ep_l", "dev_l", 1, epoch, "op_l", "nonce_l", "exec_l", "cmd_l")
     
     # Restart

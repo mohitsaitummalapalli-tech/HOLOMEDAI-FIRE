@@ -1,15 +1,9 @@
 import pytest
 
-def _ensure_device_auth(store, device_id: str = "dev1"):
+def init_device_auth(store, device_id: str):
     from holomed.persistence.authority import DeviceEpochAuthority
-    try:
-        if hasattr(store, "_storage_root"):
-            root = store._storage_root / "devices"
-        else:
-            root = store / "devices"
-        DeviceEpochAuthority(root).read_current_device_epoch(device_id)
-    except Exception:
-        DeviceEpochAuthority(root).allocate_next_device_epoch(device_id)
+    root = store._storage_root / "devices"
+    epoch = DeviceEpochAuthority(root).allocate_next_device_epoch(device_id)
 
 import threading
 from unittest.mock import patch
@@ -91,7 +85,7 @@ def test_race_a_timeout_first(components):
     transport, gate, daemon, store = components
     exec_id = "exec-race-a"
     session_id = store.start_session("test_client", store._epoch_id).session_id
-    _ensure_device_auth(store, "dev-1")
+    init_device_auth(store, "dev-1")
     store.record_operation_admitted(
         endpoint_id="end-1", session_id=session_id, device_id="dev-1",
         device_epoch=1, controller_epoch=store._epoch_id,
@@ -144,7 +138,6 @@ def test_race_a_timeout_first(components):
         store.record_operation_terminated = hooked_term
 
         dummy_id = "exec-dummy-sync"
-        _ensure_device_auth(store, "dev-1")
         store.record_operation_admitted(
             endpoint_id="end-dummy", session_id=session_id, device_id="dev-1",
             device_epoch=1, controller_epoch=store._epoch_id,
@@ -167,7 +160,7 @@ def test_race_b_evidence_first(components):
     transport, gate, daemon, store = components
     exec_id = "exec-race-b"
     session_id = store.start_session("test_client", store._epoch_id).session_id
-    _ensure_device_auth(store, "dev-1")
+    init_device_auth(store, "dev-1")
     store.record_operation_admitted(
         endpoint_id="end-1", session_id=session_id, device_id="dev-1",
         device_epoch=1, controller_epoch=store._epoch_id,
@@ -221,7 +214,6 @@ def test_race_b_evidence_first(components):
         
         # We also need a dummy event to sync since the daemon might process the first one before dummy is attached
         dummy_id = "exec-dummy-sync"
-        _ensure_device_auth(store, "dev-1")
         store.record_operation_admitted(
             endpoint_id="end-dummy", session_id=session_id, device_id="dev-1",
             device_epoch=1, controller_epoch=store._epoch_id,
@@ -247,7 +239,7 @@ def test_restart_durable_outcome_evidence_end_to_end(components):
     transport, gate, daemon, store = components
     exec_id = "exec-restart"
     session_id = store.start_session("test_client", store._epoch_id).session_id
-    _ensure_device_auth(store, "dev-1")
+    init_device_auth(store, "dev-1")
     store.record_operation_admitted(
         endpoint_id="end-1", session_id=session_id, device_id="dev-1",
         device_epoch=1, controller_epoch=store._epoch_id,
@@ -290,7 +282,6 @@ def test_restart_durable_outcome_evidence_end_to_end(components):
     session_id2 = store2.start_session("dummy_client", store2._epoch_id).session_id
     
     dummy_id = "exec-dummy-sync"
-    _ensure_device_auth(store2, "dev-1")
     store2.record_operation_admitted(
         endpoint_id="end-dummy", session_id=session_id2, device_id="dev-1",
         device_epoch=1, controller_epoch=store2._epoch_id,
@@ -314,7 +305,7 @@ def test_late_timeout_after_successful_terminal_evidence(components):
     transport, gate, daemon, store = components
     exec_id = "exec-late-timeout"
     session_id = store.start_session("test_client", store._epoch_id).session_id
-    _ensure_device_auth(store, "dev-1")
+    init_device_auth(store, "dev-1")
     store.record_operation_admitted(
         endpoint_id="end-1", session_id=session_id, device_id="dev-1",
         device_epoch=1, controller_epoch=store._epoch_id,
@@ -351,7 +342,7 @@ def test_late_terminal_telemetry_after_timeout(components):
     transport, gate, daemon, store = components
     exec_id = "exec-late-telem"
     session_id = store.start_session("test_client", store._epoch_id).session_id
-    _ensure_device_auth(store, "dev-1")
+    init_device_auth(store, "dev-1")
     store.record_operation_admitted(
         endpoint_id="end-1", session_id=session_id, device_id="dev-1",
         device_epoch=1, controller_epoch=store._epoch_id,
@@ -378,7 +369,6 @@ def test_late_terminal_telemetry_after_timeout(components):
 
     # Sync using dummy
     dummy_id = "exec-dummy-sync"
-    _ensure_device_auth(store, "dev-1")
     store.record_operation_admitted(
         endpoint_id="end-dummy", session_id=session_id, device_id="dev-1",
         device_epoch=1, controller_epoch=store._epoch_id,
@@ -399,7 +389,7 @@ def test_duplicate_terminal_evidence_and_repeated_timeout(components):
     transport, gate, daemon, store = components
     exec_id = "exec-dup"
     session_id = store.start_session("test_client", store._epoch_id).session_id
-    _ensure_device_auth(store, "dev-1")
+    init_device_auth(store, "dev-1")
     store.record_operation_admitted(
         endpoint_id="end-1", session_id=session_id, device_id="dev-1",
         device_epoch=1, controller_epoch=store._epoch_id,
@@ -429,7 +419,6 @@ def test_duplicate_terminal_evidence_and_repeated_timeout(components):
 
     # Sync
     dummy_id = "exec-dummy-sync"
-    _ensure_device_auth(store, "dev-1")
     store.record_operation_admitted(
         endpoint_id="end-dummy", session_id=session_id, device_id="dev-1",
         device_epoch=1, controller_epoch=store._epoch_id,
@@ -450,7 +439,7 @@ def test_future_epoch_evidence_through_real_path(components):
     transport, gate, daemon, store = components
     exec_id = "exec-future"
     session_id = store.start_session("test_client", store._epoch_id).session_id
-    _ensure_device_auth(store, "dev-1")
+    init_device_auth(store, "dev-1")
     store.record_operation_admitted(
         endpoint_id="end-1", session_id=session_id, device_id="dev-1",
         device_epoch=1, controller_epoch=store._epoch_id,
@@ -474,7 +463,6 @@ def test_future_epoch_evidence_through_real_path(components):
 
     # Sync using dummy
     dummy_id = "exec-dummy-sync"
-    _ensure_device_auth(store, "dev-1")
     store.record_operation_admitted(
         endpoint_id="end-dummy", session_id=session_id, device_id="dev-1",
         device_epoch=1, controller_epoch=store._epoch_id,
@@ -606,7 +594,7 @@ def test_production_timeout_durable_outcome(tmp_path):
     ctx = RuntimeContext(app_cfg, store._epoch_id)
     manager.initialize(ctx)
     manager.start()
-    _ensure_device_auth(store, "dev-1")
+    init_device_auth(store, "dev-1")
     
     manager.register_command("cmd1", lambda d, p: {}, required_capability_id="cap1")
     
@@ -668,4 +656,5 @@ def test_production_timeout_durable_outcome(tmp_path):
     assert dev.endpoints[0].active_lease.execution_id == exec_id
     
     manager.stop()
+
 
