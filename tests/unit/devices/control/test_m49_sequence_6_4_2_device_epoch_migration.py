@@ -253,87 +253,109 @@ def test_m5_c_crash_after_marker_durable_commit(tmp_path: Path):
 
 
 # ---------------------------------------------------------------------------
-# M5-D: Actual concurrent migration lock serialization
+# M5-D: Stale-snapshot concurrent migration race proof
 # ---------------------------------------------------------------------------
 
-def _worker_m5_d_holder(storage_root_str, dev_id, lock_held_event, release_event):
-    """Process A: Acquire the real DeviceEpochAuthority OS lock and hold it."""
-    storage_root = Path(storage_root_str)
-    auth = DeviceEpochAuthority(storage_root)
-    lock_path = auth._get_lock_path(dev_id)
-    if not lock_path.exists():
-        lock_path.parent.mkdir(parents=True, exist_ok=True)
-        lock_path.touch()
+def _worker_m5_d_proc_a(storage_root_str, dev_id, authority_durable_event, resume_event):
+    """Process A: Run real restore_device_from_disk() with a test hook.
 
-    with open(lock_path, "a") as f:
-        auth._acquire_lock(f.fileno())
-        # Signal: lock is held
-        lock_held_event.set()
-        # Wait for the test to signal release, bounded
-        release_event.wait(timeout=10)
-        # Exit abruptly — lock release via process death
-        os._exit(0)
-
-
-def _worker_m5_d_contender(storage_root_str, dev_id, contender_started_event, contender_done_event):
-    """Process B: Attempt real DurableDeviceStore.restore_device_from_disk().
-    
-    This will block on the OS lock until Process A dies.
+    Pauses after authority fsync (authority written, marker NOT yet written).
+    Signals AUTHORITY_DURABLE, then waits for RESUME before continuing to
+    write the marker and complete migration.
     """
-    contender_started_event.set()
     storage_root = Path(storage_root_str)
     store = DurableDeviceStore(storage_root, epoch_id=42)
+
+    def _hook(phase):
+        if phase == "after_authority_fsync":
+            # Authority is durable, marker is NOT yet written.
+            # Signal the test that this boundary has been reached.
+            authority_durable_event.set()
+            # Wait for the test to tell us to resume (bounded).
+            resume_event.wait(timeout=15)
+
+    store._migration_test_hook = _hook
     store.restore_device_from_disk(dev_id)
-    contender_done_event.set()
+    os._exit(0)
+
+
+def _worker_m5_d_proc_b(storage_root_str, dev_id, b_started_event, b_done_event):
+    """Process B: Run a completely fresh restore_device_from_disk().
+
+    This process has its own fresh DurableDeviceStore instance.
+    It will read the initial journal (no marker), then attempt to acquire
+    the migration lock. It must block until Process A finishes.
+    Once it acquires the lock, it must re-read the journal under the lock,
+    observe the completed migration, and succeed.
+    """
+    b_started_event.set()
+    storage_root = Path(storage_root_str)
+    store = DurableDeviceStore(storage_root, epoch_id=99)
+    store.restore_device_from_disk(dev_id)
+    b_done_event.set()
     os._exit(0)
 
 
 def test_m5_d_concurrent_migration_lock_serialization(tmp_path: Path):
-    """M5-D: Process B cannot complete migration while Process A holds the OS lock.
-    
+    """M5-D: Proves the stale-snapshot concurrent migration race is eliminated.
+
+    This test would FAIL against the old implementation where the journal
+    was read before the lock was acquired. Process B would see no marker
+    in its stale snapshot, then find authority exists (written by A), and
+    incorrectly enter CASE B (fail-closed).
+
+    With the fix, Process B re-reads the journal under the lock and sees
+    the completed migration.
+
     Sequence:
-    1. Process A acquires real DeviceEpochAuthority OS lock, signals LOCK_HELD
-    2. Process B starts real restore_device_from_disk, signals STARTED
-    3. Test verifies B cannot complete while A holds lock (bounded wait)
-    4. Test signals A to release (via os._exit)
-    5. B acquires lock, re-evaluates durable state, completes correctly
+    1. Process A starts real restore, acquires lock, writes authority, pauses
+       at after_authority_fsync hook, signals AUTHORITY_DURABLE
+    2. Process B starts real restore (fresh store, fresh process)
+       signals B_STARTED, then blocks on the migration lock
+    3. Test verifies B cannot complete (bounded assertion)
+    4. Test signals A to RESUME
+    5. A writes marker, completes migration, exits (releases lock)
+    6. B acquires lock, re-reads journal under lock, sees completed migration
+    7. B succeeds (does NOT raise CASE B error)
     """
     device_id = "12345678-1234-5678-1234-567812345678"
     _create_legacy_journal(tmp_path, device_id, max_epoch=5)
 
-    lock_held_event = multiprocessing.Event()
-    release_event = multiprocessing.Event()
-    contender_started_event = multiprocessing.Event()
-    contender_done_event = multiprocessing.Event()
+    authority_durable_event = multiprocessing.Event()
+    resume_event = multiprocessing.Event()
+    b_started_event = multiprocessing.Event()
+    b_done_event = multiprocessing.Event()
 
-    # Start Process A — acquires lock and holds it
+    # Start Process A — runs real migration, pauses after authority fsync
     proc_a = multiprocessing.Process(
-        target=_worker_m5_d_holder,
-        args=(str(tmp_path), device_id, lock_held_event, release_event),
+        target=_worker_m5_d_proc_a,
+        args=(str(tmp_path), device_id, authority_durable_event, resume_event),
     )
     proc_a.start()
-    assert lock_held_event.wait(timeout=5), "Process A didn't acquire lock"
+    assert authority_durable_event.wait(timeout=10), \
+        "Process A didn't reach after_authority_fsync hook"
 
-    # Start Process B — will block on the lock
+    # At this point: authority written + fsynced, marker NOT yet written, lock held by A.
+
+    # Start Process B — fresh store, fresh process
     proc_b = multiprocessing.Process(
-        target=_worker_m5_d_contender,
-        args=(str(tmp_path), device_id, contender_started_event, contender_done_event),
+        target=_worker_m5_d_proc_b,
+        args=(str(tmp_path), device_id, b_started_event, b_done_event),
     )
     proc_b.start()
-    assert contender_started_event.wait(timeout=5), "Process B didn't start"
+    assert b_started_event.wait(timeout=5), "Process B didn't start"
 
     # Verify: B cannot complete while A holds the lock
-    # contender_done_event must NOT be set yet (bounded assertion, not sleep-for-correctness)
-    assert not contender_done_event.wait(timeout=2), \
-        "Process B must NOT complete migration while Process A owns the lock"
+    assert not b_done_event.wait(timeout=2), \
+        "Process B must NOT complete migration while Process A holds the lock"
 
-    # Signal Process A to exit (os._exit releases the OS lock)
-    release_event.set()
-    proc_a.join(timeout=5)
+    # Signal Process A to resume — it will write the marker, verify, release lock, exit
+    resume_event.set()
+    proc_a.join(timeout=10)
 
-    # Now Process B should acquire the lock and complete
-    assert contender_done_event.wait(timeout=10), \
-        "Process B must complete migration after Process A releases the lock"
+    # Process B should now acquire the lock, re-read journal, see migration, succeed
+    assert b_done_event.wait(timeout=10), \
+        "Process B must complete successfully after Process A finishes migration"
     proc_b.join(timeout=5)
 
     # Verify final durable state
@@ -343,6 +365,17 @@ def test_m5_d_concurrent_migration_lock_serialization(tmp_path: Path):
     auth = DeviceEpochAuthority(tmp_path)
     assert auth.read_current_device_epoch(device_id) == 5
 
+    # Verify marker epoch matches authority
+    journal_path = tmp_path / f"{device_id}.jsonl"
+    entries, _ = DeviceJournalReader.read_and_recover_journal(journal_path)
+    markers = [
+        e for e in entries
+        if e.entry_type == DeviceJournalEntryType.DEVICE_EPOCH_DOMAIN_INITIALIZED
+    ]
+    assert len(markers) == 1
+    assert markers[0].payload["migrated_epoch"] == 5
+
+    # Fresh restore succeeds
     store = DurableDeviceStore(tmp_path, epoch_id=99)
     device = store.restore_device_from_disk(device_id)
     assert device.epoch_id == 5

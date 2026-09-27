@@ -162,9 +162,10 @@ class DurableDeviceStore:
             return self._devices[device_id]
 
         journal_path = self._storage_root / f"{device_id}.jsonl"
-        entries, _ = DeviceJournalReader.read_and_recover_journal(journal_path)
 
-        if not entries:
+        # Initial existence check only — this snapshot is NOT used for migration decisions.
+        initial_entries, _ = DeviceJournalReader.read_and_recover_journal(journal_path)
+        if not initial_entries:
             raise PersistenceValidationError(f"No journal records found for device {device_id!r}")
 
         from holomed.persistence.authority import DeviceEpochAuthority
@@ -173,23 +174,35 @@ class DurableDeviceStore:
         from datetime import datetime, timezone
 
         device_authority = DeviceEpochAuthority(self._storage_root)
-        
-        # We need to determine if we have a marker
-        marker_entries = [e for e in entries if e.entry_type == DeviceJournalEntryType.DEVICE_EPOCH_DOMAIN_INITIALIZED]
-        marker_entry = marker_entries[0] if marker_entries else None
-        
-        if len(marker_entries) > 1:
-            raise PersistenceLifecycleError(f"Ambiguous legacy history: {device_id} has multiple DEVICE_EPOCH_DOMAIN_INITIALIZED markers")
 
         lock_path = device_authority._get_lock_path(device_id)
         if not lock_path.exists():
             lock_path.touch()
 
-        # The migration critical section must hold the lock
+        # The entire migration classification + action must occur under the lock.
         with open(lock_path, "a") as lock_file:
             fd = lock_file.fileno()
             device_authority._acquire_lock(fd)
             try:
+                # --- Fresh durable journal read under lock ---
+                entries, _ = DeviceJournalReader.read_and_recover_journal(journal_path)
+                if not entries:
+                    raise PersistenceValidationError(
+                        f"No journal records found for device {device_id!r} (under lock)"
+                    )
+
+                marker_entries = [
+                    e for e in entries
+                    if e.entry_type == DeviceJournalEntryType.DEVICE_EPOCH_DOMAIN_INITIALIZED
+                ]
+                marker_entry = marker_entries[0] if marker_entries else None
+
+                if len(marker_entries) > 1:
+                    raise PersistenceLifecycleError(
+                        f"Ambiguous legacy history: {device_id} has multiple DEVICE_EPOCH_DOMAIN_INITIALIZED markers"
+                    )
+
+                # --- Fresh durable authority read under lock ---
                 try:
                     device_epoch = device_authority.read_current_device_epoch(device_id)
                     authority_missing = False
@@ -199,12 +212,13 @@ class DurableDeviceStore:
                 except PersistenceResourceIntegrityError as e:
                     raise PersistenceLifecycleError(f"Corrupt device epoch authority for {device_id}: {e}") from e
 
+                # --- Migration state classification (all under lock) ---
                 if authority_missing and not marker_entry:
                     # CASE A: Pure legacy state.
                     # Calculate legacy epoch, persist authority, append marker, all while locked.
                     legacy_epochs = [e.epoch_id for e in entries]
                     device_epoch = max(legacy_epochs) if legacy_epochs else 0
-                    
+
                     # 1. Write authority
                     epoch_path = device_authority._get_epoch_path(device_id)
                     with open(epoch_path, "w", encoding="utf-8") as f:
@@ -269,7 +283,7 @@ class DurableDeviceStore:
                     raise PersistenceLifecycleError(
                         f"Ambiguous legacy history: {device_id} has DEVICE_EPOCH_DOMAIN_INITIALIZED marker but no device_epoch.json"
                     )
-                    
+
                 else:
                     # CASE D, E, F: Both exist. Validate agreement.
                     assert marker_entry is not None  # guaranteed by control flow
