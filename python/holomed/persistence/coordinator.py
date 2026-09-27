@@ -80,17 +80,18 @@ class DurableGlobalCoordinator:
                     session_active = {k: v for k, v in active_reservations.items() if v.get("_original_session_id") == session_id}
                     
                     for op_id in operation_ids:
-                        resolved_payload = None
+                        matches = []
                         for k, v in session_active.items():
                             if v.get("operation_id") == op_id or v.get("physical_operation_id") == op_id:
-                                resolved_payload = v
-                                break
+                                matches.append(v)
                         
-                        if not resolved_payload:
+                        if len(matches) == 0:
                             from holomed.persistence.exceptions import PersistenceValidationError
                             raise PersistenceValidationError(f"Cannot isolate non-existent or inactive physical operation {op_id!r} in session {session_id!r}")
+                        if len(matches) > 1:
+                            raise PersistenceResourceIntegrityError(f"Ambiguous identifier {op_id!r} matched multiple active operations in session {session_id!r}")
                         
-                        frozen_participants[session_id].append(resolved_payload)
+                        frozen_participants[session_id].append(matches[0])
 
                 # Write INTENT to device journal
                 self._device_store._record_device_journal(
@@ -104,7 +105,7 @@ class DurableGlobalCoordinator:
             for session_id, participants in frozen_participants.items():
                 writer = self._session_store._writers.get(session_id)
                 if not writer:
-                    continue
+                    raise PersistenceLifecycleError(f"Writer unavailable for frozen participant session {session_id!r}")
 
                 for resolved_payload in participants:
                     writer.append_entry(

@@ -3,6 +3,7 @@ import sys
 import time
 import uuid
 import multiprocessing
+import pytest
 from pathlib import Path
 from unittest.mock import patch
 
@@ -583,3 +584,80 @@ class TestM49Phase63FailureMatrixCrossProcess:
         with pytest.raises(PersistenceValidationError, match="Cannot isolate non-existent"):
             coordinator.isolate_device("dev1", {session: ["WRONG_OP_ID"]})
 
+    def test_v_ambiguous_identifier_resolution(self, tmp_path: Path):
+        storage = lock_storage(tmp_path)
+        epoch, session = _setup_store(storage)
+        from holomed.persistence.sessions import DurableSessionStore
+        from holomed.persistence.coordinator import DurableGlobalCoordinator
+        from holomed.persistence.authority import ControllerAuthorityStore
+        from holomed.persistence.devices import DurableDeviceStore
+        from holomed.persistence.exceptions import PersistenceResourceIntegrityError
+        
+        store = DurableSessionStore(storage, epoch_id=epoch)
+        store.restore_session_from_disk(session)
+        
+        # Pre-admit two real ops with identical physical operation IDs but different nonces
+        # This simulates an invalid / corrupt journal state where an identifier resolves ambiguously
+        op_iso_id_1, _, _ = store.record_operation_admitted(
+            session, "ep1", "dev1", 1, epoch, "op_iso", "nonce_1", "exec_1", "cmd_1"
+        )
+        op_iso_id_2, _, _ = store.record_operation_admitted(
+            session, "ep2", "dev1", 1, epoch, "op_iso", "nonce_2", "exec_2", "cmd_2"
+        )
+        
+        assert store.get_active_physical_operations() == 2
+        
+        authority = ControllerAuthorityStore(storage)
+        devices = DurableDeviceStore(storage / "devices", epoch_id=epoch)
+        devices.restore_device_from_disk("dev1")
+        coordinator = DurableGlobalCoordinator(authority, devices, store)
+        
+        # Isolation must fail closed
+        with pytest.raises(PersistenceResourceIntegrityError, match="Ambiguous identifier"):
+            coordinator.isolate_device("dev1", {session: ["op_iso"]})
+            
+        # Verify no capacity released
+        assert store.get_active_physical_operations() == 2
+        
+        # Verify isolation transaction not committed
+        state = devices._devices["dev1"]
+        assert len(state.isolation_transactions) == 0
+
+    def test_w_missing_session_writer_fails_closed(self, tmp_path: Path):
+        storage = lock_storage(tmp_path)
+        epoch, session = _setup_store(storage)
+        from holomed.persistence.sessions import DurableSessionStore
+        from holomed.persistence.coordinator import DurableGlobalCoordinator
+        from holomed.persistence.authority import ControllerAuthorityStore
+        from holomed.persistence.devices import DurableDeviceStore
+        from holomed.persistence.exceptions import PersistenceLifecycleError
+        
+        store = DurableSessionStore(storage, epoch_id=epoch)
+        store.restore_session_from_disk(session)
+        
+        op_iso_id, _, _ = store.record_operation_admitted(
+            session, "ep1", "dev1", 1, epoch, "op_iso", "nonce_iso", "exec_iso", "cmd_iso"
+        )
+        assert store.get_active_physical_operations() == 1
+        
+        authority = ControllerAuthorityStore(storage)
+        devices = DurableDeviceStore(storage / "devices", epoch_id=epoch)
+        devices.restore_device_from_disk("dev1")
+        coordinator = DurableGlobalCoordinator(authority, devices, store)
+        
+        # Remove the writer to simulate failure
+        del store._writers[session]
+        
+        with pytest.raises(PersistenceLifecycleError, match="Writer unavailable"):
+            coordinator.isolate_device("dev1", {session: [op_iso_id]})
+            
+        # Verify no capacity released
+        assert store.get_active_physical_operations() == 1
+        
+        # Verify isolation transaction not COMMITTED (it may have INTENTED but not prepared/committed)
+        state = devices._devices["dev1"]
+        # The transaction will fail before writing PREPARED or COMMITTED.
+        # Check that no transaction is COMMITTED.
+        from holomed.persistence.models import TransactionState
+        for tx_id, tx_state in state.isolation_transactions.items():
+            assert tx_state != TransactionState.COMMITTED
