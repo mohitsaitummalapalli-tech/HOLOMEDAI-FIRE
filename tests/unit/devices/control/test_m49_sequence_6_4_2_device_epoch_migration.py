@@ -600,3 +600,47 @@ def test_migration_lock_reentrancy_eliminated(tmp_path: Path, monkeypatch):
 
     # Exactly 1 lock acquisition must occur for the device epoch lock.
     assert acquire_count == 1, f"Expected exactly 1 lock acquisition, got {acquire_count}"
+
+# ---------------------------------------------------------------------------
+# Pre-Lock Journal Recovery Remediation
+# ---------------------------------------------------------------------------
+
+def test_journal_recovery_serialization_under_lock(tmp_path: Path, monkeypatch):
+    """Proves that journal crash-tail recovery occurs only under the migration lock.
+
+    The pre-lock phase must only perform non-mutating existence validation.
+    DeviceJournalReader.read_and_recover_journal() must NOT be called before
+    the OS lock is held.
+    """
+    device_id = "12345678-1234-5678-1234-567812345678"
+    _create_legacy_journal(tmp_path, device_id, max_epoch=5)
+
+    store = DurableDeviceStore(tmp_path, epoch_id=42)
+
+    events = []
+
+    original_acquire = DeviceEpochAuthority._acquire_lock
+    original_read_recover = DeviceJournalReader.read_and_recover_journal
+
+    def _mock_acquire(self, fd):
+        events.append("lock_acquired")
+        return original_acquire(self, fd)
+
+    def _mock_read_recover(*args, **kwargs):
+        events.append("journal_recovery_invoked")
+        return original_read_recover(*args, **kwargs)
+
+    monkeypatch.setattr(DeviceEpochAuthority, "_acquire_lock", _mock_acquire)
+    monkeypatch.setattr(DeviceJournalReader, "read_and_recover_journal", _mock_read_recover)
+
+    store.restore_device_from_disk(device_id)
+
+    assert "lock_acquired" in events, "The lock must be acquired during migration"
+    assert "journal_recovery_invoked" in events, "Journal recovery must be invoked"
+
+    lock_index = events.index("lock_acquired")
+    recovery_index = events.index("journal_recovery_invoked")
+
+    assert lock_index < recovery_index, (
+        "Journal recovery was invoked BEFORE the migration lock was acquired!"
+    )

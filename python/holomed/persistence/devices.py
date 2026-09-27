@@ -163,9 +163,8 @@ class DurableDeviceStore:
 
         journal_path = self._storage_root / f"{device_id}.jsonl"
 
-        # Initial existence check only — this snapshot is NOT used for migration decisions.
-        initial_entries, _ = DeviceJournalReader.read_and_recover_journal(journal_path)
-        if not initial_entries:
+        # Non-mutating journal existence check
+        if not journal_path.exists() or journal_path.stat().st_size == 0:
             raise PersistenceValidationError(f"No journal records found for device {device_id!r}")
 
         from holomed.persistence.authority import DeviceEpochAuthority
