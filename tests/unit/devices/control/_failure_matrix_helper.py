@@ -50,7 +50,13 @@ if __name__ == "__main__":
             time.sleep(0.5)
             crash()
             
+        from holomed.persistence.authority import DeviceEpochAuthority
+        dev_auth = DeviceEpochAuthority(store_path / "devices")
+        try: dev_auth.read_current_device_epoch("dev_e")
+        except Exception: dev_auth.allocate_next_device_epoch("dev_e")
+        
         os.fsync = mocked_fsync
+        
         store.record_operation_admitted(session_id, "ep_e", "dev_e", 1, 1, "op_e", "nonce_e", "exec_e", "test_cmd")
         
     elif action == "crash_after_fsync":
@@ -66,7 +72,13 @@ if __name__ == "__main__":
             sys.stdout.flush()
             crash()
             
+        from holomed.persistence.authority import DeviceEpochAuthority
+        dev_auth = DeviceEpochAuthority(store_path / "devices")
+        try: dev_auth.read_current_device_epoch("dev_f")
+        except Exception: dev_auth.allocate_next_device_epoch("dev_f")
+        
         os.fsync = mocked_fsync
+
         store.record_operation_admitted(session_id, "ep_f", "dev_f", 1, 1, "op_f", "nonce_f", "exec_f", "test_cmd")
         
     elif action == "wait_and_crash":

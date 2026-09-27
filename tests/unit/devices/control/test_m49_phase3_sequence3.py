@@ -468,6 +468,15 @@ def test_reconciliation_vs_recovery(components):
 
     assert session_store.get_active_physical_operations() == 0
 
+    from holomed.persistence.authority import DeviceEpochAuthority
+    dev_auth = DeviceEpochAuthority(session_store._storage_root / "devices")
+    dev_auth.allocate_next_device_epoch("dev-1")
+    
+    dev_auth_flat = DeviceEpochAuthority(session_store._storage_root)
+    try: dev_auth_flat.read_current_device_epoch("dev-1")
+    except Exception: pass
+    dev_auth_flat.allocate_next_device_epoch("dev-1")
+
     # 3. Admit new operation (recovery scenario)
     session_store.record_operation_admitted(
         endpoint_id="end-1", session_id=session_id, device_id="dev-1",

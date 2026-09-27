@@ -31,7 +31,13 @@ def _setup_store(storage_path: Path) -> tuple[int, str]:
     
     from holomed.persistence.authority import DeviceEpochAuthority
     dev_auth = DeviceEpochAuthority(device_store_path)
-    dev_auth.allocate_next_device_epoch("dev1")  # Initializes to 1
+    dev_auth.allocate_next_device_epoch("dev1")
+    
+    dev_auth_fallback = DeviceEpochAuthority(storage_path)
+    try:
+        dev_auth_fallback.read_current_device_epoch("dev1")
+    except Exception:
+        dev_auth_fallback.allocate_next_device_epoch("dev1")  # Initializes to 1
     
     device_store = DurableDeviceStore(device_store_path, epoch_id=epoch)
     device_store.initialize_device('dev1', epoch)
@@ -196,7 +202,8 @@ def _worker_t_reinit_e2(storage_str: str, q_res: multiprocessing.Queue, q_sync_e
         if not msg:
             return
 
-        new_epoch = coordinator.commit_device_ready("dev1", {})
+        new_device_epoch = coordinator.allocate_device_restart_epoch("dev1")
+        new_epoch = coordinator.commit_device_ready("dev1", {}, new_device_epoch)
         q_res.put(("REINIT_DONE", new_epoch))
 
         # Signal E1 to proceed

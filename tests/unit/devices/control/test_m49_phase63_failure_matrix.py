@@ -145,7 +145,8 @@ def test_t_reinitialization_race_stale_controller(shared_store_path):
     device_store.initialize_device("dev_t", epoch)
     
     coordinator = DurableGlobalCoordinator(authority, device_store, DurableSessionStore(shared_store_path, epoch_id=epoch))
-    new_device_epoch = coordinator.commit_device_ready("dev_t", {"sig": "valid"})
+    new_device_epoch = coordinator.allocate_device_restart_epoch("dev_t")
+    coordinator.commit_device_ready("dev_t", {"sig": "valid"}, new_device_epoch)
     
     store = DurableSessionStore(shared_store_path, epoch_id=epoch)
     store.restore_session_from_disk(session)

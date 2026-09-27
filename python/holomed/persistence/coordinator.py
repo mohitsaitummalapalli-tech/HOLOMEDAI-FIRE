@@ -163,7 +163,7 @@ class DurableGlobalCoordinator:
                 return True
         return False
 
-    def commit_device_ready(self, device_id: str, hardware_evidence: dict) -> int:
+    def commit_device_ready(self, device_id: str, hardware_evidence: dict, new_epoch_id: int) -> int:
         """Allocate a new epoch and commit DEVICE_READY to the device journal.
 
         Implements lock hierarchy: 1. GLOBAL_TRANSACTION_LOCK -> 2. EPOCH AUTHORITY LOCK.
@@ -179,20 +179,19 @@ class DurableGlobalCoordinator:
         device_authority = DeviceEpochAuthority(self._device_store._storage_root)
 
         with self._authority_store._get_global_transaction_lock():
-            # Atomically allocate epoch under EPOCH AUTHORITY LOCK (via DeviceEpochAuthority)
-            new_epoch = device_authority.allocate_next_device_epoch(device_id)
-
+            # The epoch must have been allocated via allocate_device_restart_epoch already.
+            
             # Update writer epoch so it doesn't fail validation
-            self._device_store.advance_device_epoch(device_id, new_epoch)
+            self._device_store.advance_device_epoch(device_id, new_epoch_id)
 
             # Commit DEVICE_READY(E2) to device journal
             self._device_store._record_device_journal(
                 device_id=device_id,
                 entry_type=DeviceJournalEntryType.DEVICE_READY_COMMITTED,
-                payload={"new_epoch_id": new_epoch, "hardware_evidence": hardware_evidence}
+                payload={"new_epoch_id": new_epoch_id, "hardware_evidence": hardware_evidence}
             )
 
-        return new_epoch
+        return new_epoch_id
 
     def allocate_device_restart_epoch(self, device_id: str) -> int:
         """Allocate a new authoritative device epoch for a restarting device.

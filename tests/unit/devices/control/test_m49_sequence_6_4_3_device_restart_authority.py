@@ -87,11 +87,12 @@ def test_04_device_ready_commit_uses_independent_device_epoch(coordinator, store
     
     initial_controller_epoch = auth_store.read_current_epoch()
     
-    new_device_epoch = coordinator.commit_device_ready("dev1", {"hw": "proof"})
+    new_device_epoch = coordinator.allocate_device_restart_epoch("dev1")
+    epoch = coordinator.commit_device_ready("dev1", {"hw": "proof"}, new_device_epoch)
     
     # The controller epoch should not have changed
     assert auth_store.read_current_epoch() == initial_controller_epoch
-    assert new_device_epoch == 1
+    assert epoch == 1
     
     # Check journal has the correct epoch
     rec = dev_store.get_device("dev1")
@@ -123,7 +124,7 @@ def test_06_device_ready_commit_serialization(coordinator):
     coordinator._authority_store._get_global_transaction_lock.return_value.__enter__ = Mock()
     coordinator._authority_store._get_global_transaction_lock.return_value.__exit__ = Mock()
     
-    coordinator.commit_device_ready("dev1", {})
+    coordinator.commit_device_ready("dev1", {}, 1)
     
     assert coordinator._authority_store._get_global_transaction_lock.called
 
@@ -174,7 +175,8 @@ def test_11_commit_device_ready_records_journal_entry(coordinator, stores):
     _, dev_store = stores
     
     device_id = "dev1"
-    new_epoch = coordinator.commit_device_ready(device_id, {"hw": "proof"})
+    new_epoch = coordinator.allocate_device_restart_epoch(device_id)
+    epoch = coordinator.commit_device_ready(device_id, {"hw": "proof"}, new_epoch)
     
     rec = dev_store.get_device(device_id)
     # If a new entry was appended, last_sequence should be > 0.

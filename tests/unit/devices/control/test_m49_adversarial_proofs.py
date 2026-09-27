@@ -24,6 +24,7 @@ def shared_store_path(tmp_path_factory):
 def setup_test_store(path: Path) -> tuple[ControllerAuthorityStore, int, str]:
     authority = ControllerAuthorityStore(path)
     epoch = authority.allocate_next_epoch()
+    (path / "devices").mkdir(parents=True, exist_ok=True)
     store = DurableSessionStore(path, epoch_id=epoch)
     store.start_session("proof_session", epoch)
     return authority, epoch, "proof_session"
@@ -470,7 +471,7 @@ def test_evidence_identity_generation_mismatch_rejection(shared_store_path):
     gate.claim_execution_ownership("exec_e", 1)
 
     # 4. Device epoch mismatch -> Rejected by Store
-    with pytest.raises(PersistenceTerminationConflictError):
+    with pytest.raises(PersistenceEpochMismatchError):
         _run_pipeline(_make_event(), manager_command_override=_make_cmd(d_epoch=2))
 
     gate._records.pop("exec_e", None)

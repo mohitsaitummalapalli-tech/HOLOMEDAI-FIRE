@@ -207,6 +207,14 @@ def _worker_session_journal_write(
 
     store = DurableSessionStore(storage_root, epoch_id=epoch)
     try:
+        device_id = f"dev-{operation_label}"
+        from holomed.persistence.authority import DeviceEpochAuthority
+        dev_auth = DeviceEpochAuthority(storage_root / "devices")
+        try:
+            dev_auth.read_current_device_epoch(device_id)
+        except Exception:
+            dev_auth.allocate_next_device_epoch(device_id)
+
         store.start_session(session_id, epoch)
         store.record_operation_admitted(
             session_id=session_id,
@@ -245,6 +253,17 @@ def _worker_same_session_contention(
         epoch = authority.allocate_next_epoch()
 
     store = DurableSessionStore(storage_root, epoch_id=epoch)
+
+    try:
+        device_id = f"dev-{operation_label}"
+        from holomed.persistence.authority import DeviceEpochAuthority
+        dev_auth = DeviceEpochAuthority(storage_root / "devices")
+        try:
+            dev_auth.read_current_device_epoch(device_id)
+        except Exception:
+            dev_auth.allocate_next_device_epoch(device_id)
+    except Exception:
+        pass
 
     # Restore the existing session from disk (it was started by the parent)
     try:

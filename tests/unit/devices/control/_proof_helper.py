@@ -33,6 +33,12 @@ def run_epoch_race_worker_a(store_path: str, epoch: int):
     ControllerAuthorityStore._acquire_lock = slow_acquire
     
     try:
+        from holomed.persistence.authority import DeviceEpochAuthority
+        (path / "devices").mkdir(parents=True, exist_ok=True)
+        dev_auth = DeviceEpochAuthority(path / "devices")
+        try: dev_auth.read_current_device_epoch("dev_a")
+        except Exception: dev_auth.allocate_next_device_epoch("dev_a")
+        
         store.record_operation_admitted(
             "proof_session", "ep_a", "dev_a", 1, epoch, "op_a", "nonce_a", "exec_a", "test"
         )
@@ -106,6 +112,12 @@ def run_capacity_worker(store_path: str, epoch: int, endpoint_id: str, op_id: st
     
     while True:
         try:
+            from holomed.persistence.authority import DeviceEpochAuthority
+            (path / "devices").mkdir(parents=True, exist_ok=True)
+            dev_auth = DeviceEpochAuthority(path / "devices")
+            try: dev_auth.read_current_device_epoch(f"dev_{op_id}")
+            except Exception: dev_auth.allocate_next_device_epoch(f"dev_{op_id}")
+
             store.record_operation_admitted(
                 "proof_session", endpoint_id, f"dev_{op_id}", 1, 1, op_id, f"nonce_{op_id}", f"exec_{op_id}", "test"
             )
@@ -134,6 +146,12 @@ def run_concurrency_worker(store_path: str, epoch: int, op_id: str):
         success = False
         for _ in range(200): # High retry count for heavy contention
             try:
+                from holomed.persistence.authority import DeviceEpochAuthority
+                (path / "devices").mkdir(parents=True, exist_ok=True)
+                dev_auth = DeviceEpochAuthority(path / "devices")
+                try: dev_auth.read_current_device_epoch(f"dev_{op_id}")
+                except Exception: dev_auth.allocate_next_device_epoch(f"dev_{op_id}")
+
                 store.record_operation_admitted(
                     "proof_session", f"ep_{op_id}_{i}", f"dev_{op_id}", 1, 1, f"op_{op_id}_{i}", f"nonce_{op_id}_{i}", f"exec_{op_id}_{i}", "test"
                 )
@@ -159,6 +177,11 @@ def run_admission_termination_race_a(store_path: str, epoch: int, op_id: str):
             time.sleep(0.01)
     for _ in range(10):
         try:
+            from holomed.persistence.authority import DeviceEpochAuthority
+            dev_auth = DeviceEpochAuthority(path)
+            try: dev_auth.read_current_device_epoch("dev_t")
+            except Exception: dev_auth.allocate_next_device_epoch("dev_t")
+
             store.record_operation_terminated("proof_session", "dev_t", 1, 1, "op_t", "nonce_t", "OPERATION_COMPLETED")
             print("TERMINATED")
         except Exception as e:
@@ -176,6 +199,12 @@ def run_admission_termination_race_b(store_path: str, epoch: int, op_id: str):
             time.sleep(0.01)
     for _ in range(10):
         try:
+            from holomed.persistence.authority import DeviceEpochAuthority
+            (path / "devices").mkdir(parents=True, exist_ok=True)
+            dev_auth = DeviceEpochAuthority(path / "devices")
+            try: dev_auth.read_current_device_epoch("dev_a")
+            except Exception: dev_auth.allocate_next_device_epoch("dev_a")
+
             store.record_operation_admitted(
                 "proof_session", "ep_a", "dev_a", 1, 1, op_id, "nonce_a", "exec_a", "test"
             )

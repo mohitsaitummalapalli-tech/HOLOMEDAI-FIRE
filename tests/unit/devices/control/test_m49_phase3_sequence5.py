@@ -152,7 +152,8 @@ def test_concurrent_epoch_allocation(coordinator, stores):
     # 16
     auth, dev_store, session_store = stores
     dev_store.initialize_device("dev-1", epoch_id=1)
-    epoch_id = coordinator.commit_device_ready("dev-1", {"hw": True})
+    new_device_epoch = coordinator.allocate_device_restart_epoch("dev-1")
+    epoch_id = coordinator.commit_device_ready("dev-1", {"hw": True}, new_device_epoch)
     assert epoch_id > 0
 
 def test_physical_capacity_overlay_behavior(coordinator, stores):
