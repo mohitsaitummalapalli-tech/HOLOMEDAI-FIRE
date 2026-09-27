@@ -141,7 +141,7 @@ def test_t_reinitialization_race_stale_controller(shared_store_path):
     # T. Reinitialization racing with stale controller activity
     # Device re-authenticates -> DEVICE_READY_COMMITTED increments device epoch
     authority, epoch, session = setup_test_store(shared_store_path)
-    device_store = DurableDeviceStore(shared_store_path, epoch_id=epoch)
+    device_store = DurableDeviceStore(shared_store_path / "devices", epoch_id=epoch)
     device_store.initialize_device("dev_t", epoch)
     
     coordinator = DurableGlobalCoordinator(authority, device_store, DurableSessionStore(shared_store_path, epoch_id=epoch))

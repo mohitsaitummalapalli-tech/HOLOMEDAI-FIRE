@@ -181,7 +181,7 @@ class DeviceEpochAuthority:
     """
 
     def __init__(self, storage_root: Path) -> None:
-        self._devices_root = Path(storage_root) / "devices"
+        self._devices_root = Path(storage_root)
         if not self._devices_root.exists():
             self._devices_root.mkdir(parents=True, exist_ok=True)
 

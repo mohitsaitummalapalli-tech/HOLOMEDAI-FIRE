@@ -718,12 +718,20 @@ class DeviceControlManager(IService):
                     # Free from lease registry
                     self._lease_registry.release_lease(endpoint, session_id)
 
-    def handle_device_restart(self, device_id: str, new_device_epoch: int) -> None:
-        """Handles explicit device restarts and epoch changes."""
+    def handle_device_restart(self, device_id: str, coordinator: Any) -> None:
+        """Handles explicit device restarts and epoch changes.
+        
+        Args:
+            device_id: The ID of the restarting device.
+            coordinator: The global coordinator to allocate the authoritative restart epoch.
+        """
         if not self._rehydration_engine:
             return
 
         try:
+            # System authoritative allocation: caller does NOT supply the epoch
+            new_device_epoch = coordinator.allocate_device_restart_epoch(device_id)
+
             self._rehydration_engine.rehydrate_device_state(
                 current_session_id="device_restart",
                 device_id=device_id,

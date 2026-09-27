@@ -65,7 +65,7 @@ def _crash_after_allocate(storage_root, device_id):
 def test_device_epoch_authority_initialization(tmp_path):
     authority = DeviceEpochAuthority(tmp_path)
     # Shouldn't create devices/<device_id> until used
-    assert (tmp_path / "devices").exists()
+    assert tmp_path.exists()
 
 def test_device_epoch_allocation_is_monotonic(tmp_path):
     authority = DeviceEpochAuthority(tmp_path)
@@ -87,7 +87,7 @@ def test_device_epoch_allocation_is_durable(tmp_path):
     assert e1 == 1
 
     # Read directly from disk
-    with open(tmp_path / "devices" / device_id / "device_epoch.json") as f:
+    with open(tmp_path / device_id / "device_epoch.json") as f:
         data = json.load(f)
         assert data["device_epoch"] == 1
 
@@ -170,7 +170,7 @@ def test_corrupt_device_epoch_fails_closed(tmp_path):
     authority.allocate_next_device_epoch(device_id)
 
     # Corrupt the file
-    epoch_file = tmp_path / "devices" / device_id / "device_epoch.json"
+    epoch_file = tmp_path / device_id / "device_epoch.json"
     with open(epoch_file, "w") as f:
         f.write("{corrupt_json: }")
 

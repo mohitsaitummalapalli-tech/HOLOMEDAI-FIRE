@@ -28,6 +28,11 @@ def _setup_store(storage_path: Path) -> tuple[int, str]:
     store.start_session(session, epoch)
     device_store_path = storage_path / "devices"
     device_store_path.mkdir(parents=True, exist_ok=True)
+    
+    from holomed.persistence.authority import DeviceEpochAuthority
+    dev_auth = DeviceEpochAuthority(device_store_path)
+    dev_auth.allocate_next_device_epoch("dev1")  # Initializes to 1
+    
     device_store = DurableDeviceStore(device_store_path, epoch_id=epoch)
     device_store.initialize_device('dev1', epoch)
     device_store.record_device_ready_committed('dev1', 'test_tx')

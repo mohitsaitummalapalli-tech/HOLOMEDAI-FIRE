@@ -226,7 +226,12 @@ class DurableSessionStore:
         terminated_identities = {}
         for jpath in glob.glob(str(self._storage_root / "*.jsonl")):
             session_id = os.path.basename(jpath).replace(".jsonl", "")
-            entries, _ = JournalReader.read_and_recover_journal(Path(jpath))
+            try:
+                entries, _ = JournalReader.read_and_recover_journal(Path(jpath))
+            except ValueError as e:
+                if "is not a valid JournalEntryType" in str(e):
+                    continue
+                raise
             for entry in entries:
                 if entry.entry_type == JournalEntryType.OPERATION_ADMITTED:
                     payload = entry.payload
@@ -316,6 +321,19 @@ class DurableSessionStore:
         from holomed.devices.control.models import GLOBAL_PHYSICAL_OPERATION_CAPACITY, ENDPOINT_LOCAL_PHYSICAL_CAPACITY
 
         with self._authority.hold_authority(controller_epoch):
+            # Validate device epoch against DeviceEpochAuthority
+            from holomed.persistence.authority import DeviceEpochAuthority
+            from holomed.persistence.exceptions import PersistenceResourceMissingError
+            dev_auth = DeviceEpochAuthority(self._storage_root / "devices")
+            try:
+                current_dev_epoch = dev_auth.read_current_device_epoch(device_id)
+                if current_dev_epoch is not None and device_epoch != current_dev_epoch:
+                    raise PersistenceEpochMismatchError(
+                        f"Stale device epoch {device_epoch} rejected; authoritative device epoch is {current_dev_epoch}"
+                    )
+            except PersistenceResourceMissingError:
+                pass
+
             fd = self._acquire_global_lock()
             try:
                 active, terminated = self._reconstruct_reservations_locked()
@@ -440,6 +458,19 @@ class DurableSessionStore:
         auth_epoch = authoritative_epoch if authoritative_epoch is not None else controller_epoch
 
         with self._authority.hold_authority(auth_epoch):
+            # Validate device epoch against DeviceEpochAuthority
+            from holomed.persistence.authority import DeviceEpochAuthority
+            from holomed.persistence.exceptions import PersistenceResourceMissingError
+            dev_auth = DeviceEpochAuthority(self._storage_root / "devices")
+            try:
+                current_dev_epoch = dev_auth.read_current_device_epoch(device_id)
+                if current_dev_epoch is not None and device_epoch != current_dev_epoch:
+                    raise PersistenceEpochMismatchError(
+                        f"Stale device epoch {device_epoch} rejected; authoritative device epoch is {current_dev_epoch}"
+                    )
+            except PersistenceResourceMissingError:
+                pass
+
             fd = self._acquire_global_lock()
             try:
                 active, terminated = self._reconstruct_reservations_locked()

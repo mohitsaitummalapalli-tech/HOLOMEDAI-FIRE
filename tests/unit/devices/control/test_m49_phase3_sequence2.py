@@ -227,12 +227,16 @@ def test_device_restart_quarantine():
     registry = DeviceRegistry(RegistryAuthorityToken())
     engine = MockRehydrationEngine()
     
+    class MockCoordinator:
+        def allocate_device_restart_epoch(self, device_id: str) -> int:
+            return 5
+            
     manager = DeviceControlManager(
         registry=registry,
         authoritative_epoch_provider=lambda: 42,
         rehydration_engine=engine  # type: ignore
     )
     
-    manager.handle_device_restart("dev1", 5)
+    manager.handle_device_restart("dev1", MockCoordinator())
     
     assert engine.rehydrate_device_called

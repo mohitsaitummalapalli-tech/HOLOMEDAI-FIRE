@@ -175,9 +175,15 @@ class DurableGlobalCoordinator:
         Returns:
             The newly allocated epoch_id.
         """
+        from holomed.persistence.authority import DeviceEpochAuthority
+        device_authority = DeviceEpochAuthority(self._device_store._storage_root)
+
         with self._authority_store._get_global_transaction_lock():
-            # Atomically allocate epoch under EPOCH AUTHORITY LOCK
-            new_epoch = self._authority_store.allocate_next_epoch()
+            # Atomically allocate epoch under EPOCH AUTHORITY LOCK (via DeviceEpochAuthority)
+            new_epoch = device_authority.allocate_next_device_epoch(device_id)
+
+            # Update writer epoch so it doesn't fail validation
+            self._device_store.advance_device_epoch(device_id, new_epoch)
 
             # Commit DEVICE_READY(E2) to device journal
             self._device_store._record_device_journal(
@@ -187,4 +193,14 @@ class DurableGlobalCoordinator:
             )
 
         return new_epoch
+
+    def allocate_device_restart_epoch(self, device_id: str) -> int:
+        """Allocate a new authoritative device epoch for a restarting device.
+        
+        This delegates strictly to DeviceEpochAuthority and does NOT mutate
+        the ControllerAuthorityStore, enforcing independent domain authorities.
+        """
+        from holomed.persistence.authority import DeviceEpochAuthority
+        device_authority = DeviceEpochAuthority(self._device_store._storage_root)
+        return device_authority.allocate_next_device_epoch(device_id)
 

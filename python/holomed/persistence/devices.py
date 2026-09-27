@@ -66,6 +66,14 @@ class DurableDeviceStore:
         writer.initialize_storage()
 
         now_utc = datetime.now(timezone.utc).isoformat()
+        
+        # Write domain initialization marker for fresh devices
+        # so restore_device_from_disk knows this isn't a partially-migrated legacy journal.
+        writer.append_entry(
+            entry_type=DeviceJournalEntryType.DEVICE_EPOCH_DOMAIN_INITIALIZED,
+            timestamp_utc=now_utc,
+            payload={"migrated_epoch": epoch_id}
+        )
         rec = DurableDeviceRecord(
             device_id=device_id,
             epoch_id=epoch_id,
@@ -78,6 +86,36 @@ class DurableDeviceStore:
         self._devices[device_id] = rec
         self._writers[device_id] = writer
         return rec
+
+    def advance_device_epoch(self, device_id: str, new_epoch: int) -> None:
+        """Update the store's knowledge of the device's authoritative epoch."""
+        if device_id not in self._devices or device_id not in self._writers:
+            raise PersistenceValidationError(f"Device {device_id!r} not found")
+        
+        # Re-initialize the writer with the new epoch so append_entry validations pass
+        old_writer = self._writers[device_id]
+        new_writer = DeviceJournalWriter(
+            self._storage_root,
+            device_id,
+            new_epoch,
+            authoritative_epoch_provider=old_writer._get_authoritative_epoch
+        )
+        new_writer._entry_count = old_writer._entry_count
+        new_writer._last_entry_hash = old_writer._last_entry_hash
+        new_writer._last_sequence = old_writer._last_sequence
+        self._writers[device_id] = new_writer
+        
+        # Update record
+        rec = self._devices[device_id]
+        self._devices[device_id] = DurableDeviceRecord(
+            device_id=rec.device_id,
+            epoch_id=new_epoch,
+            created_timestamp_utc=rec.created_timestamp_utc,
+            last_sequence=rec.last_sequence,
+            schema_version=rec.schema_version,
+            metadata=rec.metadata,
+            isolation_transactions=rec.isolation_transactions,
+        )
 
     def record_device_quarantined(self, device_id: str, reason: str) -> None:
         self._append_device_entry(device_id, DeviceJournalEntryType.DEVICE_QUARANTINED, {"reason": reason})
