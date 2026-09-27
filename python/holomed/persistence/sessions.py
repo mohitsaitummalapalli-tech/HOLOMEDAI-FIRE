@@ -250,7 +250,7 @@ class DurableSessionStore:
                         payload.get("command_nonce")
                     )
                     if canon in active_reservations:
-                        res = payload.get("resolution")
+                        res = payload.get("resolution") or payload.get("terminal_state")
                         if res in {"FAULTED_UNKNOWN", "QUARANTINED"}:
                             active_reservations[canon]["resolution"] = res
                             terminated_identities[canon] = dict(active_reservations[canon])
@@ -259,9 +259,27 @@ class DurableSessionStore:
                             admitted_payload["resolution"] = res
                             terminated_identities[canon] = admitted_payload
                     else:
-                        payload_with_session = dict(payload)
-                        payload_with_session["_original_session_id"] = session_id
-                        terminated_identities[canon] = payload_with_session
+                        # Fallback for isolation records that only have operation_id
+                        found_canon = None
+                        op_id = payload.get("operation_id") or payload.get("physical_operation_id")
+                        if op_id:
+                            for acanon, ares in active_reservations.items():
+                                if ares.get("physical_operation_id") == op_id or ares.get("operation_id") == op_id:
+                                    found_canon = acanon
+                                    break
+                        if found_canon:
+                            res = payload.get("resolution") or payload.get("terminal_state")
+                            if res in {"FAULTED_UNKNOWN", "QUARANTINED"}:
+                                active_reservations[found_canon]["resolution"] = res
+                                terminated_identities[found_canon] = dict(active_reservations[found_canon])
+                            else:
+                                admitted_payload = active_reservations.pop(found_canon)
+                                admitted_payload["resolution"] = res
+                                terminated_identities[found_canon] = admitted_payload
+                        else:
+                            payload_with_session = dict(payload)
+                            payload_with_session["_original_session_id"] = session_id
+                            terminated_identities[canon] = payload_with_session
         return active_reservations, terminated_identities
 
     def get_active_physical_operations(self) -> int:
