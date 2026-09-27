@@ -127,7 +127,7 @@ def _worker_s_isolation(storage_str: str, session: str, op_iso_id: str, q_res: m
             payload = kwargs.get("payload")
             if not payload and len(args) >= 3:
                 payload = args[2]
-            
+
             if payload and payload.get("resolution") == "PHYSICALLY_ISOLATED":
                 # This is called exactly AFTER _get_global_admission_lock is released
                 # We signal admission to proceed, and wait for it to finish.
@@ -484,7 +484,7 @@ class TestM49Phase63FailureMatrixCrossProcess:
         from holomed.persistence.sessions import DurableSessionStore
         from holomed.persistence.models import JournalEntryType
         from datetime import datetime, timezone
-        
+
         store_setup = DurableSessionStore(storage, epoch_id=epoch)
         store_setup.restore_session_from_disk(session)
         # Pre-admit real op
@@ -492,11 +492,11 @@ class TestM49Phase63FailureMatrixCrossProcess:
             session, "ep1", "dev1", 1, epoch, "op_iso", "nonce_iso", "exec_iso", "cmd_iso"
         )
         assert store_setup.get_active_physical_operations() == 1
-        
+
         # Now artificially write adversarial termination records sharing the same operation_id and physical_operation_id
         # but with mismatched canonical fields.
         writer = store_setup._writers[session]
-        
+
         # 1. Wrong device_id
         writer.append_entry(
             entry_type=JournalEntryType.OPERATION_TERMINATED,
@@ -553,33 +553,33 @@ class TestM49Phase63FailureMatrixCrossProcess:
                 "resolution": "PHYSICALLY_ISOLATED"
             }
         )
-        
-        # Reconstruct reservations. 
+
+        # Reconstruct reservations.
         # The malicious record should NOT terminate the active reservation because the canon identity does not match.
         store_check = DurableSessionStore(storage, epoch_id=epoch)
         store_check.restore_session_from_disk(session)
-        
+
         active, terminated = store_check._reconstruct_reservations_locked()
-        
+
         # Should still be active, capacity should be 1
         assert store_check.get_active_physical_operations() == 1
-        
+
         # Verify the true operation remains active
         canon = ("dev1", 1, epoch, op_iso_id, "nonce_iso")
         assert canon in active, "Original canonical identity should still be active"
         assert active[canon].get("resolution") is None, "Should not be terminated"
-        
+
         # Now use coordinator to isolate a non-existent operation, it MUST fail closed.
         from holomed.persistence.coordinator import DurableGlobalCoordinator
         from holomed.persistence.authority import ControllerAuthorityStore
         from holomed.persistence.devices import DurableDeviceStore
         from holomed.persistence.exceptions import PersistenceValidationError
-        
+
         authority = ControllerAuthorityStore(storage)
         devices = DurableDeviceStore(storage / "devices", epoch_id=epoch)
         devices.restore_device_from_disk("dev1")
         coordinator = DurableGlobalCoordinator(authority, devices, store_setup)
-        
+
         import pytest
         with pytest.raises(PersistenceValidationError, match="Cannot isolate non-existent"):
             coordinator.isolate_device("dev1", {session: ["WRONG_OP_ID"]})
@@ -592,10 +592,10 @@ class TestM49Phase63FailureMatrixCrossProcess:
         from holomed.persistence.authority import ControllerAuthorityStore
         from holomed.persistence.devices import DurableDeviceStore
         from holomed.persistence.exceptions import PersistenceResourceIntegrityError
-        
+
         store = DurableSessionStore(storage, epoch_id=epoch)
         store.restore_session_from_disk(session)
-        
+
         # Pre-admit two real ops with identical physical operation IDs but different nonces
         # This simulates an invalid / corrupt journal state where an identifier resolves ambiguously
         op_iso_id_1, _, _ = store.record_operation_admitted(
@@ -604,21 +604,21 @@ class TestM49Phase63FailureMatrixCrossProcess:
         op_iso_id_2, _, _ = store.record_operation_admitted(
             session, "ep2", "dev1", 1, epoch, "op_iso", "nonce_2", "exec_2", "cmd_2"
         )
-        
+
         assert store.get_active_physical_operations() == 2
-        
+
         authority = ControllerAuthorityStore(storage)
         devices = DurableDeviceStore(storage / "devices", epoch_id=epoch)
         devices.restore_device_from_disk("dev1")
         coordinator = DurableGlobalCoordinator(authority, devices, store)
-        
+
         # Isolation must fail closed
         with pytest.raises(PersistenceResourceIntegrityError, match="Ambiguous identifier"):
             coordinator.isolate_device("dev1", {session: ["op_iso"]})
-            
+
         # Verify no capacity released
         assert store.get_active_physical_operations() == 2
-        
+
         # Verify isolation transaction not committed
         state = devices._devices["dev1"]
         assert len(state.isolation_transactions) == 0
@@ -631,29 +631,29 @@ class TestM49Phase63FailureMatrixCrossProcess:
         from holomed.persistence.authority import ControllerAuthorityStore
         from holomed.persistence.devices import DurableDeviceStore
         from holomed.persistence.exceptions import PersistenceLifecycleError
-        
+
         store = DurableSessionStore(storage, epoch_id=epoch)
         store.restore_session_from_disk(session)
-        
+
         op_iso_id, _, _ = store.record_operation_admitted(
             session, "ep1", "dev1", 1, epoch, "op_iso", "nonce_iso", "exec_iso", "cmd_iso"
         )
         assert store.get_active_physical_operations() == 1
-        
+
         authority = ControllerAuthorityStore(storage)
         devices = DurableDeviceStore(storage / "devices", epoch_id=epoch)
         devices.restore_device_from_disk("dev1")
         coordinator = DurableGlobalCoordinator(authority, devices, store)
-        
+
         # Remove the writer to simulate failure
         del store._writers[session]
-        
+
         with pytest.raises(PersistenceLifecycleError, match="Writer unavailable"):
             coordinator.isolate_device("dev1", {session: [op_iso_id]})
-            
+
         # Verify no capacity released
         assert store.get_active_physical_operations() == 1
-        
+
         # Verify isolation transaction not COMMITTED (it may have INTENTED but not prepared/committed)
         state = devices._devices["dev1"]
         # The transaction will fail before writing PREPARED or COMMITTED.

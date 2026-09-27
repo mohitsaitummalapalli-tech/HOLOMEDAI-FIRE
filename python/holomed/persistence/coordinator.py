@@ -23,7 +23,7 @@ from holomed.persistence.sessions import DurableSessionStore
 
 class DurableGlobalCoordinator:
     """Computes effective operation states based on device global state and session state.
-    
+
     Implements the Sequence 5 lock hierarchy:
     1. GLOBAL_TRANSACTION_LOCK
     2. EPOCH AUTHORITY LOCK
@@ -75,22 +75,22 @@ class DurableGlobalCoordinator:
                     if not self._session_store.has_session(session_id):
                         from holomed.persistence.exceptions import PersistenceValidationError
                         raise PersistenceValidationError(f"Cannot isolate non-existent session {session_id!r}")
-                    
+
                     frozen_participants[session_id] = []
                     session_active = {k: v for k, v in active_reservations.items() if v.get("_original_session_id") == session_id}
-                    
+
                     for op_id in operation_ids:
                         matches = []
                         for k, v in session_active.items():
                             if v.get("operation_id") == op_id or v.get("physical_operation_id") == op_id:
                                 matches.append(v)
-                        
+
                         if len(matches) == 0:
                             from holomed.persistence.exceptions import PersistenceValidationError
                             raise PersistenceValidationError(f"Cannot isolate non-existent or inactive physical operation {op_id!r} in session {session_id!r}")
                         if len(matches) > 1:
                             raise PersistenceResourceIntegrityError(f"Ambiguous identifier {op_id!r} matched multiple active operations in session {session_id!r}")
-                        
+
                         frozen_participants[session_id].append(matches[0])
 
                 # Write INTENT to device journal
@@ -152,7 +152,7 @@ class DurableGlobalCoordinator:
         isolation_transaction_id: str
     ) -> bool:
         """Determine if an operation is effectively isolated.
-        
+
         Requires that the isolation_transaction_id has a COMMITTED record
         in the device journal for the device it targeted.
         """
@@ -165,26 +165,26 @@ class DurableGlobalCoordinator:
 
     def commit_device_ready(self, device_id: str, hardware_evidence: dict) -> int:
         """Allocate a new epoch and commit DEVICE_READY to the device journal.
-        
+
         Implements lock hierarchy: 1. GLOBAL_TRANSACTION_LOCK -> 2. EPOCH AUTHORITY LOCK.
-        
+
         Args:
             device_id: Device to mark ready.
             hardware_evidence: Unforgeable hardware evidence proving physical state safety.
-            
+
         Returns:
             The newly allocated epoch_id.
         """
         with self._authority_store._get_global_transaction_lock():
             # Atomically allocate epoch under EPOCH AUTHORITY LOCK
             new_epoch = self._authority_store.allocate_next_epoch()
-            
+
             # Commit DEVICE_READY(E2) to device journal
             self._device_store._record_device_journal(
                 device_id=device_id,
                 entry_type=DeviceJournalEntryType.DEVICE_READY_COMMITTED,
                 payload={"new_epoch_id": new_epoch, "hardware_evidence": hardware_evidence}
             )
-            
+
         return new_epoch
 
