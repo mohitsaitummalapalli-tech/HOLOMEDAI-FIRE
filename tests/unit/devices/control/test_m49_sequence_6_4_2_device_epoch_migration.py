@@ -567,3 +567,36 @@ def test_post_migration_durable_verification(tmp_path: Path):
     ]
     assert len(markers) == 1
     assert markers[0].payload["migrated_epoch"] == durable_epoch
+
+
+# ---------------------------------------------------------------------------
+# Lock Re-entrancy Remediation
+# ---------------------------------------------------------------------------
+
+def test_migration_lock_reentrancy_eliminated(tmp_path: Path, monkeypatch):
+    """Proves migration critical section does not attempt to reacquire the device epoch lock.
+
+    In the previous implementation, the outer migration lock was held, and a call to
+    read_current_device_epoch() was made, which recursively tried to acquire the same
+    OS lock. This test proves that the OS lock is acquired exactly once during migration.
+    """
+    device_id = "12345678-1234-5678-1234-567812345678"
+    _create_legacy_journal(tmp_path, device_id, max_epoch=5)
+
+    store = DurableDeviceStore(tmp_path, epoch_id=42)
+
+    acquire_count = 0
+    original_acquire = DeviceEpochAuthority._acquire_lock
+
+    def _mock_acquire(self, fd):
+        nonlocal acquire_count
+        acquire_count += 1
+        return original_acquire(self, fd)
+
+    monkeypatch.setattr(DeviceEpochAuthority, "_acquire_lock", _mock_acquire)
+
+    # This performs the full migration
+    store.restore_device_from_disk(device_id)
+
+    # Exactly 1 lock acquisition must occur for the device epoch lock.
+    assert acquire_count == 1, f"Expected exactly 1 lock acquisition, got {acquire_count}"

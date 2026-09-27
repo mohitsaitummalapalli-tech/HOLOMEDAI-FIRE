@@ -204,7 +204,11 @@ class DurableDeviceStore:
 
                 # --- Fresh durable authority read under lock ---
                 try:
-                    device_epoch = device_authority.read_current_device_epoch(device_id)
+                    # The caller already holds DEVICE_EPOCH_AUTHORITY_LOCK
+                    device_epoch = device_authority._read_current_epoch_unlocked(
+                        device_id,
+                        allow_missing=False,
+                    )
                     authority_missing = False
                 except PersistenceResourceMissingError:
                     device_epoch = None
