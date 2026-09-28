@@ -165,7 +165,7 @@ def crash_during_commit_ready(temp_storage_str):
     coordinator.commit_device_ready("dev1", {"evidence": "DRIVER_ASSERTED_SOFTWARE_EVIDENCE"})
 
 def test_r20_reinit_hw_ready_db_crash(setup_environment):
-    temp_storage, coordinator, _, _, device_store, session_store = setup_environment
+    temp_storage, coordinator, _, dev_auth, device_store, session_store = setup_environment
     
     # Removed os.name check
     p = multiprocessing.Process(target=crash_during_commit_ready, args=(str(temp_storage),))
@@ -174,14 +174,15 @@ def test_r20_reinit_hw_ready_db_crash(setup_environment):
     assert p.exitcode == 1
     
     device_store_2 = DurableDeviceStore(temp_storage / "devices", epoch_id=1)
+    record = device_store_2.restore_device_from_disk("dev1")
 
-    # EXPOSING A REAL PRODUCTION DEFECT:
-    # restore_device_from_disk incorrectly asserts that the original initialization
-    # migrated_epoch must equal the newly advanced current_epoch, which fails
-    # and prevents device restoration after any epoch advancement.
-    from holomed.persistence.exceptions import PersistenceResourceIntegrityError
-    with pytest.raises(PersistenceResourceIntegrityError, match="Migration mismatch"):
-        device_store_2.restore_device_from_disk("dev1")
+    assert dev_auth.read_current_device_epoch("dev1") == 2
+    assert record.epoch_id == 2
+    ops = session_store.get_active_physical_operations()
+    assert ops == 1
+    snapshot = session_store.get_active_operations_snapshot()
+    canon = ("dev1", 1, 1, "op1", "nonce1")
+    assert canon in snapshot
 
 def test_r21_ctrl_restart_only_canonical_identity_immutable(setup_environment):
     temp_storage, coordinator, c_auth, dev_auth, device_store, session_store = setup_environment

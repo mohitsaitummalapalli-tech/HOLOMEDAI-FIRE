@@ -334,9 +334,11 @@ class DurableDeviceStore:
                     # CASE D, E, F: Both exist. Validate agreement.
                     assert marker_entry is not None  # guaranteed by control flow
                     marker_epoch = marker_entry.payload.get("migrated_epoch")
-                    if marker_epoch != device_epoch:
+                    assert device_epoch is not None
+                    assert isinstance(marker_epoch, int)
+                    if device_epoch < marker_epoch:
                         raise PersistenceResourceIntegrityError(
-                            f"Migration mismatch for {device_id}: marker epoch {marker_epoch} != authority epoch {device_epoch}"
+                            f"Migration mismatch for {device_id}: authority epoch {device_epoch} < marker epoch {marker_epoch}"
                         )
             finally:
                 device_authority._release_lock(fd)

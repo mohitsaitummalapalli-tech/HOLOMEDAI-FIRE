@@ -478,7 +478,7 @@ def test_marker_authority_mismatch(tmp_path: Path):
     lock_path = auth._get_lock_path(device_id)
     lock_path.touch()
     with open(auth._get_epoch_path(device_id), "w") as f:
-        json.dump({"device_epoch": 6}, f)
+        json.dump({"device_epoch": 4}, f)
 
     writer = DeviceJournalWriter(tmp_path, device_id, 5, None)
     writer.append_entry(
@@ -488,7 +488,7 @@ def test_marker_authority_mismatch(tmp_path: Path):
     )
 
     store = DurableDeviceStore(tmp_path, epoch_id=42)
-    with pytest.raises(PersistenceResourceIntegrityError, match="Migration mismatch.*marker epoch 5 != authority epoch 6"):
+    with pytest.raises(PersistenceResourceIntegrityError, match="Migration mismatch.*authority epoch 4 < marker epoch 5"):
         store.restore_device_from_disk(device_id)
 
 
