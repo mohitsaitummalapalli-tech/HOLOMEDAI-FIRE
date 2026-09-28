@@ -230,6 +230,14 @@ def test_rehydration_does_not_rewrite_canonical_identity(stores, temp_storage):
     ops = new_store.get_active_operations_snapshot()
     assert list(ops.keys()) == [("dev1", 1, 1, "op1", "nonce1")]
 
+from holomed.devices.control.manager import DeviceControlManager, AdmissionState
+from holomed.devices.registry import DeviceRegistry
+from holomed.devices.transport import TelemetryTransport
+from holomed.devices.reconciler import TelemetryReconciler
+from holomed.devices.resolution import ExecutionResolutionGate
+from holomed.devices.control.daemon import ReconciliationDaemon
+from holomed.devices.models import ExecutionTelemetryEvent, CommandState, EventSourceAuthority
+
 def test_pre_ready_recovery_blocks_telemetry_mutation(stores, temp_storage):
     """
     Simulate that telemetry cannot mutate recovered durable state before readiness.
@@ -249,30 +257,73 @@ def test_pre_ready_recovery_blocks_telemetry_mutation(stores, temp_storage):
         command_name="cmd1"
     )
     
+    assert session_store.get_active_physical_operations() == 1
+    
     c_auth.allocate_next_epoch()
     new_store = DurableSessionStore(temp_storage, epoch_id=2)
     engine = StateRehydrationEngine(new_store, Mock(), c_auth)
+    
+    transport = TelemetryTransport()
+    resolution_gate = ExecutionResolutionGate()
+    reconciler = TelemetryReconciler(transport, resolution_gate)
+    daemon = ReconciliationDaemon(reconciler, new_store)
+    
+    registry = Mock()
+    manager = DeviceControlManager(
+        registry=registry,
+        rehydration_engine=engine,
+        reconciliation_daemon=daemon
+    )
+    
+    # 2. Put the control plane into AdmissionState.REHYDRATING
+    manager._admission_state = AdmissionState.REHYDRATING
     engine.rehydrate_controller_state("s2")
     
-    # Telemetry comes in for D1/C1, but it's quarantined
-    # In actual usage, telemetry routing will drop it or it will fail to update.
-    # We prove it's flagged as FAULTED_UNKNOWN and telemetry cannot overwrite it with a terminal resolution.
+    # 4. Before recovery finishes, publish a terminal telemetry event for that execution
+    event = ExecutionTelemetryEvent(
+        event_id="evt1",
+        endpoint_id="ep1",
+        session_id="s1",
+        endpoint_lease_generation=1,
+        execution_id="test",
+        command_sequence=1,
+        event_sequence=1,
+        event_type="test_event",
+        observed_state=CommandState.COMPLETED,
+        source_authority=EventSourceAuthority.HARDWARE_DRIVER,
+        source_origin="TestDriver",
+        timestamp_utc="2026-09-28T00:00:00Z",
+        evidence_generation=1,
+        cryptographic_signature=None,
+        fencing_challenge=None,
+        lifecycle_generation=1,
+        payload={
+            "device_id": "dev1",
+            "device_epoch": 1,
+            "controller_epoch": 1,
+            "physical_operation_id": "op1",
+            "command_nonce": "nonce1"
+        }
+    )
+    transport.publisher.publish(event)
+    
+    # 5. Prove that while REHYDRATING:
+    # - reconciliation is not yet enabled for mutation (caught by StaleEpochError or blocked)
+    # - telemetry cannot convert the operation to a terminal physical resolution
+    # - capacity remains retained
+    # - historical canonical identity remains unchanged
+    daemon.run_reconciliation_cycle()
+    
+    assert daemon.stale_epoch_rejections == 1
+    assert new_store.get_active_physical_operations() == 1
+    
     ops = new_store.get_active_operations_snapshot()
     canon = ("dev1", 1, 1, "op1", "nonce1")
+    assert canon in ops
     assert ops[canon]["resolution"] == "FAULTED_UNKNOWN"
-
-    from holomed.persistence.exceptions import PersistenceEpochMismatchError
-    # Telemetry attempts to record it as COMPLETED (it has stale D1/C1)
-    with pytest.raises(PersistenceEpochMismatchError, match="Stale.*epoch 1 rejected"):
-        new_store.record_operation_terminated(
-            session_id="s1",
-            device_id="dev1",
-            device_epoch=1,
-            controller_epoch=1,
-            physical_operation_id="op1",
-            command_nonce="nonce1",
-            resolution="COMPLETED"
-        )
+    
+    # 6. Finish recovery
+    manager._admission_state = AdmissionState.READY
 
 from holomed.persistence.exceptions import PersistenceEpochMismatchError
 
