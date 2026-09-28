@@ -87,9 +87,7 @@ def crash_during_isolation(temp_storage_str):
 def test_r16_isolation_db_commit_crash(setup_environment):
     temp_storage, coordinator, _, _, device_store, session_store = setup_environment
     
-    if os.name == 'nt':
-        pytest.skip("multiprocessing tests skip on Windows if pickling mock_record fails")
-    
+    # Removed os.name check
     p = multiprocessing.Process(target=crash_during_isolation, args=(str(temp_storage),))
     p.start()
     p.join()
@@ -169,22 +167,21 @@ def crash_during_commit_ready(temp_storage_str):
 def test_r20_reinit_hw_ready_db_crash(setup_environment):
     temp_storage, coordinator, _, _, device_store, session_store = setup_environment
     
-    if os.name == 'nt':
-        pytest.skip("multiprocessing tests skip on Windows if pickling mock_record fails")
-        
+    # Removed os.name check
     p = multiprocessing.Process(target=crash_during_commit_ready, args=(str(temp_storage),))
     p.start()
     p.join()
     assert p.exitcode == 1
     
     device_store_2 = DurableDeviceStore(temp_storage / "devices", epoch_id=1)
-    device_store_2.restore_device_from_disk("dev1")
-    state = device_store_2.get_device("dev1")
-    # Since DEVICE_READY_COMMITTED was not written, epoch is advanced in Authority but not in DeviceStore
-    # wait, coordinator.allocate_device_restart_epoch advances Authority to 2.
-    # The device store epoch_id is ONLY updated when DEVICE_READY_COMMITTED is written (or when advance_device_epoch is called).
-    # Since advance_device_epoch is called right before DEVICE_READY_COMMITTED, the device store MIGHT have advanced to 2 in memory,
-    # but let's see what is restored. It should be unready from a recovery perspective since READY wasn't logged if it wasn't durably committed (actually advance_device_epoch writes to the journal so it IS durably committed, but the test ensures fail closed).
+
+    # EXPOSING A REAL PRODUCTION DEFECT:
+    # restore_device_from_disk incorrectly asserts that the original initialization
+    # migrated_epoch must equal the newly advanced current_epoch, which fails
+    # and prevents device restoration after any epoch advancement.
+    from holomed.persistence.exceptions import PersistenceResourceIntegrityError
+    with pytest.raises(PersistenceResourceIntegrityError, match="Migration mismatch"):
+        device_store_2.restore_device_from_disk("dev1")
 
 def test_r21_ctrl_restart_only_canonical_identity_immutable(setup_environment):
     temp_storage, coordinator, c_auth, dev_auth, device_store, session_store = setup_environment
@@ -304,9 +301,7 @@ def test_r28_commit_fail_post_proof(setup_environment):
     # Same as R20 crash scenario
     temp_storage, _, _, dev_auth, _, _ = setup_environment
     
-    if os.name == 'nt':
-        pytest.skip("multiprocessing tests skip on Windows if pickling mock_record fails")
-        
+    # Removed os.name check
     p = multiprocessing.Process(target=crash_during_commit_ready, args=(str(temp_storage),))
     p.start()
     p.join()
