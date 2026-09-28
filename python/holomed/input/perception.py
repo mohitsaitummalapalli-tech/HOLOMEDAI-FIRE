@@ -8,12 +8,14 @@ from typing import Any, Optional, Tuple
 
 try:
     import mediapipe as mp # type: ignore
-    import mediapipe.solutions as mp_solutions # type: ignore
+    from mediapipe.tasks import python as mp_python # type: ignore
+    from mediapipe.tasks.python import vision as mp_vision # type: ignore
     import numpy as np # type: ignore
     HAS_MEDIAPIPE = True
 except ImportError:
     mp = None # type: ignore
-    mp_solutions = None # type: ignore
+    mp_python = None # type: ignore
+    mp_vision = None # type: ignore
     np = None # type: ignore
     HAS_MEDIAPIPE = False
 
@@ -40,31 +42,47 @@ class ConcreteMediaPipeAdapter(IMediaPipeAdapter):
     Expects image_data to be an RGB numpy array.
     """
     def __init__(self, min_detection_confidence: float = 0.5, min_tracking_confidence: float = 0.5):
-        if not HAS_MEDIAPIPE or mp_solutions is None:
+        if not HAS_MEDIAPIPE:
             raise ImportError("mediapipe is not installed but ConcreteMediaPipeAdapter requires it.")
-        self._hands = mp_solutions.hands.Hands( # type: ignore
-            static_image_mode=False,
-            max_num_hands=1,
-            min_detection_confidence=min_detection_confidence,
+        
+        import os
+        model_path = os.path.join(os.path.dirname(__file__), "..", "..", "..", "tests", "assets", "hand_landmarker.task")
+        
+        if not os.path.exists(model_path):
+            raise FileNotFoundError(f"Missing hand_landmarker.task at {model_path}")
+            
+        base_options = mp_python.BaseOptions(model_asset_path=model_path) # type: ignore
+        options = mp_vision.HandLandmarkerOptions( # type: ignore
+            base_options=base_options,
+            num_hands=1,
+            min_hand_detection_confidence=min_detection_confidence,
             min_tracking_confidence=min_tracking_confidence
         )
+        self._landmarker = mp_vision.HandLandmarker.create_from_options(options) # type: ignore
 
     def process_frame(self, image_data: Any) -> Tuple[bool, float, tuple[tuple[float, float, float], ...]]:
         if not HAS_MEDIAPIPE or np is None or not isinstance(image_data, np.ndarray): # type: ignore
             return False, 0.0, ()
 
-        results = self._hands.process(image_data) # type: ignore
+        if image_data.ndim != 3 or image_data.shape[2] != 3:
+            return False, 0.0, ()
 
-        if not results.multi_hand_landmarks or not results.multi_handedness:
+        # MediaPipe expects contiguous numpy arrays
+        img = image_data if image_data.flags['C_CONTIGUOUS'] else np.ascontiguousarray(image_data) # type: ignore
+        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=img) # type: ignore
+
+        results = self._landmarker.detect(mp_image)
+
+        if not results.hand_landmarks or not results.handedness:
             return False, 0.0, ()
 
         # Get the first hand
-        hand_landmarks = results.multi_hand_landmarks[0]
-        handedness = results.multi_handedness[0]
-        confidence = float(handedness.classification[0].score)
+        hand_landmarks = results.hand_landmarks[0]
+        handedness = results.handedness[0]
+        confidence = float(handedness[0].score)
 
         # Convert landmarks
-        landmarks = tuple((float(lm.x), float(lm.y), float(lm.z)) for lm in hand_landmarks.landmark)
+        landmarks = tuple((float(lm.x), float(lm.y), float(lm.z)) for lm in hand_landmarks)
         return True, confidence, landmarks
 
 

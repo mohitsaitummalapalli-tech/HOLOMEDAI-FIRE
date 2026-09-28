@@ -275,12 +275,31 @@ def test_concrete_mediapipe_runtime_proof():
     Proves the actual concrete implementation is executable against static/controlled input.
     """
     # Create the concrete adapter
-    adapter = ConcreteMediaPipeAdapter(min_detection_confidence=0.5, min_tracking_confidence=0.5)
+    adapter = ConcreteMediaPipeAdapter(min_detection_confidence=0.1, min_tracking_confidence=0.1)
+
+    import os
+    import cv2
+    img_path = os.path.join(os.path.dirname(__file__), "..", "..", "assets", "hand.jpg")
+    
+    # Positive test: Real hand image
+    image_data = cv2.imread(img_path)
+    if image_data is None:
+        pytest.fail(f"Could not load hand image at {img_path}")
+    
+    # Convert from BGR to RGB as MediaPipe expects RGB
+    image_data_rgb = cv2.cvtColor(image_data, cv2.COLOR_BGR2RGB)
+    
+    success, confidence, landmarks = adapter.process_frame(image_data_rgb)
+    
+    # A known hand image should successfully process and detect a hand.
+    assert success is True, "Failed to detect hand in static image asset."
+    assert confidence > 0.0
+    assert len(landmarks) > 0
 
     # Give it an entirely black numpy array (no hands)
-    image_data = np.zeros((480, 640, 3), dtype=np.uint8)
+    black_image_data = np.zeros((480, 640, 3), dtype=np.uint8)
 
-    success, confidence, landmarks = adapter.process_frame(image_data)
+    success, confidence, landmarks = adapter.process_frame(black_image_data)
 
     # A black frame should successfully process, but yield no hands.
     assert success is False
