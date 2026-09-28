@@ -255,8 +255,149 @@ def test_pre_ready_recovery_blocks_telemetry_mutation(stores, temp_storage):
     engine.rehydrate_controller_state("s2")
     
     # Telemetry comes in for D1/C1, but it's quarantined
-    # In actual usage, telemetry routing will drop it or it will fail to update
-    # Here we prove it's flagged as FAULTED_UNKNOWN
+    # In actual usage, telemetry routing will drop it or it will fail to update.
+    # We prove it's flagged as FAULTED_UNKNOWN and telemetry cannot overwrite it with a terminal resolution.
     ops = new_store.get_active_operations_snapshot()
     canon = ("dev1", 1, 1, "op1", "nonce1")
     assert ops[canon]["resolution"] == "FAULTED_UNKNOWN"
+
+    from holomed.persistence.exceptions import PersistenceEpochMismatchError
+    # Telemetry attempts to record it as COMPLETED (it has stale D1/C1)
+    with pytest.raises(PersistenceEpochMismatchError, match="Stale.*epoch 1 rejected"):
+        new_store.record_operation_terminated(
+            session_id="s1",
+            device_id="dev1",
+            device_epoch=1,
+            controller_epoch=1,
+            physical_operation_id="op1",
+            command_nonce="nonce1",
+            resolution="COMPLETED"
+        )
+
+from holomed.persistence.exceptions import PersistenceEpochMismatchError
+
+def test_adversarial_forged_historical_recovery_is_rejected(stores, temp_storage):
+    """
+    1. Device authority is D2.
+    2. Operation historically belongs to D1.
+    3. Caller supplies forged _is_historical_recovery=True.
+    4. Attempt terminal physical resolution (COMPLETED).
+    5. Operation is rejected.
+    6. No journal mutation occurs, capacity unchanged.
+    """
+    c_auth, d_auth, session_store = stores
+    session_store.start_session("s1", 1)
+    session_store.record_operation_admitted(
+        session_id="s1",
+        device_id="dev1",
+        device_epoch=1,
+        controller_epoch=1,
+        physical_operation_id="op1",
+        command_nonce="nonce1",
+        execution_id="test",
+        endpoint_id="ep1",
+        command_name="cmd1"
+    )
+
+    d_auth.allocate_next_device_epoch("dev1") # D2
+
+    assert session_store.get_active_physical_operations() == 1
+
+    with pytest.raises(PersistenceEpochMismatchError, match="Historical recovery requires FAULTED_UNKNOWN"):
+        session_store.record_operation_terminated(
+            session_id="s1",
+            device_id="dev1",
+            device_epoch=1,
+            controller_epoch=1,
+            physical_operation_id="op1",
+            command_nonce="nonce1",
+            resolution="COMPLETED",
+            _is_historical_recovery=True
+        )
+
+    # Must fail closed. Capacity must remain retained.
+    assert session_store.get_active_physical_operations() == 1
+
+def test_correct_historical_recovery_classification_succeeds(stores, temp_storage):
+    """
+    1. Device authority is D2.
+    2. Historical D1 operation.
+    3. _is_historical_recovery=True is supplied.
+    4. FAULTED_UNKNOWN recovery classification succeeds.
+    5. Historical canonical identity remains D1/C1.
+    6. Capacity remains retained.
+    """
+    c_auth, d_auth, session_store = stores
+    session_store.start_session("s1", 1)
+    session_store.record_operation_admitted(
+        session_id="s1",
+        device_id="dev1",
+        device_epoch=1,
+        controller_epoch=1,
+        physical_operation_id="op1",
+        command_nonce="nonce1",
+        execution_id="test",
+        endpoint_id="ep1",
+        command_name="cmd1"
+    )
+
+    d_auth.allocate_next_device_epoch("dev1") # D2
+    assert session_store.get_active_physical_operations() == 1
+
+    session_store.record_operation_terminated(
+        session_id="s1",
+        device_id="dev1",
+        device_epoch=1,
+        controller_epoch=1,
+        physical_operation_id="op1",
+        command_nonce="nonce1",
+        resolution="FAULTED_UNKNOWN",
+        _is_historical_recovery=True
+    )
+
+    assert session_store.get_active_physical_operations() == 1
+    
+    ops = session_store.get_active_operations_snapshot()
+    canon = ("dev1", 1, 1, "op1", "nonce1")
+    assert canon in ops
+    assert ops[canon]["resolution"] == "FAULTED_UNKNOWN"
+
+def test_adversarial_historical_recovery_newer_than_authority_rejected(stores, temp_storage):
+    """
+    1. Device authority is D2.
+    2. Operation historically belongs to D1.
+    3. Forged D999 value supplied as device_epoch with _is_historical_recovery=True.
+    4. Attempt terminal physical resolution or even FAULTED_UNKNOWN.
+    5. Must fail closed.
+    6. Capacity must remain retained.
+    """
+    c_auth, d_auth, session_store = stores
+    session_store.start_session("s1", 1)
+    session_store.record_operation_admitted(
+        session_id="s1",
+        device_id="dev1",
+        device_epoch=1,
+        controller_epoch=1,
+        physical_operation_id="op1",
+        command_nonce="nonce1",
+        execution_id="test",
+        endpoint_id="ep1",
+        command_name="cmd1"
+    )
+
+    d_auth.allocate_next_device_epoch("dev1") # D2
+    assert session_store.get_active_physical_operations() == 1
+
+    with pytest.raises(PersistenceEpochMismatchError, match="cannot be strictly newer than authoritative"):
+        session_store.record_operation_terminated(
+            session_id="s1",
+            device_id="dev1",
+            device_epoch=999, # FORGED newer epoch
+            controller_epoch=1,
+            physical_operation_id="op1",
+            command_nonce="nonce1",
+            resolution="FAULTED_UNKNOWN",
+            _is_historical_recovery=True
+        )
+
+    assert session_store.get_active_physical_operations() == 1

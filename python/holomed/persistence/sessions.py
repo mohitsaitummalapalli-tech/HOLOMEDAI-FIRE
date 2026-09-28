@@ -436,7 +436,7 @@ class DurableSessionStore:
         command_nonce: str,
         resolution: str,
         authoritative_epoch: Optional[int] = None,
-        authoritative_device_epoch: Optional[int] = None
+        _is_historical_recovery: bool = False
     ) -> None:
         """Atomically record physical operation termination in the durable journal with global lock."""
         invalid_resolutions = {
@@ -459,17 +459,25 @@ class DurableSessionStore:
             fd = self._acquire_global_lock()
             try:
                 # Validate device epoch against DeviceEpochAuthority
-                current_dev_epoch = authoritative_device_epoch
-                if current_dev_epoch is None:
-                    from holomed.persistence.authority import DeviceEpochAuthority
-                    from holomed.persistence.exceptions import PersistenceResourceMissingError
-                    dev_auth = DeviceEpochAuthority(self._storage_root / "devices")
-                    current_dev_epoch = dev_auth.read_current_device_epoch(device_id)
+                from holomed.persistence.authority import DeviceEpochAuthority
+                from holomed.persistence.exceptions import PersistenceResourceMissingError
+                dev_auth = DeviceEpochAuthority(self._storage_root / "devices")
+                current_dev_epoch = dev_auth.read_current_device_epoch(device_id)
 
-                if device_epoch != current_dev_epoch and authoritative_device_epoch is None:
-                    raise PersistenceEpochMismatchError(
-                        f"Stale device epoch {device_epoch} rejected; authoritative device epoch is {current_dev_epoch}"
-                    )
+                if _is_historical_recovery:
+                    if resolution != "FAULTED_UNKNOWN":
+                        raise PersistenceEpochMismatchError(
+                            f"Historical recovery requires FAULTED_UNKNOWN resolution, got {resolution}"
+                        )
+                    if device_epoch > current_dev_epoch:
+                        raise PersistenceEpochMismatchError(
+                            f"Historical device epoch {device_epoch} cannot be strictly newer than authoritative {current_dev_epoch}"
+                        )
+                else:
+                    if device_epoch != current_dev_epoch:
+                        raise PersistenceEpochMismatchError(
+                            f"Stale device epoch {device_epoch} rejected; authoritative device epoch is {current_dev_epoch}"
+                        )
 
                 active, terminated = self._reconstruct_reservations_locked()
 

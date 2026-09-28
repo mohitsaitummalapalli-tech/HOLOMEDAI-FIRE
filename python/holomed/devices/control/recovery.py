@@ -60,7 +60,7 @@ class StateRehydrationEngine:
                 command_nonce=command_nonce,
                 resolution="FAULTED_UNKNOWN",
                 authoritative_epoch=auth_epoch,
-                authoritative_device_epoch=current_dev_epoch
+                _is_historical_recovery=True
             )
 
     def rehydrate_device_state(self, current_session_id: str, device_id: str) -> None:
@@ -102,5 +102,5 @@ class StateRehydrationEngine:
                     command_nonce=command_nonce,
                     resolution="FAULTED_UNKNOWN",
                     authoritative_epoch=auth_epoch,
-                    authoritative_device_epoch=new_device_epoch
+                    _is_historical_recovery=True
                 )
