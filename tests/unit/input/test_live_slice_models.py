@@ -39,7 +39,7 @@ def test_deep_immutability_raw_video_frame():
         RawVideoFrame(
             capture_timestamp_ns=time.time_ns(),
             frame_sequence=1,
-            data=bytearray(b"mutable"),
+            data=bytearray(b"mutable"), # type: ignore
             width=1920,
             height=1080
         )
@@ -59,35 +59,35 @@ def test_frame_sequence_and_correlation_id_semantics():
     assert obs.correlation_id == cid
     assert isinstance(obs.correlation_id, str)
     assert isinstance(obs.frame_sequence, int)
-    
+
     # Prove landmarks are deeply immutable
     assert isinstance(obs.landmarks, tuple)
 
 def test_perception_observation_deep_immutability_and_aliasing():
     """Test F: nested landmark structures cannot mutate an immutable contract after construction."""
     cid = generate_correlation_id()
-    
+
     # Original mutable list containing another list
     mutable_landmark = [0.1, 0.2, 0.3]
     mutable_landmarks_list = [mutable_landmark]
-    
+
     obs = PerceptionObservation(
         capture_timestamp_ns=time.time_ns(),
         perception_timestamp_ns=time.time_ns(),
         frame_sequence=1,
         correlation_id=cid,
-        landmarks=mutable_landmarks_list, # Passed as mutable list
+        landmarks=mutable_landmarks_list, # type: ignore
         confidence=0.95
     )
 
     # Prove stored value is deeply frozen to tuples
     assert isinstance(obs.landmarks, tuple)
     assert isinstance(obs.landmarks[0], tuple)
-    
+
     # Prove mutating the original alias has no effect on the stored contract
     mutable_landmarks_list.append([0.4, 0.5, 0.6])
     mutable_landmark[0] = 99.9
-    
+
     assert len(obs.landmarks) == 1
     assert obs.landmarks[0] == (0.1, 0.2, 0.3)
 

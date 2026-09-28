@@ -27,20 +27,20 @@ def test_command_request_untrusted_proposal():
 def test_authorized_command_requires_physical_command_identity():
     """Test B: AuthorizedUnityCommand cannot be created with missing canonical identity/forged params."""
     cid = generate_correlation_id()
-    
+
     # Adversarial caller tries to construct an AuthorizedUnityCommand with forged epoch/nonce directly
     with pytest.raises(TypeError):
         # The constructor signature strictly requires _physical_command
-        AuthorizedUnityCommand(
+        AuthorizedUnityCommand( # type: ignore
             correlation_id=cid,
             command_timestamp_ns=time.time_ns(),
-            device_id="unity_heart_sim",
-            device_epoch=1,
-            controller_epoch=1,
-            physical_operation_id="forged",
-            command_nonce="forged",
-            action="GRASP",
-            payload={}
+            device_id="unity_heart_sim", # type: ignore
+            device_epoch=1, # type: ignore
+            controller_epoch=1, # type: ignore
+            physical_operation_id="forged", # type: ignore
+            command_nonce="forged", # type: ignore
+            action="GRASP", # type: ignore
+            payload={} # type: ignore
         )
 
 def test_authorized_command_rejects_non_physical_command():
@@ -50,7 +50,7 @@ def test_authorized_command_rejects_non_physical_command():
         AuthorizedUnityCommand(
             correlation_id=cid,
             command_timestamp_ns=time.time_ns(),
-            _physical_command="I am a forged string, not a PhysicalCommand"
+            _physical_command="I am a forged string, not a PhysicalCommand" # type: ignore
         )
 
 def test_ultron_cannot_inject_epoch():
@@ -66,7 +66,7 @@ def test_ultron_cannot_inject_epoch():
     # The CommandRequest has absolutely no slots for epoch or nonce, blocking injection
     assert not hasattr(req, "device_epoch")
     with pytest.raises(AttributeError):
-        req.device_epoch = 999  # frozen dataclass prevents mutation anyway
+        req.device_epoch = 999  # type: ignore # frozen dataclass prevents mutation anyway
 
 def test_telemetry_dto_cannot_mutate_persistence():
     """Test E: telemetry DTO cannot directly mutate persistence."""
@@ -89,16 +89,16 @@ def test_telemetry_dto_cannot_mutate_persistence():
 def test_deep_immutability_payload_mutation_rejected():
     """Test F: nested payload structures cannot mutate an immutable contract after construction."""
     cid = generate_correlation_id()
-    
+
     # Original mutable input
     mutable_nested_list = [1, 2, 3]
     mutable_nested_dict = {"inner": "val"}
     payload_dict = {
-        "force": 0.5, 
+        "force": 0.5,
         "nested_dict": mutable_nested_dict,
         "nested_list": mutable_nested_list
     }
-    
+
     req = CommandRequest(
         correlation_id=cid,
         command_timestamp_ns=time.time_ns(),
@@ -106,22 +106,22 @@ def test_deep_immutability_payload_mutation_rejected():
         action="GRASP",
         payload=payload_dict
     )
-    
+
     assert isinstance(req.payload, MappingProxyType)
-    
+
     # Mutation on the payload structure itself should raise TypeError
     with pytest.raises(TypeError):
-        req.payload["force"] = 0.9
+        req.payload["force"] = 0.9 # type: ignore
 
     # Prove that modifying the original aliased list/dict does NOT mutate the stored contract
     # because deep_freeze_parameter creates a deeply immutable copy
     mutable_nested_list.append(4)
     mutable_nested_dict["new"] = "injected"
-    
+
     # The stored contract retains the frozen tuple/MappingProxyType, immune to the alias mutation
     assert req.payload["nested_list"] == (1, 2, 3)
     assert isinstance(req.payload["nested_list"], tuple)
-    
+
     assert req.payload["nested_dict"]["inner"] == "val"
     assert "new" not in req.payload["nested_dict"]
     assert isinstance(req.payload["nested_dict"], MappingProxyType)

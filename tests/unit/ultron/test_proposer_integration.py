@@ -27,14 +27,14 @@ def device_registry():
     from unittest.mock import MagicMock
     from holomed.devices.models import DeviceType, DeviceState, CapabilityCategory, DeviceCapability
     from holomed.devices.interfaces import IDevice, IPhysicalEndpoint
-    
+
     device = MagicMock(spec=IDevice)
     device.device_id = "dev_xr_headset_01"
     device.physical_id = "phys_01"
     device.device_type = DeviceType.SIMULATED_GENERIC
     device.state = DeviceState.UNREGISTERED
     device.current_epoch = 0
-    
+
     cap = DeviceCapability(
         capability_id="sys.interaction",
         category=CapabilityCategory.CONTROL,
@@ -43,13 +43,13 @@ def device_registry():
         target_endpoint_id="ep_hand_tracking",
     )
     device.capabilities = (cap,)
-    
+
     ep = MagicMock(spec=IPhysicalEndpoint)
     ep.endpoint_id = "ep_hand_tracking"
     ep.device_id = "dev_xr_headset_01"
     ep.protocol = "internal"
     ep.capabilities = frozenset(["sys.interaction"])
-    
+
     from holomed.devices.models import SubmissionStatus
     res_mock = MagicMock()
     res_mock.status = SubmissionStatus.ACCEPTED
@@ -57,13 +57,13 @@ def device_registry():
     ep.submit_command.return_value = res_mock
 
     device.endpoints = (ep,)
-    
+
     # Needs valid token to register
     tok = MagicMock()
     registry = DeviceRegistry(token=tok)
     registry.register(device, token=tok)
     device.state = DeviceState.ACTIVE
-    
+
     return registry
 
 
@@ -74,17 +74,17 @@ def control_manager(device_registry):
         secret_filter=None,
         authoritative_epoch_provider=lambda: 100
     )
-    
+
     # We need to stub start dependencies
     class DummyRehydration:
         def rehydrate_controller_state(self, current_session_id): pass
         def wait_until_ready(self, timeout): return True
-        
+
     manager._rehydration_engine = DummyRehydration()  # type: ignore
     from unittest.mock import MagicMock
     manager.initialize(RuntimeContext(epoch_id=100, app_config=MagicMock()))
     manager.start()
-    
+
     # Needs a handler for our generated sys.input.interact command
     from holomed.devices.control.models import DeviceCommandDefinition
     manager._commands["sys.input.interact"] = DeviceCommandDefinition(
@@ -92,7 +92,7 @@ def control_manager(device_registry):
         handler=_mock_command_handler,
         required_capability_id="sys.interaction",
     )
-    
+
     return manager
 
 # --- Tests ---
@@ -100,17 +100,17 @@ def control_manager(device_registry):
 def test_manager_admission_valid_command(control_manager):
     # Setup session validator to allow it
     control_manager._session_validator = lambda sid, gen: True
-    
+
     # Allocate a lease
     device = control_manager._registry.get("dev_xr_headset_01")
     ep = device.endpoints[0]
     control_manager._lease_registry.issue_lease(ep, "00000000-0000-0000-0000-000000000003", 1, "00000000-0000-0000-0000-000000000002", frozenset(["sys.interaction"]))
-    
+
     intent = UltronIntent("00000000-0000-0000-0000-000000000001", 0, ACTION_GRASP, 1.0, 1.0)
     proposal = UltronProposer().process_intent(intent, "dev_xr_headset_01")
     assert proposal is not None
     env = create_envelope_from_proposal(proposal, "00000000-0000-0000-0000-000000000003", 1, "00000000-0000-0000-0000-000000000002", "00000000-0000-0000-0000-000000000004")
-    
+
     response = control_manager.handle_command(env)
     assert response.message_type == MessageType.RESPONSE
     assert response.payload.get("status") == "SUCCESS"
@@ -118,18 +118,18 @@ def test_manager_admission_valid_command(control_manager):
 
 def test_manager_admission_rejects_lease_conflict(control_manager):
     control_manager._session_validator = lambda sid, gen: True
-    
+
     device = control_manager._registry.get("dev_xr_headset_01")
     ep = device.endpoints[0]
-    
+
     # Issue a lease to a different session to create a conflict
     control_manager._lease_registry.issue_lease(ep, "different-session", 1, "exec-different", frozenset(["sys.interaction"]))
-    
+
     intent = UltronIntent("00000000-0000-0000-0000-000000000001", 0, ACTION_GRASP, 1.0, 1.0)
     proposal = UltronProposer().process_intent(intent, "dev_xr_headset_01")
     assert proposal is not None
     env = create_envelope_from_proposal(proposal, "00000000-0000-0000-0000-000000000003", 1, "00000000-0000-0000-0000-000000000002", "00000000-0000-0000-0000-000000000004")
-    
+
     response = control_manager.handle_command(env)
     assert response.message_type == MessageType.ERROR
     assert "ERR_CONTROLCAPACITYERROR" in response.payload["error_code"]
@@ -137,30 +137,30 @@ def test_manager_admission_rejects_lease_conflict(control_manager):
 def test_manager_admission_rejects_unauthorized_session(control_manager):
     # Session validator returns False (stale/revoked session)
     control_manager._session_validator = lambda sid, gen: False
-    
+
     # Has a lease but session is unauthorized
     device = control_manager._registry.get("dev_xr_headset_01")
     ep = device.endpoints[0]
     control_manager._lease_registry.issue_lease(ep, "00000000-0000-0000-0000-000000000003", 1, "00000000-0000-0000-0000-000000000002", frozenset(["sys.interaction"]))
-    
+
     intent = UltronIntent("00000000-0000-0000-0000-000000000001", 0, ACTION_GRASP, 1.0, 1.0)
     proposal = UltronProposer().process_intent(intent, "dev_xr_headset_01")
     assert proposal is not None
     env = create_envelope_from_proposal(proposal, "00000000-0000-0000-0000-000000000003", 1, "00000000-0000-0000-0000-000000000002", "00000000-0000-0000-0000-000000000004")
-    
+
     response = control_manager.handle_command(env)
     assert response.message_type == MessageType.ERROR
     assert "ERR_CAPABILITYUNAUTHORIZEDERROR" in response.payload["error_code"]
 
 def test_manager_admission_rejects_unavailable_endpoint(control_manager):
     control_manager._session_validator = lambda sid, gen: True
-    
+
     # Target invalid device
     intent = UltronIntent("00000000-0000-0000-0000-000000000001", 0, ACTION_GRASP, 1.0, 1.0)
     proposal = UltronProposer().process_intent(intent, "dev_invalid")
     assert proposal is not None
     env = create_envelope_from_proposal(proposal, "00000000-0000-0000-0000-000000000003", 1, "00000000-0000-0000-0000-000000000002", "00000000-0000-0000-0000-000000000004")
-    
+
     response = control_manager.handle_command(env)
     assert response.message_type == MessageType.ERROR
     assert "ERR_DEVICE_NOT_FOUND" in response.payload["error_code"]
@@ -169,15 +169,15 @@ def test_manager_admission_idempotency_duplicate_proposal(control_manager):
     control_manager._session_validator = lambda sid, gen: True
     device = control_manager._registry.get("dev_xr_headset_01")
     control_manager._lease_registry.issue_lease(device.endpoints[0], "00000000-0000-0000-0000-000000000003", 1, "00000000-0000-0000-0000-000000000002", frozenset(["sys.interaction"]))
-    
+
     intent = UltronIntent("00000000-0000-0000-0000-000000000001", 0, ACTION_GRASP, 1.0, 1.0)
     proposal = UltronProposer().process_intent(intent, "dev_xr_headset_01")
     assert proposal is not None
     env = create_envelope_from_proposal(proposal, "00000000-0000-0000-0000-000000000003", 1, "00000000-0000-0000-0000-000000000002", "00000000-0000-0000-0000-000000000004")
-    
+
     response1 = control_manager.handle_command(env)
     assert response1.payload.get("status") == "SUCCESS"
-    
+
     # Second duplicate admission (same envelope message_id)
     response2 = control_manager.handle_command(env)
     assert response2.payload.get("status") == "SUCCESS"
@@ -188,18 +188,18 @@ def test_manager_rejects_capacity_exhausted(control_manager):
     control_manager._session_validator = lambda sid, gen: True
     device = control_manager._registry.get("dev_xr_headset_01")
     control_manager._lease_registry.issue_lease(device.endpoints[0], "00000000-0000-0000-0000-000000000003", 1, "00000000-0000-0000-0000-000000000002", frozenset(["sys.interaction"]))
-    
+
     # Override capacity_admitter to raise ControlCapacityError
     def mock_capacity_admitter(*args, **kwargs):
         from holomed.devices.control.exceptions import ControlCapacityError
         raise ControlCapacityError("Capacity exhausted")
     control_manager._capacity_admitter = mock_capacity_admitter
-    
+
     intent = UltronIntent("00000000-0000-0000-0000-000000000001", 0, ACTION_GRASP, 1.0, 1.0)
     proposal = UltronProposer().process_intent(intent, "dev_xr_headset_01")
     assert proposal is not None
     env = create_envelope_from_proposal(proposal, "00000000-0000-0000-0000-000000000003", 1, "00000000-0000-0000-0000-000000000002", "00000000-0000-0000-0000-000000000004")
-    
+
     response = control_manager.handle_command(env)
     assert response.message_type == MessageType.ERROR
     assert "ERR_CONTROLCAPACITYERROR" in response.payload["error_code"]
