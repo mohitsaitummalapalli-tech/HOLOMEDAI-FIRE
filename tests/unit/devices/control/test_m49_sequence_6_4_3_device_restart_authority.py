@@ -47,11 +47,10 @@ def test_01_caller_epoch_is_ignored_by_manager(temp_storage):
     # The caller passes a coordinator, not an int
     manager.handle_device_restart("dev1", mock_coordinator)
 
-    # Engine must have been called with system's allocated epoch (99), NOT something the caller passed
+    # Engine must have been called with system's allocated epoch, without taking new_device_epoch explicitly
     engine.rehydrate_device_state.assert_called_once_with(
         current_session_id="device_restart",
-        device_id="dev1",
-        new_device_epoch=99
+        device_id="dev1"
     )
 
 def test_02_coordinator_allocates_monotonic_epoch(coordinator, stores):

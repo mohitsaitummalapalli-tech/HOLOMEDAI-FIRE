@@ -435,7 +435,8 @@ class DurableSessionStore:
         physical_operation_id: str,
         command_nonce: str,
         resolution: str,
-        authoritative_epoch: Optional[int] = None
+        authoritative_epoch: Optional[int] = None,
+        authoritative_device_epoch: Optional[int] = None
     ) -> None:
         """Atomically record physical operation termination in the durable journal with global lock."""
         invalid_resolutions = {
@@ -458,11 +459,14 @@ class DurableSessionStore:
             fd = self._acquire_global_lock()
             try:
                 # Validate device epoch against DeviceEpochAuthority
-                from holomed.persistence.authority import DeviceEpochAuthority
-                from holomed.persistence.exceptions import PersistenceResourceMissingError
-                dev_auth = DeviceEpochAuthority(self._storage_root / "devices")
-                current_dev_epoch = dev_auth.read_current_device_epoch(device_id)
-                if device_epoch != current_dev_epoch:
+                current_dev_epoch = authoritative_device_epoch
+                if current_dev_epoch is None:
+                    from holomed.persistence.authority import DeviceEpochAuthority
+                    from holomed.persistence.exceptions import PersistenceResourceMissingError
+                    dev_auth = DeviceEpochAuthority(self._storage_root / "devices")
+                    current_dev_epoch = dev_auth.read_current_device_epoch(device_id)
+
+                if device_epoch != current_dev_epoch and authoritative_device_epoch is None:
                     raise PersistenceEpochMismatchError(
                         f"Stale device epoch {device_epoch} rejected; authoritative device epoch is {current_dev_epoch}"
                     )

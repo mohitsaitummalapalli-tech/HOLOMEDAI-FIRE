@@ -730,12 +730,11 @@ class DeviceControlManager(IService):
 
         try:
             # System authoritative allocation: caller does NOT supply the epoch
-            new_device_epoch = coordinator.allocate_device_restart_epoch(device_id)
+            coordinator.allocate_device_restart_epoch(device_id)
 
             self._rehydration_engine.rehydrate_device_state(
                 current_session_id="device_restart",
-                device_id=device_id,
-                new_device_epoch=new_device_epoch
+                device_id=device_id
             )
         except Exception as e:
             self._logger.error("Device rehydration failed", extra={"device_id": device_id, "error": str(e)})

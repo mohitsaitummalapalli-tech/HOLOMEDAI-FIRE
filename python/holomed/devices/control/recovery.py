@@ -2,8 +2,9 @@
 
 from typing import Dict, Any, Tuple
 from holomed.persistence.sessions import DurableSessionStore
-from holomed.persistence.authority import ControllerAuthorityStore
+from holomed.persistence.authority import ControllerAuthorityStore, DeviceEpochAuthority
 from holomed.devices.interfaces import IExecutionResolutionGate
+from holomed.persistence.exceptions import PersistenceResourceIntegrityError
 
 class StateRehydrationEngine:
     """Orchestrates recovery of physical capacity and state from durable journals.
@@ -18,6 +19,7 @@ class StateRehydrationEngine:
         self._session_store = session_store
         self._resolution_gate = resolution_gate
         self._authority = authority_store
+        self._device_authority = DeviceEpochAuthority(session_store._storage_root / "devices")
 
     def rehydrate_controller_state(self, current_session_id: str) -> None:
         """
@@ -30,8 +32,7 @@ class StateRehydrationEngine:
         # We need the current authoritative epoch to safely write terminations for old epochs
         auth_epoch = self._authority.read_current_epoch()
         if auth_epoch is None:
-            # If there's no epoch, we can't be booting correctly, but let's be safe.
-            return
+            raise PersistenceResourceIntegrityError("Controller authority is missing or corrupt.")
             
         for canon, payload in active_ops.items():
             device_id, device_epoch, controller_epoch, physical_operation_id, command_nonce = canon
@@ -46,6 +47,10 @@ class StateRehydrationEngine:
             # Ensure the original session is available in the store
             self._session_store.restore_session_from_disk(original_session_id)
             
+            # Resolve authoritative device epoch using independent authority store
+            # DO NOT allocate, just read
+            current_dev_epoch = self._device_authority.read_current_device_epoch(device_id)
+
             self._session_store.record_operation_terminated(
                 session_id=original_session_id,
                 device_id=device_id,
@@ -54,18 +59,24 @@ class StateRehydrationEngine:
                 physical_operation_id=physical_operation_id,
                 command_nonce=command_nonce,
                 resolution="FAULTED_UNKNOWN",
-                authoritative_epoch=auth_epoch
+                authoritative_epoch=auth_epoch,
+                authoritative_device_epoch=current_dev_epoch
             )
 
-    def rehydrate_device_state(self, current_session_id: str, device_id: str, new_device_epoch: int) -> None:
+    def rehydrate_device_state(self, current_session_id: str, device_id: str) -> None:
         """
         Rehydrates and quarantines state when a device restarts.
         Any active operation for this device that belongs to an OLDER device_epoch must be quarantined.
         """
         active_ops = self._session_store.get_active_operations_snapshot()
+        
         auth_epoch = self._authority.read_current_epoch()
         if auth_epoch is None:
-            return
+            raise PersistenceResourceIntegrityError("Controller authority is missing or corrupt.")
+            
+        new_device_epoch = self._device_authority.read_current_device_epoch(device_id)
+        if new_device_epoch is None:
+            raise PersistenceResourceIntegrityError(f"Device authority is missing or corrupt for {device_id}.")
             
         for canon, payload in active_ops.items():
             op_device_id, op_device_epoch, op_controller_epoch, physical_operation_id, command_nonce = canon
@@ -90,5 +101,6 @@ class StateRehydrationEngine:
                     physical_operation_id=physical_operation_id,
                     command_nonce=command_nonce,
                     resolution="FAULTED_UNKNOWN",
-                    authoritative_epoch=auth_epoch
+                    authoritative_epoch=auth_epoch,
+                    authoritative_device_epoch=new_device_epoch
                 )

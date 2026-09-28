@@ -36,7 +36,7 @@ class MockRehydrationEngine:
             raise Exception("Mock rehydration failure")
         self.rehydrate_controller_called = True
         
-    def rehydrate_device_state(self, current_session_id: str, device_id: str, new_device_epoch: int) -> None:
+    def rehydrate_device_state(self, current_session_id: str, device_id: str) -> None:
         if self.should_fail:
             raise Exception("Mock device rehydration failure")
         self.rehydrate_device_called = True
