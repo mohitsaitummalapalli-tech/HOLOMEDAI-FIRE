@@ -90,10 +90,20 @@ class ReconciliationDaemon:
                     logger.error(f"Telemetry identity mismatch for {record.execution_id}: {record.telemetry_identity} != {canon}")
                     return
                 
-                # Verify STALE EPOCH REJECTION
-                if controller_epoch < self._session_store._epoch_id:
+                # Verify STALE EPOCH REJECTION (G13)
+                current_controller_epoch = self._session_store._authority.read_current_epoch()
+
+                from holomed.persistence.authority import DeviceEpochAuthority
+                dev_auth = DeviceEpochAuthority(self._session_store._storage_root / "devices")
+                current_dev_epoch = dev_auth.read_current_device_epoch(device_id)
+
+                if controller_epoch != current_controller_epoch:
                     self.stale_epoch_rejections += 1
-                    raise StaleEpochError(f"Rejected stale epoch: {controller_epoch} < {self._session_store._epoch_id}")
+                    raise StaleEpochError(f"Rejected mismatched controller epoch: {controller_epoch} != {current_controller_epoch}")
+
+                if device_epoch != current_dev_epoch:
+                    self.stale_epoch_rejections += 1
+                    raise StaleEpochError(f"Rejected mismatched device epoch: {device_epoch} != {current_dev_epoch}")
                 
                 # Quarantined / Faulted Unknown remain in the active set but are marked.
                 # However, they are still considered "terminal" for the ExecutionResolutionGate.
