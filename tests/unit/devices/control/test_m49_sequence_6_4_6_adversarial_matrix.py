@@ -176,13 +176,41 @@ def test_r20_reinit_hw_ready_db_crash(setup_environment):
     device_store_2 = DurableDeviceStore(temp_storage / "devices", epoch_id=1)
     record = device_store_2.restore_device_from_disk("dev1")
 
+    # 1. current D authority == D2
     assert dev_auth.read_current_device_epoch("dev1") == 2
+    # 2. restored durable record is valid under D2
     assert record.epoch_id == 2
+
+
+    # 3. READY is not inferred merely from successful restore
+    # 4. no false DEVICE_READY evidence is created
+    import json
+    journal_path = temp_storage / "devices" / "dev1.jsonl"
+    with open(journal_path) as f:
+        journal_entries = [json.loads(line) for line in f]
+    ready_epoch_2 = [e for e in journal_entries if e["entry_type"] == "DEVICE_READY_COMMITTED" and e["epoch_id"] == 2]
+    assert len(ready_epoch_2) == 0
+
+    # 5. any unresolved physical ownership/capacity remains retained
     ops = session_store.get_active_physical_operations()
     assert ops == 1
+
+
+    # 6. canonical historical operation identity remains unchanged
     snapshot = session_store.get_active_operations_snapshot()
     canon = ("dev1", 1, 1, "op1", "nonce1")
     assert canon in snapshot
+
+
+    # 7. authority D0 < initialization marker D1 still raises PersistenceResourceIntegrityError
+    # We overwrite the current device epoch with 0, while marker is 1
+    with open(dev_auth._get_epoch_path("dev1"), "w") as f:
+        json.dump({"device_epoch": 0}, f)
+
+    device_store_3 = DurableDeviceStore(temp_storage / "devices", epoch_id=0)
+    from holomed.persistence.exceptions import PersistenceResourceIntegrityError
+    with pytest.raises(PersistenceResourceIntegrityError, match="Migration mismatch for dev1: authority epoch 0 < marker epoch 1"):
+        device_store_3.restore_device_from_disk("dev1")
 
 def test_r21_ctrl_restart_only_canonical_identity_immutable(setup_environment):
     temp_storage, coordinator, c_auth, dev_auth, device_store, session_store = setup_environment
