@@ -7,6 +7,19 @@ from holomed.anatomy.models import Point3D, Vector3D, COORDINATE_EPSILON
 from holomed.anatomy.exceptions import AnatomyValidationError
 
 class IntersectionClassification(Enum):
+    """
+    Definitive Classification Matrix Contract:
+    A. vertex ↔ vertex -> POINT
+    B. vertex ↔ edge -> POINT
+    C. vertex ↔ face -> POINT
+    D. edge ↔ edge -> POINT
+    E. edge ↔ face crossing -> SEGMENT
+    F. coplanar disjoint -> raises CoplanarAmbiguityError
+    G. coplanar shared vertex -> raises CoplanarAmbiguityError
+    H. coplanar shared edge -> raises CoplanarAmbiguityError
+    I. coplanar partial-area overlap -> raises CoplanarAmbiguityError
+    J. identical triangles -> raises CoplanarAmbiguityError
+    """
     NONE = auto()
     POINT = auto()
     SEGMENT = auto()
