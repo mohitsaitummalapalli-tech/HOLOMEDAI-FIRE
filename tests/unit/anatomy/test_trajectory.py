@@ -17,10 +17,12 @@ def create_trajectory(points, timestamps=None) -> CutTrajectory:
         if i == 0: state = TrajectoryState.START
         elif i == len(points) - 1: state = TrajectoryState.END
         samples.append(TrajectorySample(Point3D(*p), timestamps[i], state))
+    from types import MappingProxyType
     return CutTrajectory(
         trajectory_id="test",
         correlation_id="corr",
-        samples=tuple(samples)
+        samples=tuple(samples),
+        sampling_metadata=MappingProxyType({})
     )
 
 def test_valid_planar_trajectory():
@@ -53,12 +55,41 @@ def test_uneven_sampling():
     pts = [(0, 0, 0), (0.01, 0, 0), (0.011, 0, 0), (0.05, 0, 0), (0.09, 0, 0)]
     traj = create_trajectory(pts)
     p = process_trajectory(traj)
-    # spacing should be roughly 0.005
+    # The resampler guarantees 5mm spacing on its output.
+    # Smoothing alters this slightly. We verify the final spacing is approximately 5mm.
     for i in range(len(p.samples) - 1):
         d = math.sqrt((p.samples[i].position.x - p.samples[i+1].position.x)**2 + 
                       (p.samples[i].position.y - p.samples[i+1].position.y)**2 + 
                       (p.samples[i].position.z - p.samples[i+1].position.z)**2)
         assert abs(d - 0.005) < 1e-3 or i == len(p.samples) - 2 # last can be less
+
+def test_spacing_invariant():
+    # Verify explicitly that resampling produces exactly 5mm Euclidean spacing 
+    # for a straight line, and smoothing alters it when bent.
+    from holomed.anatomy.surface_generation import resample_trajectory
+    pts = []
+    # Create a straight line first
+    for i in range(20):
+        pts.append((i * 0.004, 0, 0))
+    traj = create_trajectory(pts)
+    resampled = resample_trajectory(traj)
+    
+    for i in range(len(resampled.samples) - 1):
+        d = math.sqrt((resampled.samples[i].position.x - resampled.samples[i+1].position.x)**2 + 
+                      (resampled.samples[i].position.y - resampled.samples[i+1].position.y)**2 + 
+                      (resampled.samples[i].position.z - resampled.samples[i+1].position.z)**2)
+        if i < len(resampled.samples) - 2:
+            assert abs(d - 0.005) < 1e-6 # Exactly 5mm
+
+    # Now make it bent
+    pts[10] = (pts[10][0], 0.01, 0)
+    traj_bent = create_trajectory(pts)
+    p = process_trajectory(traj_bent)
+    # After smoothing, it is approximately 5mm but not exactly
+    d0 = math.sqrt((p.samples[9].position.x - p.samples[10].position.x)**2 + 
+                   (p.samples[9].position.y - p.samples[10].position.y)**2 + 
+                   (p.samples[9].position.z - p.samples[10].position.z)**2)
+    assert abs(d0 - 0.005) > 1e-6
 
 def test_gap_rejection():
     # H >5cm gap rejection
@@ -78,9 +109,29 @@ def test_micro_movement_collapse():
 def test_duplicate_points():
     # J duplicate points
     pts = [(0, 0, 0), (0, 0, 0), (0.02, 0, 0), (0.02, 0, 0), (0.04, 0, 0)]
-    traj = create_trajectory(pts)
+    timestamps = [0.1, 0.2, 0.3, 0.4, 0.5]
+    traj = create_trajectory(pts, timestamps)
     p = process_trajectory(traj)
     assert len(p.samples) >= 3
+
+def test_duplicate_timestamp_semantics():
+    # same spatial position + multiple timestamps -> first temporal timestamp survives.
+    pts = [(0, 0, 0), (0, 0, 0), (0, 0, 0), (0.04, 0, 0), (0.08, 0, 0)]
+    timestamps = [0.1, 0.2, 0.3, 0.4, 0.5]
+    traj = create_trajectory(pts, timestamps)
+    validated = validate_trajectory(traj)
+    
+    # The first sample (0,0,0) should have survived, retaining timestamp 0.1
+    assert validated.samples[0].timestamp == 0.1
+    # The next unique sample is at 0.4
+    assert validated.samples[1].timestamp == 0.4
+    
+    # confirm duplicate removal doesn't hide excessive gap
+    pts_gap = [(0, 0, 0), (0, 0, 0), (0.06, 0, 0)]
+    timestamps_gap = [0.1, 0.2, 0.3]
+    traj_gap = create_trajectory(pts_gap, timestamps_gap)
+    with pytest.raises(TrajectoryValidationError, match="Excessive gap"):
+        validate_trajectory(traj_gap)
 
 def test_timestamp_reversal():
     # K timestamp reversal
@@ -107,18 +158,25 @@ def test_zero_length():
 def test_corner_preservation():
     # P corner preservation (>30 degrees)
     # Move along x by 0.1, then along y by 0.1
-    # 0 -> 0.1 in x is 20 segments of 0.005. Corner is at exactly (0.1, 0, 0).
     pts = [(0, 0, 0), (0.04, 0, 0), (0.08, 0, 0), (0.1, 0, 0), (0.1, 0.04, 0), (0.1, 0.08, 0), (0.1, 0.1, 0)]
     traj = create_trajectory(pts)
     p = process_trajectory(traj)
     
-    # Check that (0.1, 0, 0) is preserved exactly
     corner_found = False
-    for s in p.samples:
+    corner_idx = -1
+    for i, s in enumerate(p.samples):
         if abs(s.position.x - 0.1) < 1e-6 and abs(s.position.y - 0.0) < 1e-6 and abs(s.position.z - 0.0) < 1e-6:
             corner_found = True
+            corner_idx = i
             break
     assert corner_found, "Corner sample was destroyed by smoothing!"
+    
+    # Neighborhood semantics: samples on side A (i < corner_idx) must be strictly on Y=0
+    # Samples on side B (i > corner_idx) must be strictly on X=0.1
+    for i in range(corner_idx):
+        assert abs(p.samples[i].position.y - 0.0) < 1e-6, "Side A bled into Y axis"
+    for i in range(corner_idx + 1, len(p.samples)):
+        assert abs(p.samples[i].position.x - 0.1) < 1e-6, "Side B bled into X axis"
 
 def test_deterministic_replay():
     # Q deterministic replay
@@ -156,3 +214,12 @@ def test_immutability():
     original_samples = traj.samples
     p = process_trajectory(traj)
     assert traj.samples is original_samples
+    
+    # Test nested immutability
+    import dataclasses
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        traj.samples[0].position.x = 1.0
+        
+    with pytest.raises(TypeError):
+        # MappingProxyType prevents mutation
+        traj.sampling_metadata["new_key"] = "value"
