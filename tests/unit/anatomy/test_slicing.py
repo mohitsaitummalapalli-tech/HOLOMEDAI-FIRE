@@ -220,25 +220,32 @@ def test_intersection_vertex_welding_index():
     assert res.child_pieces[0].lineage_metadata is not None
     front = res.child_pieces[0].mesh if res.child_pieces[0].lineage_metadata["side"] == "front" else res.child_pieces[1].mesh
 
-    # We expect front piece to contain the intersection vertex (0, 0, 0).
-    # Since triangles A and B share edge (0,2), they should both reference the EXACT SAME index
-    # for the intersection vertex.
-    intersection_idx = None
-    intersection_count = 0
+    # Prove exact geometric identity (1 generated vertex, not 2).
+    # Original mesh has 4 vertices. 3 are front, 1 is back.
+    # The cutting plane intersects 3 edges.
+    # If perfectly welded, the front mesh should have exactly 6 vertices (3 orig + 3 intersection).
+    assert len(front.vertices) == 6, "Expected exactly 3 original + 3 welded intersection vertices."
+
+    # Analyze the actual index graph to prove both triangles use the SAME vertex index
+    # Find the intersection vertices (z=0)
+    intersection_indices = []
     for i, pt in enumerate(front.vertices):
-        if math.isclose(pt.x, 0, abs_tol=1e-5) and math.isclose(pt.y, 0, abs_tol=1e-5) and math.isclose(pt.z, 0, abs_tol=1e-5):
-            intersection_idx = i
-            intersection_count += 1
+        if math.isclose(pt.z, 0, abs_tol=1e-5):
+            intersection_indices.append(i)
 
-    assert intersection_count == 1, "There should be EXACTLY ONE generated intersection vertex for the edge."
+    assert len(intersection_indices) == 3, "Expected exactly 3 intersection vertices."
 
-    # Check that this index is used by triangles in the front mesh.
-    # Specifically, front mesh will have cut triangles corresponding to the front portions of original A and B.
-    # Original A (0,1,2) front portion connects v0, intersection(0,1), intersection(1,2).
-    # Wait, (0,2) is the shared edge, so intersection(0,2) is the shared vertex!
-    # Yes, both new front triangles must use `intersection_idx`.
-    usage_count = front.indices.count(intersection_idx)
-    assert usage_count >= 2, "Both child triangle sets must reference the same vertex index."
+    # Due to the topology of the input (two triangles sharing an edge),
+    # the polygon for each triangle's front fragment is a quad starting at the shared intersection vertex.
+    # The simple fan triangulation uses the first vertex for all triangles in the polygon.
+    # Thus, the shared edge intersection is used 2 times per original triangle (4 times total).
+    # The other two intersections are referenced by 1 face from A or B (1 time total).
+    usage_counts = sorted([front.indices.count(idx) for idx in intersection_indices])
+
+    assert usage_counts == [1, 1, 4], (
+        "Index graph must reflect perfect welding: the shared edge intersection index "
+        "must be referenced exactly 4 times, and the unshared ones exactly 1 time."
+    )
 
 def test_cap_failure_fails_closed(monkeypatch):
     mesh = create_cube_mesh()
