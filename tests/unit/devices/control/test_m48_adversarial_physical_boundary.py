@@ -68,6 +68,8 @@ def m48_system() -> Tuple[DeviceControlManager, DeviceRegistry, SessionManager, 
         return gate.generation == gen
 
     manager = DeviceControlManager(registry=registry, session_validator=validator, rehydration_engine=MagicMock(), authoritative_epoch_provider=lambda: 1)
+    import uuid
+    manager._capacity_admitter = lambda *args, **kwargs: (str(uuid.uuid4()), False, None)
     # Temporary monkey-patch to connect events until manager is updated
     def on_stopped(env: MessageEnvelope):
         sess_id = env.payload.get("session_id")

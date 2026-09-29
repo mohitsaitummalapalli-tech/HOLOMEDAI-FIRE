@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import weakref
+import contextlib
 from datetime import datetime, timezone
 from types import MappingProxyType
 import uuid
@@ -29,7 +30,7 @@ from holomed.devices.control.models import (
     GLOBAL_PHYSICAL_OPERATION_CAPACITY,
     QueryHandler,
 )
-from holomed.devices.models import PhysicalCommand, SubmissionStatus, PhysicalCommandResult
+from holomed.devices.models import PhysicalCommand, SubmissionStatus, PhysicalCommandResult, EndpointLease, AdmittedCommandCapability
 from holomed.devices.control.lease import EndpointLeaseRegistry
 from holomed.devices.control.verifier import CommandVerifier
 import time
@@ -108,6 +109,35 @@ class DeviceControlManager(IService):
         self._admission_state = AdmissionState.INITIALIZING
         self._rehydration_engine = rehydration_engine
         self._reconciliation_daemon = reconciliation_daemon
+
+        # 0. Initialize authoritative capability issuer/verifier
+        import secrets
+        import hmac
+        import hashlib
+        from holomed.devices.models import AdmittedCommandCapability, PhysicalCommand, EndpointLease, DeviceValidationError
+        self._admission_secret = secrets.token_bytes(32)
+
+        def _verify_capability(capability: AdmittedCommandCapability, physical_command: PhysicalCommand, endpoint_lease: EndpointLease) -> None:
+            if capability.physical_operation_id != physical_command.physical_operation_id or \
+               capability.command_nonce != physical_command.command_nonce or \
+               capability.endpoint_lease_generation != endpoint_lease.endpoint_lease_generation:
+                raise DeviceValidationError("Capability context mismatch: command/lease parameters do not match admitted capability.")
+
+            fingerprint_dict = {
+                "device_id": endpoint_lease.device_id,
+                "endpoint_id": physical_command.endpoint_id,
+                "command_name": physical_command.operation,
+                "parameters": physical_command.parameters,
+            }
+            from holomed.persistence.serialization import serialize_canonical_bytes
+            fingerprint = hashlib.sha256(serialize_canonical_bytes(fingerprint_dict)).hexdigest()
+
+            msg = f"{physical_command.physical_operation_id}:{physical_command.command_nonce}:{endpoint_lease.endpoint_lease_generation}:{endpoint_lease.device_id}:{physical_command.endpoint_id}:{physical_command.execution_id}:{physical_command.operation}:{fingerprint}".encode('utf-8')
+            expected = hmac.new(self._admission_secret, msg, hashlib.sha256).hexdigest()
+            if not secrets.compare_digest(expected, capability._signature):
+                raise DeviceValidationError("Invalid admission signature. Capability forged or corrupted.")
+
+        self._verify_capability = _verify_capability
 
         # Resources & Subsystems
         self._resources: Optional[OwnedResourceSet] = None
@@ -226,6 +256,15 @@ class DeviceControlManager(IService):
                 self._reconciliation_daemon.start()
 
             self._admission_state = AdmissionState.READY
+
+            # Register as the authoritative verifier ONLY after successful start/rehydration
+            from holomed.devices.control.admission import register_authoritative_verifier
+            try:
+                register_authoritative_verifier(self)
+            except RuntimeError as e:
+                # If already registered, log a warning or re-raise if strict
+                self._logger.warning("Event", action="dcm.verifier.registration", error=str(e))
+
         except Exception as e:
             self._admission_state = AdmissionState.FAILED
             self._state = ServiceState.FAILED
@@ -235,6 +274,9 @@ class DeviceControlManager(IService):
         """Tear down all resources and clear in-memory caches."""
         if self._state in (ServiceState.STOPPED, ServiceState.UNINITIALIZED):
             return
+
+        from holomed.devices.control.admission import unregister_authoritative_verifier
+        unregister_authoritative_verifier(self)
 
         if self._reconciliation_daemon:
             self._reconciliation_daemon.stop()
@@ -509,51 +551,45 @@ class DeviceControlManager(IService):
                     fingerprint = hashlib.sha256(serialize_canonical_bytes(fingerprint_dict)).hexdigest()
 
                     # 1. Durable Admission (Acquires persistence locks internally and releases them)
-                    if self._capacity_admitter:
-                        physical_operation_id, is_replay, resolution = self._capacity_admitter(
-                            session_id,
-                            endpoint.endpoint_id,
-                            device.device_id,
-                            d_epoch,
-                            c_epoch,
-                            None,
-                            command_nonce,
-                            execution_id,
-                            command_name,
-                            fingerprint
+                    with self.admit_physical_command(
+                        session_id,
+                        endpoint.endpoint_id,
+                        device.device_id,
+                        d_epoch,
+                        c_epoch,
+                        command_nonce,
+                        execution_id,
+                        command_name,
+                        fingerprint,
+                        lease.endpoint_lease_generation
+                    ) as admission_ctx:
+                        physical_cmd = PhysicalCommand(
+                            device_epoch=d_epoch,
+                            controller_epoch=c_epoch,
+                            physical_operation_id=admission_ctx.physical_operation_id,
+                            command_nonce=command_nonce,
+                            endpoint_id=endpoint.endpoint_id,
+                            session_id=session_id,
+                            lifecycle_generation=lifecycle_generation,
+                            endpoint_lease_generation=lease.endpoint_lease_generation,
+                            execution_id=execution_id,
+                            capability_scope=capability_scope,
+                            command_sequence=seq,
+                            operation=command_name,
+                            parameters=canonical_params,
                         )
-                    else:
-                        physical_operation_id = str(uuid.uuid4())
-                        is_replay = False
-                        resolution = None
 
-                    physical_cmd = PhysicalCommand(
-                        device_epoch=d_epoch,
-                        controller_epoch=c_epoch,
-                        physical_operation_id=physical_operation_id,
-                        command_nonce=command_nonce,
-                        endpoint_id=endpoint.endpoint_id,
-                        session_id=session_id,
-                        lifecycle_generation=lifecycle_generation,
-                        endpoint_lease_generation=lease.endpoint_lease_generation,
-                        execution_id=execution_id,
-                        capability_scope=capability_scope,
-                        command_sequence=seq,
-                        operation=command_name,
-                        parameters=canonical_params,
-                    )
-
-                    if is_replay:
-                        details: dict[str, Any] = {"idempotent_replay": True}
-                        if resolution is not None:
-                            details["resolution"] = resolution
+                        if admission_ctx.is_replay:
+                            details: dict[str, Any] = {"idempotent_replay": True}
+                            if admission_ctx.resolution is not None:
+                                details["resolution"] = admission_ctx.resolution
+                            else:
+                                details["resolution"] = "IN_FLIGHT"
+                            physical_result = PhysicalCommandResult(status=SubmissionStatus.ACCEPTED, details=details)
                         else:
-                            details["resolution"] = "IN_FLIGHT"
-                        physical_result = PhysicalCommandResult(status=SubmissionStatus.ACCEPTED, details=details)
-                    else:
-                        # 2. Setup endpoint fence if supported (driver injection)
-                        if hasattr(endpoint, "set_epoch_fence") and self._authoritative_epoch_provider:
-                            endpoint.set_epoch_fence(self._authoritative_epoch_provider) # type: ignore
+                            # 2. Setup endpoint fence if supported (driver injection)
+                            if hasattr(endpoint, "set_epoch_fence") and self._authoritative_epoch_provider:
+                                endpoint.set_epoch_fence(self._authoritative_epoch_provider) # type: ignore
 
                         # 3. Physical Submission
                         physical_result = endpoint.submit_command(physical_cmd)
@@ -720,7 +756,7 @@ class DeviceControlManager(IService):
 
     def handle_device_restart(self, device_id: str, coordinator: Any) -> None:
         """Handles explicit device restarts and epoch changes.
-        
+
         Args:
             device_id: The ID of the restarting device.
             coordinator: The global coordinator to allocate the authoritative restart epoch.
@@ -868,3 +904,55 @@ class DeviceControlManager(IService):
                 event="control_event_sink_error",
                 extra={"topic": topic, "error": self._secret_filter.redact(str(e))},
             )
+
+    @contextlib.contextmanager
+    def admit_physical_command(
+        self,
+        session_id: str,
+        endpoint_id: str,
+        device_id: str,
+        d_epoch: int,
+        c_epoch: int,
+        command_nonce: str,
+        execution_id: str,
+        command_name: str,
+        fingerprint: str,
+        endpoint_lease_generation: int
+    ):
+        """Authoritative admission context manager that durably admits a command and provides the sole mechanism to issue capabilities."""
+        if self._state != ServiceState.STARTED:
+            from holomed.devices.control.exceptions import DeviceControlError
+            raise DeviceControlError("Capabilities can only be issued by a STARTED authoritative controller.")
+
+        if not self._capacity_admitter:
+            from holomed.devices.control.exceptions import ControlCapacityError
+            raise ControlCapacityError("No capacity admitter configured. Cannot perform authoritative admission.")
+
+        physical_operation_id, is_replay, resolution = self._capacity_admitter(
+            session_id, endpoint_id, device_id, d_epoch, c_epoch, None, command_nonce, execution_id, command_name, fingerprint
+        )
+
+        import hmac
+        import hashlib
+        msg = f"{physical_operation_id}:{command_nonce}:{endpoint_lease_generation}:{device_id}:{endpoint_id}:{execution_id}:{command_name}:{fingerprint}".encode('utf-8')
+        sig = hmac.new(self._admission_secret, msg, hashlib.sha256).hexdigest()
+
+        from holomed.devices.models import AdmittedCommandCapability
+        cap = AdmittedCommandCapability(
+            physical_operation_id=physical_operation_id,
+            command_nonce=command_nonce,
+            endpoint_lease_generation=endpoint_lease_generation,
+            _signature=sig
+        )
+
+        from dataclasses import dataclass
+        from typing import Optional
+        @dataclass(frozen=True)
+        class AuthoritativeAdmissionContext:
+            physical_operation_id: str
+            is_replay: bool
+            resolution: Optional[str]
+            capability: AdmittedCommandCapability
+
+        ctx = AuthoritativeAdmissionContext(physical_operation_id, is_replay, resolution, cap)
+        yield ctx

@@ -3,7 +3,8 @@
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-from holomed.devices.models import PhysicalCommand, deep_freeze_parameter
+from holomed.devices.models import PhysicalCommand, deep_freeze_parameter, AdmittedCommandCapability, EndpointLease
+from holomed.protocol.models import MessageEnvelope
 
 @dataclass(frozen=True)
 class CommandRequest:
@@ -46,7 +47,8 @@ class AuthorizedUnityCommand:
     _lease: 'EndpointLease'
 
     def __post_init__(self) -> None:
-        from holomed.devices.models import AdmittedCommandCapability, PhysicalCommand, EndpointLease, _ADMISSION_SECRET_KEY
+        from holomed.devices.models import AdmittedCommandCapability, PhysicalCommand, EndpointLease
+        from holomed.devices.control.admission import verify_admitted_capability
         if not self.correlation_id:
             raise ValueError("correlation_id must not be empty")
         if not isinstance(self._physical_command, PhysicalCommand):
@@ -56,7 +58,7 @@ class AuthorizedUnityCommand:
         if not isinstance(self._capability, AdmittedCommandCapability):
             raise TypeError("Must provide a cryptographically sealed AdmittedCommandCapability to construct an AuthorizedUnityCommand")
         # Validate the cryptographic seal
-        self._capability.verify(self._physical_command, self._lease, _ADMISSION_SECRET_KEY)
+        verify_admitted_capability(self._capability, self._physical_command, self._lease)
 
     @property
     def action(self) -> str:

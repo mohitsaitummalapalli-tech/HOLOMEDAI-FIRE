@@ -14,7 +14,6 @@ from holomed.devices.exceptions import DeviceValidationError
 from holomed.runtime.models import HealthStatus
 import secrets
 
-_ADMISSION_SECRET_KEY = secrets.token_bytes(32)
 
 # Constant Limits
 MAX_DEVICE_ID_LENGTH: int = 64
@@ -295,29 +294,6 @@ class AdmittedCommandCapability:
     command_nonce: str
     endpoint_lease_generation: int
     _signature: str
-
-    @classmethod
-    def issue(cls, physical_command: PhysicalCommand, endpoint_lease: EndpointLease, secret_key: bytes) -> 'AdmittedCommandCapability':
-        import hmac
-        import hashlib
-        msg = f"{physical_command.physical_operation_id}:{physical_command.command_nonce}:{endpoint_lease.endpoint_lease_generation}".encode('utf-8')
-        sig = hmac.new(secret_key, msg, hashlib.sha256).hexdigest()
-        return cls(physical_command.physical_operation_id, physical_command.command_nonce, endpoint_lease.endpoint_lease_generation, sig)
-
-    def verify(self, physical_command: PhysicalCommand, endpoint_lease: EndpointLease, secret_key: bytes) -> None:
-        import hmac
-        import hashlib
-        import secrets
-        
-        if self.physical_operation_id != physical_command.physical_operation_id or \
-           self.command_nonce != physical_command.command_nonce or \
-           self.endpoint_lease_generation != endpoint_lease.endpoint_lease_generation:
-            raise DeviceValidationError("Capability context mismatch: command/lease parameters do not match admitted capability.")
-            
-        msg = f"{self.physical_operation_id}:{self.command_nonce}:{self.endpoint_lease_generation}".encode('utf-8')
-        expected = hmac.new(secret_key, msg, hashlib.sha256).hexdigest()
-        if not secrets.compare_digest(expected, self._signature):
-            raise DeviceValidationError("Invalid admission signature. Capability forged or corrupted.")
 
 
 

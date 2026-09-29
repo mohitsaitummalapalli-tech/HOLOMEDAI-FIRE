@@ -80,3 +80,13 @@ def auto_mock_platform_status(monkeypatch):
     monkeypatch.setattr(SafetyGateService, "_is_session_active", _patched_is_session_active)
     monkeypatch.setattr(WorkflowService, "_is_session_active", _patched_is_session_active)
     monkeypatch.setattr(GatewayService, "_is_session_active", _patched_is_session_active)
+
+import pytest
+@pytest.fixture(autouse=True)
+def reset_admission_verifier():
+    from holomed.devices.control import admission
+    if hasattr(admission, '_verifier_ref'): admission._verifier_ref = None
+    if hasattr(admission, '_verifier'): setattr(admission, '_verifier', None)
+    yield
+    if hasattr(admission, '_verifier_ref'): admission._verifier_ref = None
+    if hasattr(admission, '_verifier'): setattr(admission, '_verifier', None)

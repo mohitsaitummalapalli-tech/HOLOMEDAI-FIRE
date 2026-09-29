@@ -28,6 +28,8 @@ def manager_and_device():
     token = RegistryAuthorityToken()
     registry = DeviceRegistry(token=token)
     manager = DeviceControlManager(registry=registry, rehydration_engine=MagicMock(), authoritative_epoch_provider=lambda: 1)
+    import uuid
+    manager._capacity_admitter = lambda *args, **kwargs: (str(uuid.uuid4()), False, None)
     ctx = make_test_context(epoch_id=1)
     
     # Create device with a physical capability and endpoint

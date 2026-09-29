@@ -74,6 +74,8 @@ def control_manager(device_registry):
         secret_filter=None,
         authoritative_epoch_provider=lambda: 100
     )
+    import uuid
+    manager._capacity_admitter = lambda *args, **kwargs: (str(uuid.uuid4()), False, None)
 
     # We need to stub start dependencies
     class DummyRehydration:
