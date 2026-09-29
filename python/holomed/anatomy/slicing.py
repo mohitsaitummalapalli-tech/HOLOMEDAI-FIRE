@@ -7,6 +7,8 @@ import uuid
 from holomed.anatomy.exceptions import AnatomyValidationError
 from holomed.anatomy.models import Point3D, Vector3D, COORDINATE_EPSILON
 from holomed.anatomy.mesh import AnatomicalMesh, AnatomicalPiece
+from holomed.anatomy.swept_surface import SweptCutSurface
+from abc import ABC, abstractmethod
 
 class CutSurface:
     """Abstract base class for cut surfaces."""
@@ -22,10 +24,14 @@ class PlanarCutSurface(CutSurface):
         if mag < COORDINATE_EPSILON:
             raise AnatomyValidationError("CutSurface normal must have non-zero length")
 
+from typing import Union
+
+AnyCutSurface = Union[CutSurface, SweptCutSurface]
+
 @dataclass(frozen=True)
 class SliceOperation:
     operation_id: str
-    cut_surface: CutSurface
+    cut_surface: AnyCutSurface
     geometry_version: int
 
 @dataclass(frozen=True)
@@ -163,11 +169,15 @@ def _cap_mesh(builder: MeshBuilder, segments: List[Tuple[Point3D, Point3D]], nor
             else:
                 builder.add_triangle(i0, i1, i2)
 
-class SliceEngine:
-    @staticmethod
-    def slice_piece(piece: AnatomicalPiece, operation: SliceOperation) -> SliceResult:
+class SliceStrategy(ABC):
+    @abstractmethod
+    def slice(self, piece: AnatomicalPiece, operation: SliceOperation) -> SliceResult:
+        pass
+
+class PlanarSliceStrategy(SliceStrategy):
+    def slice(self, piece: AnatomicalPiece, operation: SliceOperation) -> SliceResult:
         if not isinstance(operation.cut_surface, PlanarCutSurface):
-            raise NotImplementedError("Only PlanarCutSurface is supported")
+            raise NotImplementedError("PlanarSliceStrategy only supports PlanarCutSurface")
         plane = operation.cut_surface
         mesh = piece.mesh
 
@@ -335,3 +345,15 @@ class SliceEngine:
             child_pieces=tuple(child_pieces),
             geometry_version=operation.geometry_version
         )
+
+
+class SliceEngine:
+    @staticmethod
+    def slice_piece(piece: AnatomicalPiece, operation: SliceOperation) -> SliceResult:
+        if isinstance(operation.cut_surface, PlanarCutSurface):
+            strategy = PlanarSliceStrategy()
+            return strategy.slice(piece, operation)
+        elif isinstance(operation.cut_surface, SweptCutSurface):
+            raise NotImplementedError("Freeform slice strategy is not yet implemented")
+        else:
+            raise TypeError(f"Unsupported cut surface type: {type(operation.cut_surface).__name__}")
