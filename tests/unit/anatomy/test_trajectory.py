@@ -302,11 +302,11 @@ def test_immutability():
     # Test nested immutability
     import dataclasses
     with pytest.raises(dataclasses.FrozenInstanceError):
-        traj.samples[0].position.x = 1.0
+        traj.samples[0].position.x = 1.0  # type: ignore
         
     with pytest.raises(TypeError):
         # Metadata should be immutable via MappingProxyType even though we passed a dict
-        traj.sampling_metadata["new_key"] = "value"
+        traj.sampling_metadata["new_key"] = "value"  # type: ignore
         
     # Test a) normal CutTrajectory construction cannot mutate metadata
     mutable_meta = {"key": "val1"}
@@ -317,11 +317,11 @@ def test_immutability():
     # Test b) validation does not expose mutable metadata
     t_valid = validate_trajectory(traj)
     with pytest.raises(TypeError):
-        t_valid.sampling_metadata["new_key"] = "value"
+        t_valid.sampling_metadata["new_key"] = "value"  # type: ignore
         
     # Test c) ProcessedCutTrajectory does not expose mutable metadata
     with pytest.raises(TypeError):
-        p.sampling_metadata["new_key"] = "value"
+        p.sampling_metadata["new_key"] = "value"  # type: ignore
         
     # Test d) input trajectory metadata remains unchanged
     assert traj.sampling_metadata["test_key"] == "test_value"
