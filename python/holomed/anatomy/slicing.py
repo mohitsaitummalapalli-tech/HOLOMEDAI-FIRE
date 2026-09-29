@@ -54,10 +54,10 @@ class MeshBuilder:
     def __init__(self):
         self.vertices: List[Point3D] = []
         self.indices: List[int] = []
-        self.vert_map: Dict[Tuple[float, float, float], int] = {}
+        self.vert_map: Dict[int, int] = {}
 
     def add_vertex(self, p: Point3D) -> int:
-        key = (round(p.x, 6), round(p.y, 6), round(p.z, 6))
+        key = id(p)
         if key in self.vert_map:
             return self.vert_map[key]
         idx = len(self.vertices)
@@ -136,12 +136,12 @@ def _build_loops(segments: List[Tuple[Point3D, Point3D]]) -> List[List[Point3D]]
             added = False
             last_pt = loop[-1][1]
             for i, seg in enumerate(unprocessed):
-                if math.dist((last_pt.x, last_pt.y, last_pt.z), (seg[0].x, seg[0].y, seg[0].z)) < 1e-5:
+                if last_pt is seg[0]:
                     loop.append(seg)
                     unprocessed.pop(i)
                     added = True
                     break
-                if math.dist((last_pt.x, last_pt.y, last_pt.z), (seg[1].x, seg[1].y, seg[1].z)) < 1e-5:
+                if last_pt is seg[1]:
                     loop.append((seg[1], seg[0]))
                     unprocessed.pop(i)
                     added = True
