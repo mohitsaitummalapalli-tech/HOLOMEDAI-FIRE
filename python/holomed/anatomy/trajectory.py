@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Tuple
+from typing import Tuple, Mapping
 import math
+from types import MappingProxyType
 from holomed.anatomy.models import Point3D, Vector3D
 
 class TrajectoryState(Enum):
@@ -32,7 +33,11 @@ class CutTrajectory:
     samples: Tuple[TrajectorySample, ...]
     coordinate_space: str = "canonical_anatomical"
     validity_state: ValidityState = ValidityState.RAW
-    sampling_metadata: dict = field(default_factory=dict)
+    sampling_metadata: Mapping = field(default_factory=dict)
+
+    def __post_init__(self):
+        if not isinstance(self.sampling_metadata, MappingProxyType):
+            object.__setattr__(self, 'sampling_metadata', MappingProxyType(dict(self.sampling_metadata)))
 
 @dataclass(frozen=True)
 class ProcessedCutTrajectory:
@@ -44,7 +49,11 @@ class ProcessedCutTrajectory:
     width_parameter: float = 0.0
     thickness_parameter: float = 0.0
     coordinate_space: str = "canonical_anatomical"
-    sampling_metadata: dict = field(default_factory=dict)
+    sampling_metadata: Mapping = field(default_factory=dict)
+
+    def __post_init__(self):
+        if not isinstance(self.sampling_metadata, MappingProxyType):
+            object.__setattr__(self, 'sampling_metadata', MappingProxyType(dict(self.sampling_metadata)))
 
 
 def validate_trajectory(traj: CutTrajectory) -> CutTrajectory:

@@ -45,7 +45,7 @@ The trajectory operates strictly in the stable canonical anatomical coordinate s
 Resampling transforms an unevenly sampled raw sequence into a deterministically spaced sequence, making it independent of camera sampling frequency.
 
 **Exact Rules:**
-- **Spatial Spacing:** Exactly `0.005` meters (5 mm) between interpolated points.
+- **Spatial Spacing:** Exactly 5 mm spacing is guaranteed by the RESAMPLER OUTPUT. After smoothing, ProcessedCutTrajectory is NOT guaranteed to remain equidistant.
 - **Minimum Threshold:** Micro-movements $< 0.001$ meters (1 mm) from the previous retained point are collapsed (ignored) during resampling traversal.
 - **Maximum Sample Gap:** Any two consecutive raw points $> 0.05$ meters (5 cm) apart trigger an immediate REJECTION of the trajectory.
 - **Interpolation Method:** Linear 3D spatial interpolation along the piecewise segment.
@@ -116,13 +116,13 @@ This guarantees mapping to an `SweptCutSurface` without redefining F3 trajectory
 
 ## 10. Curve Fidelity & Trajectory Quality Metrics
 Generated during validation/processing for analytics and rejection:
-- `total_path_length`, `point_count`, `spatial_span`, `svd_fitting_residual_max`, `svd_fitting_residual_mean`.
+- `total_path_length`, `point_count`, `spatial_span`, `pca_fitting_residual_max`, `pca_fitting_residual_mean`.
 - **Curve Fidelity Proof:** Compares the processed trajectory coordinates against the known mathematical synthetic reference curve, proving maximum absolute deviation $< 0.02$ meters (2 cm) irrespective of path length.
 
 ## 11. Failure Semantics
 Fail-closed at all layers:
 - Trajectory validation failure $\rightarrow$ `TrajectoryValidationError`.
-- SVD degeneracy or excessive residual $\rightarrow$ `SurfaceGenerationError`.
+- PCA degeneracy or excessive residual $\rightarrow$ `SurfaceGenerationError`.
 - **Consequence:** No `CutSurface` is yielded, F2 `SliceEngine` is NEVER invoked, canonical geometry remains untouched.
 - No trajectory fields become authoritative capability fields.
 
@@ -130,8 +130,8 @@ Fail-closed at all layers:
 
 | ID | Test Target | Description |
 |---|---|---|
-| A | `test_valid_planar_trajectory` | Well-defined 2D spread yielding a clean SVD plane. |
-| B | `test_valid_straight_trajectory` | Rejected as collinear by SVD Planar Generator (UX note: accepted in future via explicit tool orientation). |
+| A | `test_valid_planar_trajectory` | Well-defined 2D spread yielding a clean PCA plane. |
+| B | `test_valid_straight_trajectory` | Rejected as collinear by PCA Planar Generator (UX note: accepted in future via explicit tool orientation). |
 | C | `test_diagonal_trajectory` | Perfect 45-degree angled path proving general orientation. |
 | D | `test_arbitrary_orientation` | Randomly generated valid orientation proving non-alignment. |
 | E | `test_arbitrary_position` | Trajectories shifted by X yield surfaces shifted by X. |
@@ -154,4 +154,4 @@ Fail-closed at all layers:
 | V | `test_future_swept_surface_compatibility` | Demonstrates centerline, tangent, and parallel transport frame preservation. |
 
 ## 13. Definition of Done
-F3 Architecture is COMPLETE as all requirements are explicitly defined herein, establishing mathematically rigorous, deterministic, non-snapping trajectory-to-surface processing via structured SVD constraints, while perfectly preserving the F2 geometry bounds and future swept-cut expansion paths.
+F3 Architecture is COMPLETE as all requirements are explicitly defined herein, establishing mathematically rigorous, deterministic, non-snapping trajectory-to-surface processing via structured PCA constraints, while perfectly preserving the F2 geometry bounds and future swept-cut expansion paths.

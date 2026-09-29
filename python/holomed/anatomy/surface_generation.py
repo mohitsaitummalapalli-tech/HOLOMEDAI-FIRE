@@ -69,8 +69,9 @@ def smooth_trajectory(traj: CutTrajectory) -> ProcessedCutTrajectory:
     samples = traj.samples
     if len(samples) < 3:
         raise TrajectoryValidationError("Need at least 3 points for smoothing")
-    smoothed = [samples[0]]
     
+    # Pre-calculate corners to create smoothing boundaries
+    is_corner = [False] * len(samples)
     for i in range(1, len(samples) - 1):
         p_prev = samples[i-1].position
         p_curr = samples[i].position
@@ -86,17 +87,26 @@ def smooth_trajectory(traj: CutTrajectory) -> ProcessedCutTrajectory:
         lin = math.sqrt(vx_in**2 + vy_in**2 + vz_in**2)
         lout = math.sqrt(vx_out**2 + vy_out**2 + vz_out**2)
         
-        bypass = False
         if lin > 1e-6 and lout > 1e-6:
             dot = (vx_in*vx_out + vy_in*vy_out + vz_in*vz_out) / (lin * lout)
             dot = max(-1.0, min(1.0, dot))
             angle = math.acos(dot)
             if angle > 30.0 * math.pi / 180.0:
-                bypass = True
-                
+                is_corner[i] = True
+
+    smoothed = [samples[0]]
+    for i in range(1, len(samples) - 1):
+        # A protected corner creates a smoothing boundary.
+        # If this point is a corner, or adjacent to a corner, it remains unsmoothed.
+        bypass = is_corner[i] or is_corner[i-1] or is_corner[i+1]
+        
         if bypass:
             smoothed.append(samples[i])
         else:
+            p_prev = samples[i-1].position
+            p_curr = samples[i].position
+            p_next = samples[i+1].position
+            
             sx = 0.25 * p_prev.x + 0.5 * p_curr.x + 0.25 * p_next.x
             sy = 0.25 * p_prev.y + 0.5 * p_curr.y + 0.25 * p_next.y
             sz = 0.25 * p_prev.z + 0.5 * p_curr.z + 0.25 * p_next.z
@@ -272,7 +282,7 @@ def generate_planar_surface(traj: ProcessedCutTrajectory) -> PlanarCutSurface:
     pts = [s.position for s in traj.samples]
     n = len(pts)
     if n < 3:
-        raise SurfaceGenerationError("Insufficient points for SVD")
+        raise SurfaceGenerationError("Insufficient points for PCA")
         
     p0_x = sum(p.x for p in pts) / n
     p0_y = sum(p.y for p in pts) / n
