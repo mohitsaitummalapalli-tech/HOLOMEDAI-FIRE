@@ -117,8 +117,55 @@ def generate_swept_mesh(surface: SweptCutSurface, u_samples: int = 3) -> SweptCu
     # We evaluate at exact s corresponding to centerline samples to avoid interpolation discrepancies
     for i in range(len(surface.centerline_samples)):
         s_val = surface._arc_lengths[i]
+        
+        is_corner = False
+        P_i = surface.centerline_samples[i]
+        nm_x = nm_y = nm_z = 0.0
+        dot = 1.0
+        t_out_x = t_out_y = t_out_z = 0.0
+        
+        if 0 < i < len(surface.centerline_samples) - 1:
+            P_prev = surface.centerline_samples[i-1]
+            P_next = surface.centerline_samples[i+1]
+            
+            dx_in = P_i.x - P_prev.x
+            dy_in = P_i.y - P_prev.y
+            dz_in = P_i.z - P_prev.z
+            mag_in = math.sqrt(dx_in**2 + dy_in**2 + dz_in**2)
+            
+            dx_out = P_next.x - P_i.x
+            dy_out = P_next.y - P_i.y
+            dz_out = P_next.z - P_i.z
+            mag_out = math.sqrt(dx_out**2 + dy_out**2 + dz_out**2)
+            
+            if mag_in > 1e-6 and mag_out > 1e-6:
+                t_in_x, t_in_y, t_in_z = dx_in/mag_in, dy_in/mag_in, dz_in/mag_in
+                t_out_x, t_out_y, t_out_z = dx_out/mag_out, dy_out/mag_out, dz_out/mag_out
+                
+                dot = t_in_x*t_out_x + t_in_y*t_out_y + t_in_z*t_out_z
+                if dot < 0.9999:
+                    is_corner = True
+                    nm_x = t_in_x - t_out_x
+                    nm_y = t_in_y - t_out_y
+                    nm_z = t_in_z - t_out_z
+        
         for u in u_values:
             pt = surface.evaluate_surface(s_val, u)
+            
+            if is_corner:
+                dp_x = pt.x - P_i.x
+                dp_y = pt.y - P_i.y
+                dp_z = pt.z - P_i.z
+                
+                # Project along T_out onto the Miter Plane
+                t = (dp_x * nm_x + dp_y * nm_y + dp_z * nm_z) / (1.0 - dot)
+                
+                # Optional: Bevel fallback for extreme spikes
+                if abs(t) > 2.0 * surface.width:
+                    t = math.copysign(2.0 * surface.width, t)
+                    
+                pt = Point3D(pt.x + t * t_out_x, pt.y + t * t_out_y, pt.z + t * t_out_z)
+                
             if not math.isfinite(pt.x) or not math.isfinite(pt.y) or not math.isfinite(pt.z):
                 raise AnatomyValidationError("Non-finite vertex generated")
             vertices.append(pt)

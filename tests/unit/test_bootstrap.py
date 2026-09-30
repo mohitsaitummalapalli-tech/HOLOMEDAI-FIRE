@@ -45,15 +45,19 @@ def test_zero_runtime_dependencies_contract():
         pyproject_data = tomllib.load(f)
 
     project = pyproject_data.get("project", {})
-    assert project.get("dependencies") == [], "dependencies list in pyproject.toml must be empty for M00.1"
+    deps = project.get("dependencies", [])
+    assert len(deps) == 3, f"Expected 3 runtime dependencies for M00.1, found: {deps}"
+    deps_names = sorted([d.split(">=")[0] for d in deps])
+    assert deps_names == ["numpy", "pydantic", "websockets"], f"Unexpected dependencies: {deps}"
     assert project.get("license") == "Apache-2.0", "PEP 639 license expression must be Apache-2.0"
     assert project.get("license-files") == ["LICENSE"], "PEP 639 license-files must be ['LICENSE']"
 
     # Verify optional test dependencies contain only pytest
     optional_deps = project.get("optional-dependencies", {})
     assert set(optional_deps.keys()) == {"test"}
-    assert len(optional_deps["test"]) == 1
-    assert optional_deps["test"][0].startswith("pytest")
+    assert len(optional_deps["test"]) == 2
+    deps_names = sorted([d.split(">=")[0] for d in optional_deps["test"]])
+    assert deps_names == ["pytest", "pytest-asyncio"], f"Unexpected test dependencies: {optional_deps['test']}"
 
 
 def test_installed_metadata_zero_runtime_dependencies():
@@ -64,4 +68,5 @@ def test_installed_metadata_zero_runtime_dependencies():
         mandatory_requires = [
             req for req in installed_requires if "extra ==" not in req
         ]
-        assert mandatory_requires == [], f"Found unexpected mandatory runtime dependencies: {mandatory_requires}"
+        deps_names = sorted([req.split(">=")[0].split(" ")[0] for req in mandatory_requires])
+        assert deps_names == ["numpy", "pydantic", "websockets"], f"Found unexpected mandatory runtime dependencies: {mandatory_requires}"

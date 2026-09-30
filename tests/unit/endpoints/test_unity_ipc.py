@@ -5,9 +5,11 @@ from uuid import uuid4
 import websockets
 from holomed.devices.endpoints.unity_ipc import UnityIpcServer, UnityIpcClient, AnatomyIpcEnvelope, PROTOCOL_VERSION
 
-@pytest.fixture
-async def ipc_server(free_tcp_port):
-    server = UnityIpcServer("127.0.0.1", free_tcp_port)
+import pytest_asyncio
+
+@pytest_asyncio.fixture
+async def ipc_server(unused_tcp_port):
+    server = UnityIpcServer("127.0.0.1", unused_tcp_port)
     
     async def echo_handler(envelope: AnatomyIpcEnvelope):
         return AnatomyIpcEnvelope(
@@ -25,14 +27,14 @@ async def ipc_server(free_tcp_port):
     yield server
     await server.stop()
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def ipc_client(ipc_server):
     client = UnityIpcClient(f"ws://127.0.0.1:{ipc_server.port}")
     await client.connect()
     yield client
     await client.disconnect()
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_a_valid_envelope(ipc_client):
     correlation_id = uuid4()
     await ipc_client.send_message("test_msg", {"data": 123}, correlation_id)
@@ -43,7 +45,7 @@ async def test_a_valid_envelope(ipc_client):
     assert response.correlation_id == correlation_id
     assert response.payload["status"] == "received"
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_b_wrong_protocol_version(ipc_client):
     env = AnatomyIpcEnvelope(
         protocol_version="99.0",
@@ -59,14 +61,14 @@ async def test_b_wrong_protocol_version(ipc_client):
     assert isinstance(response, dict)
     assert response.get("error") == "protocol_version_mismatch"
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_c_malformed_json(ipc_client):
     await ipc_client.send_raw("{ bad_json: true ")
     response = await ipc_client.receive_response()
     assert isinstance(response, dict)
     assert response.get("error") == "malformed_json"
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_d_missing_required_field(ipc_client):
     data = {
         "message_type": "test_msg",
@@ -77,7 +79,7 @@ async def test_d_missing_required_field(ipc_client):
     assert isinstance(response, dict)
     assert response.get("error") == "malformed_envelope"
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_e_duplicate_message(ipc_client):
     env = await ipc_client.send_message("test_msg", {"data": 1}, uuid4())
     ack = await ipc_client.receive_response()
@@ -88,7 +90,7 @@ async def test_e_duplicate_message(ipc_client):
     assert isinstance(response, dict)
     assert response.get("error") == "stale_sequence"
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_f_stale_sequence(ipc_client):
     ipc_client._sequence_number = 5
     await ipc_client.send_message("test_msg", {}, uuid4())
@@ -100,7 +102,7 @@ async def test_f_stale_sequence(ipc_client):
     assert isinstance(response, dict)
     assert response.get("error") == "stale_sequence"
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_g_stale_geometry_version(ipc_server, ipc_client):
     ipc_server.set_geometry_version(5)
     
@@ -111,7 +113,7 @@ async def test_g_stale_geometry_version(ipc_server, ipc_client):
     assert isinstance(response, dict)
     assert response.get("error") == "stale_geometry_version"
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_h_correlation_mismatch(ipc_client):
     correlation_id = uuid4()
     await ipc_client.send_message("test_msg", {}, correlation_id)
@@ -119,7 +121,7 @@ async def test_h_correlation_mismatch(ipc_client):
     with pytest.raises(ValueError, match="correlation_mismatch"):
         await ipc_client.receive_response(expected_correlation_id=wrong_id)
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_i_timeout(ipc_server, ipc_client):
     async def slow_handler(env):
         await asyncio.sleep(0.5)
@@ -130,7 +132,7 @@ async def test_i_timeout(ipc_server, ipc_client):
     with pytest.raises(asyncio.TimeoutError):
         await ipc_client.receive_response(timeout=0.1)
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_j_disconnect_reconnect_k(ipc_server):
     client1 = UnityIpcClient(f"ws://127.0.0.1:{ipc_server.port}")
     await client1.connect()
@@ -148,12 +150,12 @@ async def test_j_disconnect_reconnect_k(ipc_server):
     assert resp2.message_type == "test_msg_ack"
     await client2.disconnect()
 
-@pytest.mark.anyio
-async def test_l_clean_shutdown(free_tcp_port):
-    server = UnityIpcServer("127.0.0.1", free_tcp_port)
+@pytest.mark.asyncio
+async def test_l_clean_shutdown(unused_tcp_port):
+    server = UnityIpcServer("127.0.0.1", unused_tcp_port)
     await server.start()
     
-    client = UnityIpcClient(f"ws://127.0.0.1:{free_tcp_port}")
+    client = UnityIpcClient(f"ws://127.0.0.1:{unused_tcp_port}")
     await client.connect()
     
     await server.stop()
@@ -162,7 +164,7 @@ async def test_l_clean_shutdown(free_tcp_port):
         await client.send_message("test_msg", {}, uuid4())
         await client.receive_response()
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_performance_latency(ipc_client):
     import time
     import statistics
@@ -190,7 +192,7 @@ async def test_performance_latency(ipc_client):
     # CI latency bound is generous to avoid flakes, but real measured local target is < 5ms
     assert median_lat < 50.0
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_p_csharp_interop_contract():
     # Verify the JSON payload exactly matches the fields in AnatomyIpcClient.cs
     env = AnatomyIpcEnvelope(
@@ -211,7 +213,7 @@ async def test_p_csharp_interop_contract():
     
     assert set(data.keys()) == expected_fields, f"Missing or extra fields in JSON mapping: {data.keys()}"
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_m_old_session_replay(ipc_client):
     # Valid first message establishes session
     await ipc_client.send_message("test_msg", {}, uuid4())
@@ -231,7 +233,7 @@ async def test_m_old_session_replay(ipc_client):
     assert isinstance(response, dict)
     assert response.get("error") == "session_mismatch"
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_n_geometry_version_authority_spoof(ipc_server, ipc_client):
     ipc_server.set_geometry_version(1)
     
@@ -243,7 +245,7 @@ async def test_n_geometry_version_authority_spoof(ipc_server, ipc_client):
     assert isinstance(response, dict)
     assert response.get("error") == "stale_geometry_version"
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_o_authority_via_ipc_attempt():
     # IPC Envelopes must inherently lack authority fields (no execution capabilities)
     env = AnatomyIpcEnvelope(

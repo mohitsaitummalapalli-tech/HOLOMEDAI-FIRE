@@ -13,11 +13,16 @@ license-files = ["LICENSE"]
 authors = [
     { name = "HoloMed AI Team" }
 ]
-dependencies = []
+dependencies = [
+    "numpy>=2.5.3",
+    "pydantic>=2.13.5",
+    "websockets>=17.1",
+]
 
 [project.optional-dependencies]
 test = [
     "pytest>=9.1.1,<10.0.0",
+    "pytest-asyncio>=1.4.0",
 ]
 
 [tool.setuptools.packages.find]
@@ -27,3 +32,4 @@ where = ["python"]
 minversion = "9.1"
 testpaths = ["tests"]
 pythonpath = ["python"]
+asyncio_default_fixture_loop_scope = "function"

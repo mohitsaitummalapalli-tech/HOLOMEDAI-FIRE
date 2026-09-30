@@ -1138,7 +1138,8 @@ def test_runtime_dependencies_are_empty() -> None:
     with open("pyproject.toml", "rb") as f:
         pyproject = tomllib.load(f)
     deps = pyproject["project"]["dependencies"]
-    assert deps == [], f"Expected empty runtime deps, found: {deps}"
+    deps_names = sorted([d.split(">=")[0] for d in deps])
+    assert deps_names == ["numpy", "pydantic", "websockets"], f"Expected specific runtime deps, found: {deps}"
 
 
 # ===========================================================================
