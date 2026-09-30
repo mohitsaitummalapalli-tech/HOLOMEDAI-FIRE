@@ -121,7 +121,14 @@ def extract_cutter_patch(
         v1 = cutter.vertices[cutter.indices[j*3 + 1]]
         v2 = cutter.vertices[cutter.indices[j*3 + 2]]
         for edge in [(v0, v1), (v1, v2), (v2, v0)]:
-            edge_norm = (edge[0], edge[1]) if edge[0].x < edge[1].x or (edge[0].x == edge[1].x and edge[0].y < edge[1].y) else (edge[1], edge[0])
+            # Correct lexicographical sorting for 3D points
+            pA, pB = edge[0], edge[1]
+            if (pA.x < pB.x) or \
+               (pA.x == pB.x and pA.y < pB.y) or \
+               (pA.x == pB.x and pA.y == pB.y and pA.z < pB.z):
+                edge_norm = (pA, pB)
+            else:
+                edge_norm = (pB, pA)
             edge_counts[edge_norm] = edge_counts.get(edge_norm, 0) + 1
             
     outer_boundary_edges = set()

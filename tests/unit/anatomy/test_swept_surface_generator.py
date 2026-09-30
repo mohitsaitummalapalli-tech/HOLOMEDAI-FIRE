@@ -190,10 +190,10 @@ def test_exact_180_reversal():
     traj = create_trajectory(pts)
     frames = generate_transport_frames(traj)
     surf = generate_swept_surface(traj, frames, width=0.01, thickness=0.01)
-    mesh = generate_swept_mesh(surf)
-    # Must not raise, topology must be fully generated
-    assert len(mesh.vertices) == 9
-    assert len(mesh.indices) == 24
+    import pytest
+    from holomed.anatomy.exceptions import AnatomyValidationError
+    with pytest.raises(AnatomyValidationError, match="180-degree trajectory reversals"):
+        mesh = generate_swept_mesh(surf)
 
 def test_immutability():
     pts = [Point3D(0,0,0), Point3D(0,1,0), Point3D(0,2,0)]

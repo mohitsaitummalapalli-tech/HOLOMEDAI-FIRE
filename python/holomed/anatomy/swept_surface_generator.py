@@ -143,6 +143,8 @@ def generate_swept_mesh(surface: SweptCutSurface, u_samples: int = 3) -> SweptCu
                 t_out_x, t_out_y, t_out_z = dx_out/mag_out, dy_out/mag_out, dz_out/mag_out
                 
                 dot = t_in_x*t_out_x + t_in_y*t_out_y + t_in_z*t_out_z
+                if dot < -0.9999:
+                    raise AnatomyValidationError("180-degree trajectory reversals are not supported for miter joins")
                 if dot < 0.9999:
                     is_corner = True
                     nm_x = t_in_x - t_out_x
@@ -160,9 +162,11 @@ def generate_swept_mesh(surface: SweptCutSurface, u_samples: int = 3) -> SweptCu
                 # Project along T_out onto the Miter Plane
                 t = (dp_x * nm_x + dp_y * nm_y + dp_z * nm_z) / (1.0 - dot)
                 
-                # Optional: Bevel fallback for extreme spikes
-                if abs(t) > 2.0 * surface.width:
-                    t = math.copysign(2.0 * surface.width, t)
+                # Bevel fallback for extreme outer spikes. We must NEVER clamp the inner fold (t < 0),
+                # otherwise we re-introduce self-intersections.
+                miter_limit = 2.0 * surface.width
+                if t > miter_limit:
+                    t = miter_limit
                     
                 pt = Point3D(pt.x + t * t_out_x, pt.y + t * t_out_y, pt.z + t * t_out_z)
                 

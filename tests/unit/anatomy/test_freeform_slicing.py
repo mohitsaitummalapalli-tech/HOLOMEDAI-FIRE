@@ -67,19 +67,32 @@ def _make_l_surface(
     width: float = 8.0,
     offset: Point3D = Point3D(0, 0, 0),
 ) -> SweptCutSurface:
-    """L-shaped SweptCutSurface: starts from (-4,0,0), goes to (0,0,0), then to (4,0,0).
+    """L-shaped SweptCutSurface: starts from (-2,0,0), goes to (0,0,0), then to (0,0,2).
     
-    This is actually a gentle kink (V-shape in XZ), sweeping along Y, 
-    staying fully interior to a box of size 2.0.
-    The trajectory passes through the origin with a slight Z dip at center.
+    This is a genuine 90-degree corner, sweeping along Y.
     """
     samples = [
-        TrajectorySample(Point3D(-4.0 + offset.x, offset.y, 0.123 + offset.z), 0.0, TrajectoryState.START),
-        TrajectorySample(Point3D(offset.x, offset.y, -0.123 + offset.z), 1.0, TrajectoryState.ACTIVE),
-        TrajectorySample(Point3D(4.0 + offset.x, offset.y, 0.123 + offset.z), 2.0, TrajectoryState.END),
+        TrajectorySample(Point3D(-3.0 + offset.x, offset.y, 0.5 + offset.z), 0.0, TrajectoryState.START),
+        TrajectorySample(Point3D(0.5 + offset.x, offset.y, 0.5 + offset.z), 1.0, TrajectoryState.ACTIVE),
+        TrajectorySample(Point3D(0.5 + offset.x, offset.y, 3.0 + offset.z), 2.0, TrajectoryState.END),
     ]
-    traj = ProcessedCutTrajectory("traj_l", "corr", tuple(samples), tuple([Vector3D(1, 0, 0)] * 3))
-    frames = tuple([TransportedFrame(Vector3D(1, 0, 0), Vector3D(0, 0, 1), Vector3D(0, -1, 0))] * 3)
+    # Re-calculate correct tangents
+    tangents = [
+        Vector3D(1, 0, 0),
+        Vector3D(1, 0, 0), # Middle tangent can be anything, swept_surface_generator ignores it
+        Vector3D(0, 0, 1)
+    ]
+    traj = ProcessedCutTrajectory("traj_l", "corr", tuple(samples), tuple(tangents))
+    
+    # Generate simple frames keeping binormal = (0, 1, 0) for vertical ribbon
+    # frame 0: tangent=(1,0,0), normal=(0,0,-1), binormal=(0,1,0)
+    f0 = TransportedFrame(Vector3D(1, 0, 0), Vector3D(0, 0, -1), Vector3D(0, 1, 0))
+    # frame 1: corner frame, T=(1,0,0), N=(0,0,-1), B=(0,1,0)
+    f1 = TransportedFrame(Vector3D(1, 0, 0), Vector3D(0, 0, -1), Vector3D(0, 1, 0))
+    # frame 2: tangent=(0,0,1), normal=(1,0,0), binormal=(0,1,0)
+    f2 = TransportedFrame(Vector3D(0, 0, 1), Vector3D(1, 0, 0), Vector3D(0, 1, 0))
+    
+    frames = (f0, f1, f2)
     return generate_swept_surface(traj, frames, width, 1.0)
 
 

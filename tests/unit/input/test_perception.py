@@ -278,7 +278,8 @@ def test_concrete_mediapipe_runtime_proof():
     adapter = ConcreteMediaPipeAdapter(min_detection_confidence=0.1, min_tracking_confidence=0.1)
 
     import os
-    import cv2
+    import importlib
+    cv2 = importlib.import_module("cv2")
     img_path = os.path.join(os.path.dirname(__file__), "..", "..", "assets", "hand.jpg")
     
     # Positive test: Real hand image
