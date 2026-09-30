@@ -10,6 +10,10 @@ from holomed.anatomy.mesh import AnatomicalMesh, AnatomicalPiece
 from holomed.anatomy.swept_surface import SweptCutSurface
 from abc import ABC, abstractmethod
 
+
+class FreeformSliceError(AnatomyValidationError):
+    pass
+
 class CutSurface:
     """Abstract base class for cut surfaces."""
     pass
@@ -347,6 +351,82 @@ class PlanarSliceStrategy(SliceStrategy):
         )
 
 
+class FreeformSliceStrategy(SliceStrategy):
+    def slice(self, piece: AnatomicalPiece, operation: SliceOperation) -> SliceResult:
+        assert isinstance(operation.cut_surface, SweptCutSurface)
+        
+        # Deferred imports to break circular dependency chain
+        from holomed.anatomy.swept_surface_generator import generate_swept_mesh
+        from holomed.anatomy.freeform_capping import (
+            compute_intersections_with_provenance,
+            extract_cutter_patch,
+            cap_partitioned_mesh,
+            get_segment_views,
+        )
+        from holomed.anatomy.mesh_partition import TargetMeshPartitioner
+        
+        # 1. Single cutter mesh generation (immutable for entire operation)
+        cutter_mesh = generate_swept_mesh(operation.cut_surface)
+        
+        # 2. D2 intersection with provenance capture (D4 orchestration boundary)
+        intersections = compute_intersections_with_provenance(piece.mesh, cutter_mesh)
+        if not intersections:
+            # Cut missed the target entirely — return original piece unchanged
+            return SliceResult(
+                operation_id=operation.operation_id,
+                parent_piece_id=piece.piece_id,
+                child_pieces=(piece,),
+                geometry_version=operation.geometry_version
+            )
+            
+        # Derive indexed segment views for target and cutter triangles
+        target_view, cutter_view = get_segment_views(intersections)
+        
+        # 3. D3 target partition using target_triangle_segments
+        partition_result = TargetMeshPartitioner.partition(
+            piece.mesh,
+            piece.piece_id,
+            operation.operation_id,
+            target_view
+        )
+        
+        # Require exactly two child pieces for a valid separating cut
+        if len(partition_result.child_pieces) != 2:
+            raise FreeformSliceError(
+                f"Freeform partition produced {len(partition_result.child_pieces)} components, expected exactly 2"
+            )
+            
+        # 4. D4 cutter patch extraction using cutter_triangle_segments
+        cutter_patch = extract_cutter_patch(cutter_mesh, cutter_view)
+        
+        # 5. D4 grafting — stitch patch into both children
+        child_A_capped = cap_partitioned_mesh(partition_result.child_pieces[0], cutter_patch)
+        child_B_capped = cap_partitioned_mesh(partition_result.child_pieces[1], cutter_patch)
+        
+        # 6. Volume conservation validation (uses D4 tolerance contracts)
+        orig_vol = piece.mesh.volume
+        vol_A = child_A_capped.mesh.volume
+        vol_B = child_B_capped.mesh.volume
+        
+        if vol_A <= 0 or vol_B <= 0:
+            raise FreeformSliceError(
+                f"Freeform slice produced child with non-positive volume: A={vol_A}, B={vol_B}"
+            )
+            
+        vol_sum = vol_A + vol_B
+        if abs(vol_sum - orig_vol) > 1e-4:
+            raise FreeformSliceError(
+                f"Volume conservation failed: original={orig_vol}, A+B={vol_sum}, delta={abs(vol_sum - orig_vol)}"
+            )
+            
+        return SliceResult(
+            operation_id=operation.operation_id,
+            parent_piece_id=piece.piece_id,
+            child_pieces=(child_A_capped, child_B_capped),
+            geometry_version=operation.geometry_version
+        )
+
+
 class SliceEngine:
     @staticmethod
     def slice_piece(piece: AnatomicalPiece, operation: SliceOperation) -> SliceResult:
@@ -354,6 +434,7 @@ class SliceEngine:
             strategy = PlanarSliceStrategy()
             return strategy.slice(piece, operation)
         elif isinstance(operation.cut_surface, SweptCutSurface):
-            raise NotImplementedError("Freeform slice strategy is not yet implemented")
+            strategy = FreeformSliceStrategy()
+            return strategy.slice(piece, operation)
         else:
             raise TypeError(f"Unsupported cut surface type: {type(operation.cut_surface).__name__}")

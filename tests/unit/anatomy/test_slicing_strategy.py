@@ -69,29 +69,6 @@ def test_existing_planar_result_regression(cube_piece):
     assert c2_strat.mesh.vertices == c2_eng.mesh.vertices
     assert c2_strat.mesh.indices == c2_eng.mesh.indices
 
-def test_swept_cut_surface_unsupported_behavior(cube_piece):
-    s1 = Point3D(0, 0, 0)
-    s2 = Point3D(0, 1, 0)
-    s3 = Point3D(0, 2, 0)
-
-    t1 = Vector3D(0, 1, 0)
-    n1 = Vector3D(0, 0, 1)
-    b1 = Vector3D(1, 0, 0)
-
-    frame = TransportedFrame(t1, n1, b1)
-
-    swept = SweptCutSurface(
-        surface_id="test_swept",
-        centerline_samples=(s1, s2, s3),
-        transport_frames=(frame, frame, frame),
-        width=0.01,
-        thickness=0.01
-    )
-    op = SliceOperation("op_2", swept, 1)
-
-    with pytest.raises(NotImplementedError) as exc:
-        SliceEngine.slice_piece(cube_piece, op)
-    assert "Freeform slice strategy is not yet implemented" in str(exc.value)
 
 class FakeCutSurface(CutSurface):
     pass
