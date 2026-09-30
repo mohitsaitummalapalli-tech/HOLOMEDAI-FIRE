@@ -186,7 +186,23 @@ class DeviceControlManager(IService):
 
         with self._timeout_lock:
             current = self._active_commands.get(execution_id)
-            if current and current.session_id == cmd.session_id and current.command_nonce == cmd.command_nonce:
+            current_device_id = None
+            if current:
+                for device in self._registry.all_devices:
+                    for endpoint in device.endpoints:
+                        if endpoint.endpoint_id == current.endpoint_id:
+                            current_device_id = device.device_id
+                            break
+                    if current_device_id:
+                        break
+
+            if (current and
+                current.session_id == cmd.session_id and
+                current.command_nonce == cmd.command_nonce and
+                current.device_epoch == cmd.device_epoch and
+                current.controller_epoch == cmd.controller_epoch and
+                current.physical_operation_id == cmd.physical_operation_id and
+                current_device_id == device_id):
                 self._active_commands.pop(execution_id, None)
 
     def _release_physical_lease(self, execution_id: str) -> None:
