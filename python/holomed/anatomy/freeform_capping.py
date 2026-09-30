@@ -149,9 +149,9 @@ def extract_cutter_patch(
         
         if t_idx in cutter_triangle_segments:
             try:
-                t1, t2, new_segs = _split_triangle(v0, v1, v2, cutter_triangle_segments[t_idx])
-                modified_mesh_tris.extend(t1)
-                modified_mesh_tris.extend(t2)
+                from holomed.anatomy.local_arrangement import subdivide_cutter_triangle
+                new_tris, new_segs = subdivide_cutter_triangle(v0, v1, v2, cutter_triangle_segments[t_idx])
+                modified_mesh_tris.extend(new_tris)
                 for seg in new_segs:
                     barrier_edges.add((seg.start, seg.end))
                     barrier_edges.add((seg.end, seg.start))
@@ -159,6 +159,25 @@ def extract_cutter_patch(
                 raise CutterPartitionError(f"Failed to split cutter triangle {t_idx}: {e}")
         else:
             modified_mesh_tris.append((v0, v1, v2))
+
+    # 2.5 Deduplicate vertices across all cutter triangles to heal floating-point cracks
+    global_verts = []
+    def get_global(pt: Point3D) -> Point3D:
+        for gv in global_verts:
+            if abs(pt.x - gv.x) + abs(pt.y - gv.y) + abs(pt.z - gv.z) < 1e-5:
+                return gv
+        global_verts.append(pt)
+        return pt
+        
+    deduped_tris = []
+    for (va, vb, vc) in modified_mesh_tris:
+        deduped_tris.append((get_global(va), get_global(vb), get_global(vc)))
+    modified_mesh_tris = deduped_tris
+    
+    deduped_barrier = set()
+    for e in barrier_edges:
+        deduped_barrier.add((get_global(e[0]), get_global(e[1])))
+    barrier_edges = deduped_barrier
             
     # 3. Build adjacency graph of new triangles
     edge_to_tris = {}
@@ -202,7 +221,7 @@ def extract_cutter_patch(
                 break
         if not touches_outer:
             interior_components.append(comp)
-            
+
     # 6. Require exactly one interior component
     if len(interior_components) == 0:
         raise CutterPartitionError("No valid bounded patch found (all components touch outer boundary or none exist)")
