@@ -158,7 +158,7 @@ class DeviceControlManager(IService):
     def durably_record_terminal_state(self, execution_id: str, terminal_state: str) -> None:
         """Atomically records a terminal software resolution in the durable journal."""
         with self._timeout_lock:
-            cmd = self._active_commands.pop(execution_id, None)
+            cmd = self._active_commands.get(execution_id)
 
         if not cmd or not self._capacity_releaser:
             return
@@ -183,6 +183,11 @@ class DeviceControlManager(IService):
                 cmd.command_nonce,
                 val
             )
+
+        with self._timeout_lock:
+            current = self._active_commands.get(execution_id)
+            if current and current.session_id == cmd.session_id and current.command_nonce == cmd.command_nonce:
+                self._active_commands.pop(execution_id, None)
 
     def _release_physical_lease(self, execution_id: str) -> None:
         """Hardware-level lease release."""
@@ -845,6 +850,9 @@ class DeviceControlManager(IService):
 
         if route_state == StopRouteState.PHYSICAL_ROUTING_ACCEPTED:
             target_endpoint.request_stop(execution_id)
+        elif route_state == StopRouteState.PRE_CLAIM_CANCELLED:
+            self.durably_record_terminal_state(execution_id, "PREEMPTED")
+            self._release_physical_lease(execution_id)
 
     # --------------------------------------------------------------------------
     # Private Helpers
