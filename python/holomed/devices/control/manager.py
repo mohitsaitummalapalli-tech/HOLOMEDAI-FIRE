@@ -203,7 +203,7 @@ class DeviceControlManager(IService):
                 current.controller_epoch == cmd.controller_epoch and
                 current.physical_operation_id == cmd.physical_operation_id and
                 current_device_id == device_id):
-                self._active_commands.pop(execution_id, None)
+                pass  # DO NOT POP HERE. Let the timeout loop clean up after 5 seconds to act as idempotency tombstone.
 
     def _release_physical_lease(self, execution_id: str) -> None:
         """Hardware-level lease release."""
@@ -612,26 +612,58 @@ class DeviceControlManager(IService):
                             if hasattr(endpoint, "set_epoch_fence") and self._authoritative_epoch_provider:
                                 endpoint.set_epoch_fence(self._authoritative_epoch_provider) # type: ignore
 
-                        # 3. Physical Submission
-                        physical_result = endpoint.submit_command(physical_cmd)
-
-                        if physical_result.status == SubmissionStatus.ACCEPTED:
-                            # Register deadline
+                            # Pre-publish binding to act as idempotency tombstone & allow preemption
                             with self._timeout_lock:
-                                self._deadlines[execution_id] = (time.time() + 5.0, lifecycle_generation)
                                 self._active_commands[execution_id] = physical_cmd
-                        else:
-                            # Failure Rollback (Case A: Confirmed Absent)
-                            if self._capacity_releaser:
-                                self._capacity_releaser(
-                                    session_id,
-                                    device.device_id,
-                                    physical_cmd.device_epoch,
-                                    physical_cmd.controller_epoch,
-                                    physical_cmd.physical_operation_id,
-                                    physical_cmd.command_nonce,
-                                    "OPERATION_CONFIRMED_ABSENT"
-                                )
+
+                            try:
+                                # 3. Physical Submission
+                                physical_result = endpoint.submit_command(physical_cmd)
+
+                                if physical_result.status == SubmissionStatus.ACCEPTED:
+                                    # Register deadline ONLY if it hasn't been preempted/popped
+                                    with self._timeout_lock:
+                                        if execution_id in self._active_commands:
+                                            self._deadlines[execution_id] = (time.time() + 5.0, lifecycle_generation)
+                                else:
+                                    # Failure Rollback (Case A: Confirmed Absent)
+                                    with self._timeout_lock:
+                                        self._active_commands.pop(execution_id, None)
+
+                                    if self._capacity_releaser:
+                                        from holomed.persistence.exceptions import PersistenceLifecycleError
+                                        try:
+                                            self._capacity_releaser(
+                                                session_id,
+                                                device.device_id,
+                                                physical_cmd.device_epoch,
+                                                physical_cmd.controller_epoch,
+                                                physical_cmd.physical_operation_id,
+                                                physical_cmd.command_nonce,
+                                                "OPERATION_CONFIRMED_ABSENT"
+                                            )
+                                        except PersistenceLifecycleError:
+                                            pass
+                            except Exception as submit_exc:
+                                # Failure Rollback (Case B: Exception during submission)
+                                with self._timeout_lock:
+                                    self._active_commands.pop(execution_id, None)
+
+                                if self._capacity_releaser:
+                                    from holomed.persistence.exceptions import PersistenceLifecycleError
+                                    try:
+                                        self._capacity_releaser(
+                                            session_id,
+                                            device.device_id,
+                                            physical_cmd.device_epoch,
+                                            physical_cmd.controller_epoch,
+                                            physical_cmd.physical_operation_id,
+                                            physical_cmd.command_nonce,
+                                            "OPERATION_CONFIRMED_ABSENT"
+                                        )
+                                    except PersistenceLifecycleError:
+                                        pass
+                                raise submit_exc
 
                     canonical_result = self._verifier.validate_and_canonicalize_command_result(
                         dict(physical_result.details)
@@ -850,6 +882,15 @@ class DeviceControlManager(IService):
 
     def preempt_execution(self, device_id: str, endpoint_id: str, execution_id: str, lifecycle_generation: int) -> None:
         """Issue an authoritative preemption routing request for a specific execution."""
+        # 1. Authorize against active command tombstone window
+        with self._timeout_lock:
+            cmd = self._active_commands.get(execution_id)
+
+        if not cmd:
+            # If it is not in the active window, it's either an unknown execution,
+            # or it has expired past 5 seconds. Either way, cancellation is a no-op.
+            return
+
         if not self._registry.contains(device_id):
             raise DeviceNotFoundError(f"Device '{device_id}' not found")
         device = self._registry.get(device_id)

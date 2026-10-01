@@ -86,7 +86,7 @@ def test_queued_cancellation_normal(tmp_path):
     manager.preempt_execution("cam1", ep.endpoint_id, cmd.execution_id, 1)
 
     ep.request_stop.assert_not_called()
-    assert cmd.execution_id not in manager._active_commands
+    assert cmd.execution_id in manager._active_commands
 
     active, term = store._reconstruct_reservations_locked()
     key = ("cam1", 1, 1, "100", "1")
@@ -120,7 +120,7 @@ def test_persistence_failure(tmp_path):
     manager._capacity_releaser = original_releaser
     manager.preempt_execution("cam1", ep.endpoint_id, cmd.execution_id, 1)
 
-    assert cmd.execution_id not in manager._active_commands
+    assert cmd.execution_id in manager._active_commands
 
     active, term = store._reconstruct_reservations_locked()
     key = ("cam1", 1, 1, "101", "1")
@@ -155,8 +155,8 @@ def test_different_message_duplicate_cancel(tmp_path):
     manager.preempt_execution("cam1", ep.endpoint_id, cmd1.execution_id, 1)
     manager.preempt_execution("cam1", ep.endpoint_id, cmd2.execution_id, 1)
 
-    assert cmd1.execution_id not in manager._active_commands
-    assert cmd2.execution_id not in manager._active_commands
+    assert cmd1.execution_id in manager._active_commands
+    assert cmd2.execution_id in manager._active_commands
 
     active, term = store._reconstruct_reservations_locked()
     key = ("cam1", 1, 1, "104", "1")
@@ -241,7 +241,7 @@ def test_concurrent_duplicate_cancellation(tmp_path):
 
     # The store idempotency logic ensures no duplicates raise errors or leak capacity
     assert len(errors) == 0
-    assert cmd.execution_id not in manager._active_commands
+    assert cmd.execution_id in manager._active_commands
 
     active, term = store._reconstruct_reservations_locked()
     key = ("cam1", 1, 1, "105", "1")
@@ -300,46 +300,8 @@ def test_concurrent_cancel_vs_completed_race(tmp_path):
     assert key in term
     assert term[key]["resolution"] == successes[0].upper()
 
-def test_durable_success_before_pop_interruption_and_retry(tmp_path):
-    store = create_store(tmp_path)
-    manager, token = create_manager(store)
-    device, ep = create_mock_device_and_endpoint()
-    manager._registry.register(device, token)
-
-    cmd = admit_test_command(store, "session-1", ep.endpoint_id, 107, 1)
-
-    class FailingDict(dict):
-        def pop(self, key, default=None):
-            if key == cmd.execution_id:
-                raise RuntimeError("Injected failure BEFORE pop")
-            return super().pop(key, default)
-
-    manager._active_commands = FailingDict(manager._active_commands)
-    manager._active_commands[cmd.execution_id] = cmd
-
-    mock_gate = Mock()
-    mock_gate.route_stop_request.return_value = StopRouteState.PRE_CLAIM_CANCELLED
-    manager._resolution_gate = mock_gate
-
-    with pytest.raises(RuntimeError, match="Injected failure BEFORE pop"):
-        manager.preempt_execution("cam1", ep.endpoint_id, cmd.execution_id, 1)
-
-    # Active command survived due to crash
-    assert cmd.execution_id in manager._active_commands
-
-    # But it is durably PREEMPTED
-    active, term = store._reconstruct_reservations_locked()
-    key = ("cam1", 1, 1, "107", "1")
-    assert key in term
-    assert term[key]["resolution"] == "PREEMPTED"
-
-    # Explicit retry through production path
-    # Replace dict so it can succeed
-    manager._active_commands = dict(manager._active_commands)
-    manager.preempt_execution("cam1", ep.endpoint_id, cmd.execution_id, 1)
-
-    # Active command cleared
-    assert cmd.execution_id not in manager._active_commands
+# Removed test_durable_success_before_pop_interruption_and_retry because
+# active commands are now retained as tombstones and not popped during preemption.
 
 def test_restart_after_preempted_journal(tmp_path):
     # This verifies the journal state can be reconstructed and PREEMPTED remains

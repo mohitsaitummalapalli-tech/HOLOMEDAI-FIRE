@@ -370,6 +370,20 @@ class DurableSessionStore:
                         f"Canonical identity {canonical_identity} has already been terminated. Reuse is forbidden."
                     )
 
+                # Verify Execution-ID non-rebinding invariant
+                for c, p in active.items():
+                    if p.get("execution_id") == execution_id:
+                        if p.get("command_nonce") != command_nonce or p.get("_original_session_id") != session_id:
+                            raise PersistenceIdentityReuseError(
+                                f"Execution ID {execution_id} is already bound to an active operation. Rebinding is forbidden."
+                            )
+                for c, p in terminated.items():
+                    if p.get("execution_id") == execution_id:
+                        if p.get("command_nonce") != command_nonce or p.get("_original_session_id") != session_id:
+                            raise PersistenceIdentityReuseError(
+                                f"Execution ID {execution_id} is already bound to a terminated operation. Rebinding is forbidden."
+                            )
+
                 if canonical_identity in active:
                     return physical_operation_id, True, None  # Unlikely with uuid4, but kept for structural completeness
 
