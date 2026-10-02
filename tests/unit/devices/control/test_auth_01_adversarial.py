@@ -199,8 +199,8 @@ class TestThreeStatePersistenceOutcome:
         key = ("cam1", 1, 1, "204", "1")
         assert key in active
 
-    def test_commit_outcome_unknown_runtime_error(self, tmp_path):
-        """COMMIT_OUTCOME_UNKNOWN (RuntimeError): gate → quarantine."""
+    def test_persistence_commit_outcome_unknown_does_not_abort_cancel_intent(self, tmp_path):
+        """COMMIT_OUTCOME_UNKNOWN (RuntimeError): gate → quarantine, does NOT revert."""
         store, manager, gate, device, ep, cmd = setup_manager_with_real_gate(tmp_path, 205)
 
         def unexpected_fail(*args, **kwargs):
@@ -211,9 +211,23 @@ class TestThreeStatePersistenceOutcome:
             manager.preempt_execution("session_1", "cam1", ep.endpoint_id, cmd.execution_id, 1)
 
         rec = gate._records[cmd.execution_id]
+
+        # 1. MUST NOT revert PRE_CLAIM_CANCELLING to NOT_REQUESTED
+        assert rec.stop_route_state != StopRouteState.NOT_REQUESTED
+        # 2. MUST remain fail-closed / Quarantined
         assert rec.stop_route_state == StopRouteState.PRE_CLAIM_CANCEL_QUARANTINED
         assert rec.quarantine_consequence is True
         assert rec.terminal_resolution_status is False
+
+        # 3. Worker claim MUST remain blocked
+        claimed = gate.claim_execution_ownership(cmd.execution_id, 1)
+        assert claimed is False
+
+        # 4. Resource ownership must not be released
+        active, term = store._reconstruct_reservations_locked()
+        key = ("cam1", 1, 1, "205", "1")
+        assert key in active
+        assert key not in term
 
     def test_quarantined_blocks_subsequent_claims(self, tmp_path):
         """After quarantine, worker claims MUST be rejected."""
@@ -463,8 +477,8 @@ class TestCrashCutpoints:
         # Durable truth: PREEMPTED → not active
         assert key not in active
 
-    def test_cutpoint_c_crash_persistence_unknown_not_committed(self, tmp_path):
-        """Crash after persistence outcome UNKNOWN where write actually failed.
+    def test_cutpoint_c_crash_persistence_not_committed(self, tmp_path):
+        """Crash after persistence outcome NOT_COMMITTED where write actually failed.
         Restart: operation is still ADMITTED, can be re-cancelled."""
         store = create_store(tmp_path)
         gate = ExecutionResolutionGate()
