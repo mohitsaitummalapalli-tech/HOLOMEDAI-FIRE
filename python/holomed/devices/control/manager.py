@@ -882,15 +882,7 @@ class DeviceControlManager(IService):
 
     def preempt_execution(self, device_id: str, endpoint_id: str, execution_id: str, lifecycle_generation: int) -> None:
         """Issue an authoritative preemption routing request for a specific execution."""
-        # 1. Authorize against active command tombstone window
-        with self._timeout_lock:
-            cmd = self._active_commands.get(execution_id)
-
-        if not cmd:
-            # If it is not in the active window, it's either an unknown execution,
-            # or it has expired past 5 seconds. Either way, cancellation is a no-op.
-            return
-
+        # 1. Device and endpoint validation
         if not self._registry.contains(device_id):
             raise DeviceNotFoundError(f"Device '{device_id}' not found")
         device = self._registry.get(device_id)
