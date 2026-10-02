@@ -213,13 +213,13 @@ class DeviceControlManager(IService):
                     if current_device_id:
                         break
 
-            if (current and
+            if (current and cmd and
                 current.session_id == cmd.session_id and
                 current.command_nonce == cmd.command_nonce and
                 current.device_epoch == cmd.device_epoch and
                 current.controller_epoch == cmd.controller_epoch and
                 current.physical_operation_id == cmd.physical_operation_id and
-                current_device_id == device_id):
+                binding_canon and current_device_id == binding_canon[0]):
                 pass  # DO NOT POP HERE. Let the timeout loop clean up after 5 seconds to act as idempotency tombstone.
 
     def _release_physical_lease(self, execution_id: str) -> None:
@@ -962,13 +962,43 @@ class DeviceControlManager(IService):
         if route_state == StopRouteState.PHYSICAL_ROUTING_ACCEPTED:
             target_endpoint.request_stop(execution_id)
         elif route_state == StopRouteState.PRE_CLAIM_CANCELLING:
-            from holomed.persistence.exceptions import PersistenceLifecycleError
+            from holomed.persistence.exceptions import (
+                PersistenceLifecycleError,
+                PersistenceValidationError,
+                PersistenceEpochMismatchError,
+                PersistenceTerminationConflictError,
+            )
+            # Three-state persistence outcome:
+            #   COMMITTED            → commit gate, release resources
+            #   NOT_COMMITTED        → abort gate (safe retry), re-raise
+            #   COMMIT_OUTCOME_UNKNOWN → quarantine gate, retain resources, re-raise
+            #
+            # NOT_COMMITTED errors are those where the write definitively
+            # did NOT reach the journal: validation failures, lifecycle
+            # precondition failures, epoch mismatches, and termination
+            # conflicts are all raised BEFORE the fsync barrier.
+            #
+            # Any OSError or unexpected exception occurs at/after the I/O
+            # boundary, so the write may or may not have been committed.
+            definite_not_committed = (
+                PersistenceLifecycleError,
+                PersistenceValidationError,
+                PersistenceEpochMismatchError,
+                PersistenceTerminationConflictError,
+            )
             try:
                 self.durably_record_terminal_state(execution_id, "PREEMPTED")
-            except PersistenceLifecycleError:
+            except definite_not_committed:
+                # OUTCOME: NOT_COMMITTED — safe to abort and retry later
                 self._resolution_gate.abort_pre_claim_cancel(execution_id, lifecycle_generation)
                 raise
+            except Exception:
+                # OUTCOME: COMMIT_OUTCOME_UNKNOWN — must fail closed
+                # Quarantine: retain resources, block claims, require reconciliation
+                self._resolution_gate.quarantine_pre_claim_cancel(execution_id, lifecycle_generation)
+                raise
 
+            # OUTCOME: COMMITTED — finalize gate and release resources
             self._resolution_gate.commit_pre_claim_cancel(execution_id, lifecycle_generation)
             self._release_physical_lease(execution_id)
         elif route_state == StopRouteState.ALREADY_TERMINAL:

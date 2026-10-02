@@ -198,7 +198,10 @@ class ExecutionResolutionGate(IExecutionResolutionGate):
             if record.terminal_resolution_status:
                 return False
 
-            if record.stop_route_state == StopRouteState.PRE_CLAIM_CANCELLING:
+            if record.stop_route_state in (
+                StopRouteState.PRE_CLAIM_CANCELLING,
+                StopRouteState.PRE_CLAIM_CANCEL_QUARANTINED,
+            ):
                 return False
 
             # If already claimed (shouldn't happen twice in valid flow, but safe)
@@ -234,6 +237,11 @@ class ExecutionResolutionGate(IExecutionResolutionGate):
                 return record.stop_route_state
 
             if not record.execution_claimed:
+                if record.stop_route_state == StopRouteState.PRE_CLAIM_CANCEL_QUARANTINED:
+                    return StopRouteState.PRE_CLAIM_CANCEL_QUARANTINED
+                if record.stop_route_state == StopRouteState.PRE_CLAIM_CANCELLED:
+                    return StopRouteState.PRE_CLAIM_CANCELLED
+
                 # Pre-claim non-started cancellation INTENT
                 updated_record = AuthoritativeExecutionRecord(
                     execution_id=execution_id,
@@ -320,5 +328,35 @@ class ExecutionResolutionGate(IExecutionResolutionGate):
                 quarantine_consequence=record.quarantine_consequence,
                 execution_claimed=False,
                 stop_route_state=StopRouteState.NOT_REQUESTED,
+            )
+            self._records[execution_id] = updated_record
+
+    def quarantine_pre_claim_cancel(self, execution_id: str, lifecycle_generation: int) -> None:
+        """Quarantine a pre-claim cancellation whose persistence outcome is UNKNOWN.
+
+        The execution remains locked against worker claims and resource release.
+        Reconciliation from durable truth is required before any state change.
+        """
+        lock = self._get_lock(execution_id)
+        with lock:
+            record = self._records.get(execution_id)
+            if not record or record.lifecycle_generation != lifecycle_generation:
+                return
+
+            if record.stop_route_state != StopRouteState.PRE_CLAIM_CANCELLING:
+                return
+
+            updated_record = AuthoritativeExecutionRecord(
+                execution_id=execution_id,
+                current_state=CommandState.PREEMPT_REQUESTED,
+                latest_accepted_sequence=record.latest_accepted_sequence,
+                terminal_resolution_status=False,
+                terminal_event_id=None,
+                source_authority=None,
+                lifecycle_generation=record.lifecycle_generation,
+                timeout_status=record.timeout_status,
+                quarantine_consequence=True,
+                execution_claimed=False,
+                stop_route_state=StopRouteState.PRE_CLAIM_CANCEL_QUARANTINED,
             )
             self._records[execution_id] = updated_record

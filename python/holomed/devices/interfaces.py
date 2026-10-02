@@ -266,7 +266,15 @@ class IExecutionResolutionGate(abc.ABC):
 
     @abc.abstractmethod
     def abort_pre_claim_cancel(self, execution_id: str, lifecycle_generation: int) -> None:
-        """Abort a failed pre-claim cancellation intent."""
+        """Abort a failed pre-claim cancellation intent (definite NOT_COMMITTED)."""
+
+    @abc.abstractmethod
+    def quarantine_pre_claim_cancel(self, execution_id: str, lifecycle_generation: int) -> None:
+        """Quarantine a pre-claim cancellation whose persistence outcome is UNKNOWN.
+
+        The execution remains locked against worker claims and resource release.
+        Reconciliation from durable truth is required before any state change.
+        """
 
     @abc.abstractmethod
     def is_capacity_release_terminal(self, state: str) -> bool:
