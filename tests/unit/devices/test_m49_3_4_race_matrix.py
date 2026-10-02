@@ -30,10 +30,16 @@ def registry():
 @pytest.fixture
 def manager(registry, gate, publisher):
     from holomed.configuration.models import AppConfig, EnvironmentProfile, LogLevel
-    dcm = DeviceControlManager(registry=registry, resolution_gate=gate, rehydration_engine=MagicMock(), authoritative_epoch_provider=lambda: 1)
+    dcm = DeviceControlManager(registry=registry, resolution_gate=gate, rehydration_engine=MagicMock(), authoritative_epoch_provider=lambda: 1, )
     ctx = RuntimeContext(app_config=AppConfig(app_name="test", environment=EnvironmentProfile.TESTING, host="localhost", port=8000, log_level=LogLevel.INFO), epoch_id=1)
     dcm.initialize(ctx)
     dcm.start()
+    original_preempt = dcm.preempt_execution
+    def fake_preempt(session_id, device_id, endpoint_id, execution_id, lifecycle_generation):
+        from unittest.mock import MagicMock
+        dcm._active_commands[execution_id] = MagicMock(session_id=session_id, endpoint_id=endpoint_id)
+        return original_preempt(session_id, device_id, endpoint_id, execution_id, lifecycle_generation)
+    dcm.preempt_execution = fake_preempt
     return dcm
 
 @pytest.fixture
@@ -92,7 +98,7 @@ def test_race_4_8_stop_vs_completed(endpoint_and_device, manager, gate, transpor
     assert gate._records[exec_id].current_state == CommandState.COMPLETED
     
     # Now issue stop request (Race 8: Stop after COMPLETED)
-    manager.preempt_execution("dev_1", "ep_1", exec_id, 1)
+    manager.preempt_execution('session_1', "dev_1", "ep_1", exec_id, 1)
     
     # Gate should ignore it, state remains COMPLETED, not PREEMPTED
     assert gate._records[exec_id].current_state == CommandState.COMPLETED
@@ -104,7 +110,7 @@ def test_race_5_stop_vs_timeout(endpoint_and_device, manager, gate, transport):
     cmd = create_cmd(exec_id)
     
     # Pre-claim stop commits first
-    manager.preempt_execution("dev_1", "ep_1", exec_id, 1)
+    manager.preempt_execution('session_1', "dev_1", "ep_1", exec_id, 1)
     
     # Timeout tries to resolve
     rec = gate.resolve_timeout(exec_id, 1)
@@ -120,7 +126,7 @@ def test_race_9_stale_generation_stop(endpoint_and_device, manager, gate):
     time.sleep(0.05)
     
     # Stop with stale generation 0
-    manager.preempt_execution("dev_1", "ep_1", exec_id, 0)
+    manager.preempt_execution('session_1', "dev_1", "ep_1", exec_id, 0)
     
     # Gate should reject it
     assert gate._records[exec_id].stop_route_state == StopRouteState.NOT_REQUESTED
@@ -132,7 +138,7 @@ def test_race_11_stop_transport_unavailable(endpoint_and_device, manager, gate, 
     ep.submit_command(cmd)
     time.sleep(0.05)
     
-    manager.preempt_execution("dev_1", "ep_1", exec_id, 1)
+    manager.preempt_execution('session_1', "dev_1", "ep_1", exec_id, 1)
     
     # Clear transport to simulate lost telemetry
     transport.drain_normal()
@@ -151,7 +157,7 @@ def test_race_13_stop_while_quarantined_unclaimed(endpoint_and_device, manager, 
     exec_id = "exec_race_13"
     
     # Pre-claim cancellation succeeds
-    manager.preempt_execution("dev_1", "ep_1", exec_id, 1)
+    manager.preempt_execution('session_1', "dev_1", "ep_1", exec_id, 1)
     assert gate._records[exec_id].current_state == CommandState.PREEMPTED
     assert gate._records[exec_id].stop_route_state == StopRouteState.PRE_CLAIM_CANCELLED
 
@@ -166,7 +172,7 @@ def test_race_14_stop_while_quarantined_claimed(endpoint_and_device, manager, ga
     ep._endpoint_state = EndpointState.QUARANTINED
     
     # Post-claim stop routing
-    manager.preempt_execution("dev_1", "ep_1", exec_id, 1)
+    manager.preempt_execution('session_1', "dev_1", "ep_1", exec_id, 1)
     
     assert gate._records[exec_id].stop_route_state == StopRouteState.PHYSICAL_ROUTING_ACCEPTED
     

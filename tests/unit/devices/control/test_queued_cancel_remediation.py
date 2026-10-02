@@ -22,7 +22,7 @@ def create_store(tmp_path):
     (cam1_dir / "device_epoch.json").write_text(json.dumps({"device_epoch": 1}))
 
     store = DurableSessionStore(tmp_path, epoch_id=1)
-    store.start_session("session-1", 1)
+    store.start_session("session_1", 1)
     return store
 
 def create_manager(store):
@@ -33,6 +33,12 @@ def create_manager(store):
     manager._capacity_releaser = store.record_operation_terminated
     manager._state = Mock()
     manager._state.name = "STARTED"
+
+
+
+
+
+
     manager._registry = registry
     return manager, token
 
@@ -76,14 +82,14 @@ def test_queued_cancellation_normal(tmp_path):
     device, ep = create_mock_device_and_endpoint()
     manager._registry.register(device, token)
 
-    cmd = admit_test_command(store, "session-1", ep.endpoint_id, 100, 1)
+    cmd = admit_test_command(store, "session_1", ep.endpoint_id, 100, 1)
     manager._active_commands[cmd.execution_id] = cmd
 
     mock_gate = Mock()
     mock_gate.route_stop_request.return_value = StopRouteState.PRE_CLAIM_CANCELLED
     manager._resolution_gate = mock_gate
 
-    manager.preempt_execution("cam1", ep.endpoint_id, cmd.execution_id, 1)
+    manager.preempt_execution('session_1', "cam1", ep.endpoint_id, cmd.execution_id, 1)
 
     ep.request_stop.assert_not_called()
     assert cmd.execution_id in manager._active_commands
@@ -103,7 +109,7 @@ def test_persistence_failure(tmp_path):
     mock_gate.route_stop_request.return_value = StopRouteState.PRE_CLAIM_CANCELLED
     manager._resolution_gate = mock_gate
 
-    cmd = admit_test_command(store, "session-1", ep.endpoint_id, 101, 1)
+    cmd = admit_test_command(store, "session_1", ep.endpoint_id, 101, 1)
     manager._active_commands[cmd.execution_id] = cmd
 
     original_releaser = manager._capacity_releaser
@@ -113,12 +119,12 @@ def test_persistence_failure(tmp_path):
     manager._capacity_releaser = failing_releaser
 
     with pytest.raises(PersistenceLifecycleError):
-        manager.preempt_execution("cam1", ep.endpoint_id, cmd.execution_id, 1)
+        manager.preempt_execution('session_1', "cam1", ep.endpoint_id, cmd.execution_id, 1)
 
     assert cmd.execution_id in manager._active_commands
 
     manager._capacity_releaser = original_releaser
-    manager.preempt_execution("cam1", ep.endpoint_id, cmd.execution_id, 1)
+    manager.preempt_execution('session_1', "cam1", ep.endpoint_id, cmd.execution_id, 1)
 
     assert cmd.execution_id in manager._active_commands
 
@@ -137,7 +143,7 @@ def test_different_message_duplicate_cancel(tmp_path):
     mock_gate.route_stop_request.return_value = StopRouteState.PRE_CLAIM_CANCELLED
     manager._resolution_gate = mock_gate
 
-    cmd1 = admit_test_command(store, "session-1", ep.endpoint_id, 104, 1)
+    cmd1 = admit_test_command(store, "session_1", ep.endpoint_id, 104, 1)
     manager._active_commands[cmd1.execution_id] = cmd1
 
     cmd2 = Mock(spec=PhysicalCommand)
@@ -152,8 +158,8 @@ def test_different_message_duplicate_cancel(tmp_path):
     manager._active_commands[cmd2.execution_id] = cmd2
 
     # Two distinct request identities sharing the same physical canonical identity
-    manager.preempt_execution("cam1", ep.endpoint_id, cmd1.execution_id, 1)
-    manager.preempt_execution("cam1", ep.endpoint_id, cmd2.execution_id, 1)
+    manager.preempt_execution('session_1', "cam1", ep.endpoint_id, cmd1.execution_id, 1)
+    manager.preempt_execution('session_1', "cam1", ep.endpoint_id, cmd2.execution_id, 1)
 
     assert cmd1.execution_id in manager._active_commands
     assert cmd2.execution_id in manager._active_commands
@@ -173,7 +179,7 @@ def test_targeted_identity_replacement(tmp_path):
     mock_gate.route_stop_request.return_value = StopRouteState.PRE_CLAIM_CANCELLED
     manager._resolution_gate = mock_gate
 
-    cmd1 = admit_test_command(store, "session-1", ep.endpoint_id, 110, 1)
+    cmd1 = admit_test_command(store, "session_1", ep.endpoint_id, 110, 1)
 
     # We rig capacity releaser to swap the active command right before popping
     original_releaser = manager._capacity_releaser
@@ -198,7 +204,7 @@ def test_targeted_identity_replacement(tmp_path):
     manager._capacity_releaser = capacity_releaser_with_swap
 
     manager._active_commands[cmd1.execution_id] = cmd1
-    manager.preempt_execution("cam1", ep.endpoint_id, cmd1.execution_id, 1)
+    manager.preempt_execution('session_1', "cam1", ep.endpoint_id, cmd1.execution_id, 1)
 
     # Prove that the replacement command was NOT popped because its canonical identity didn't match!
     assert manager._active_commands[cmd1.execution_id].device_epoch == 9999
@@ -210,7 +216,7 @@ def test_concurrent_duplicate_cancellation(tmp_path):
     device, ep = create_mock_device_and_endpoint()
     manager._registry.register(device, token)
 
-    cmd = admit_test_command(store, "session-1", ep.endpoint_id, 105, 1)
+    cmd = admit_test_command(store, "session_1", ep.endpoint_id, 105, 1)
     manager._active_commands[cmd.execution_id] = cmd
 
     mock_gate = Mock()
@@ -231,7 +237,7 @@ def test_concurrent_duplicate_cancellation(tmp_path):
 
     def cancel_task():
         try:
-            manager.preempt_execution("cam1", ep.endpoint_id, cmd.execution_id, 1)
+            manager.preempt_execution('session_1', "cam1", ep.endpoint_id, cmd.execution_id, 1)
         except Exception as e:
             errors.append(e)
 
@@ -254,7 +260,7 @@ def test_concurrent_cancel_vs_completed_race(tmp_path):
     device, ep = create_mock_device_and_endpoint()
     manager._registry.register(device, token)
 
-    cmd = admit_test_command(store, "session-1", ep.endpoint_id, 106, 1)
+    cmd = admit_test_command(store, "session_1", ep.endpoint_id, 106, 1)
     manager._active_commands[cmd.execution_id] = cmd
 
     barrier = threading.Barrier(2)
@@ -310,7 +316,7 @@ def test_restart_after_preempted_journal(tmp_path):
     device, ep = create_mock_device_and_endpoint()
     manager._registry.register(device, token)
 
-    cmd = admit_test_command(store, "session-1", ep.endpoint_id, 108, 1)
+    cmd = admit_test_command(store, "session_1", ep.endpoint_id, 108, 1)
     store.record_operation_terminated(
         cmd.session_id, "cam1", 1, 1, cmd.physical_operation_id, cmd.command_nonce, "PREEMPTED"
     )
@@ -318,7 +324,7 @@ def test_restart_after_preempted_journal(tmp_path):
     # Recovery primitive: get_active_operations_snapshot is used by StateRehydrationEngine
     # It ensures that terminated operations are not rehydrated as active
     new_store = DurableSessionStore(tmp_path, epoch_id=1)
-    new_store.start_session("session-1", 1)
+    new_store.start_session("session_1", 1)
     active_snapshot = new_store.get_active_operations_snapshot()
 
     key = ("cam1", 1, 1, "108", "1")

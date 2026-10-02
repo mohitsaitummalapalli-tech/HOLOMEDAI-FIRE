@@ -86,6 +86,7 @@ class DeviceControlManager(IService):
         capacity_checker: Optional[Callable[[str], int]] = None,
         capacity_releaser: Optional[Callable[[str, str, int, int, str, str, str], None]] = None,
         capacity_admitter: Optional[Callable[[str, str, str, int, int, Optional[str], str, str, str, str], tuple[str, bool, Optional[str]]]] = None,
+        capacity_snapshot_provider: Optional[Callable[[], dict[tuple, dict]]] = None,
         authoritative_epoch_provider: Optional[Callable[[], int]] = None,
         rehydration_engine: Optional["StateRehydrationEngine"] = None,
         reconciliation_daemon: Optional["ReconciliationDaemon"] = None,
@@ -104,6 +105,7 @@ class DeviceControlManager(IService):
         self._capacity_checker = capacity_checker
         self._capacity_releaser = capacity_releaser
         self._capacity_admitter = capacity_admitter
+        self._capacity_snapshot_provider = capacity_snapshot_provider
         self._authoritative_epoch_provider = authoritative_epoch_provider
         self._state: ServiceState = ServiceState.UNINITIALIZED
         self._admission_state = AdmissionState.INITIALIZING
@@ -880,7 +882,7 @@ class DeviceControlManager(IService):
         self._admission_state = AdmissionState.READY
 
 
-    def preempt_execution(self, device_id: str, endpoint_id: str, execution_id: str, lifecycle_generation: int) -> None:
+    def preempt_execution(self, session_id: str, device_id: str, endpoint_id: str, execution_id: str, lifecycle_generation: int) -> None:
         """Issue an authoritative preemption routing request for a specific execution."""
         # 1. Device and endpoint validation
         if not self._registry.contains(device_id):
@@ -892,6 +894,34 @@ class DeviceControlManager(IService):
             raise DeviceControlError(f"Endpoint '{endpoint_id}' not found on device '{device_id}'")
 
         if not self._resolution_gate:
+            return
+
+        is_known = False
+        is_authorized = False
+
+        with self._timeout_lock:
+            cmd = self._active_commands.get(execution_id)
+
+        if cmd:
+            is_known = True
+            if cmd.session_id == session_id and cmd.endpoint_id == endpoint_id:
+                is_authorized = True
+        else:
+            if self._capacity_snapshot_provider:
+                active_ops = self._capacity_snapshot_provider()
+                for canon, payload in active_ops.items():
+                    if payload.get("execution_id") == execution_id:
+                        is_known = True
+                        if payload.get("_original_session_id") == session_id and payload.get("endpoint_id") == endpoint_id:
+                            is_authorized = True
+                        break
+
+        if not is_known:
+            self._logger.warning(f"preempt_execution rejected: execution_id {execution_id} is unknown.")
+            return
+
+        if not is_authorized:
+            self._logger.warning(f"preempt_execution unauthorized: session {session_id} cannot preempt execution_id {execution_id}.")
             return
 
         from holomed.devices.models import StopRouteState

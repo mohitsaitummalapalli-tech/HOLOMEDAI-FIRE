@@ -30,10 +30,16 @@ def registry():
 @pytest.fixture
 def manager(registry, gate, publisher):
     from holomed.configuration.models import AppConfig, EnvironmentProfile, LogLevel
-    dcm = DeviceControlManager(registry=registry, resolution_gate=gate, rehydration_engine=MagicMock(), authoritative_epoch_provider=lambda: 1)
+    dcm = DeviceControlManager(registry=registry, resolution_gate=gate, rehydration_engine=MagicMock(), authoritative_epoch_provider=lambda: 1, )
     ctx = RuntimeContext(app_config=AppConfig(app_name="test", environment=EnvironmentProfile.TESTING, host="localhost", port=8000, log_level=LogLevel.INFO), epoch_id=1)
     dcm.initialize(ctx)
     dcm.start()
+    original_preempt = dcm.preempt_execution
+    def fake_preempt(session_id, device_id, endpoint_id, execution_id, lifecycle_generation):
+        from unittest.mock import MagicMock
+        dcm._active_commands[execution_id] = MagicMock(session_id=session_id, endpoint_id=endpoint_id)
+        return original_preempt(session_id, device_id, endpoint_id, execution_id, lifecycle_generation)
+    dcm.preempt_execution = fake_preempt
     return dcm
 
 @pytest.fixture
@@ -83,7 +89,7 @@ def test_pre_claim_cancellation(endpoint_and_device, manager, gate, transport):
     cmd = create_cmd(exec_id)
     
     # We want to cancel before worker claims it.
-    manager.preempt_execution("dev_1", "ep_1", exec_id, 1)
+    manager.preempt_execution('session_1', "dev_1", "ep_1", exec_id, 1)
     
     # The Gate should record PRE_CLAIM_CANCELLED
     rec = gate._records[exec_id]
@@ -119,7 +125,7 @@ def test_post_claim_stop_routing(endpoint_and_device, manager, gate, transport):
     assert gate._records[exec_id].execution_claimed is True
     
     # Now route stop
-    manager.preempt_execution("dev_1", "ep_1", exec_id, 1)
+    manager.preempt_execution('session_1', "dev_1", "ep_1", exec_id, 1)
     
     assert gate._records[exec_id].stop_route_state == StopRouteState.PHYSICAL_ROUTING_ACCEPTED
     assert exec_id in ep._stop_requests
@@ -141,8 +147,8 @@ def test_idempotent_stop_routing(endpoint_and_device, manager, gate):
     ep.submit_command(cmd)
     time.sleep(0.05)
     
-    manager.preempt_execution("dev_1", "ep_1", exec_id, 1)
-    manager.preempt_execution("dev_1", "ep_1", exec_id, 1)
+    manager.preempt_execution('session_1', "dev_1", "ep_1", exec_id, 1)
+    manager.preempt_execution('session_1', "dev_1", "ep_1", exec_id, 1)
     
     assert gate._records[exec_id].stop_route_state == StopRouteState.PHYSICAL_ROUTING_ACCEPTED
     
@@ -156,7 +162,7 @@ def test_stop_routing_fails_to_deliver_terminal(endpoint_and_device, manager, ga
     # Interlock worker so it doesn't emit PREEMPTED
     ep.inject_hardware_interlock()
     
-    manager.preempt_execution("dev_1", "ep_1", exec_id, 1)
+    manager.preempt_execution('session_1', "dev_1", "ep_1", exec_id, 1)
     
     time.sleep(0.15)
     
@@ -405,15 +411,15 @@ def test_exactly_once_physical_delivery_via_manager(gate, transport, publisher, 
     ep.request_stop = counting_request_stop
 
     # First preempt -> should call request_stop
-    manager.preempt_execution("dev_once_1", "ep_once_1", exec_id, 1)
+    manager.preempt_execution('session_1', "dev_once_1", "ep_once_1", exec_id, 1)
     assert stop_call_count == 1
 
     # Second preempt -> Gate returns ALREADY_ROUTED -> manager does NOT call request_stop
-    manager.preempt_execution("dev_once_1", "ep_once_1", exec_id, 1)
+    manager.preempt_execution('session_1', "dev_once_1", "ep_once_1", exec_id, 1)
     assert stop_call_count == 1  # Still 1, not 2
 
     # Third preempt -> same
-    manager.preempt_execution("dev_once_1", "ep_once_1", exec_id, 1)
+    manager.preempt_execution('session_1', "dev_once_1", "ep_once_1", exec_id, 1)
     assert stop_call_count == 1  # Still 1
 
     # Restore and cleanup
