@@ -87,11 +87,10 @@ def test_queued_cancellation_normal(tmp_path):
 
     mock_gate = Mock()
     def fake_route(*args, **kwargs):
-        cb = kwargs.get("pre_claim_callback")
-        if cb:
-            cb()
-        return StopRouteState.PRE_CLAIM_CANCELLED
+        return StopRouteState.PRE_CLAIM_CANCELLING
     mock_gate.route_stop_request.side_effect = fake_route
+    mock_gate.commit_pre_claim_cancel = Mock()
+    mock_gate.abort_pre_claim_cancel = Mock()
     manager._resolution_gate = mock_gate
 
     manager.preempt_execution('session_1', "cam1", ep.endpoint_id, cmd.execution_id, 1)
@@ -112,11 +111,10 @@ def test_persistence_failure(tmp_path):
 
     mock_gate = Mock()
     def fake_route(*args, **kwargs):
-        cb = kwargs.get("pre_claim_callback")
-        if cb and not cb():
-            return StopRouteState.ALREADY_TERMINAL
-        return StopRouteState.PRE_CLAIM_CANCELLED
+        return StopRouteState.PRE_CLAIM_CANCELLING
     mock_gate.route_stop_request.side_effect = fake_route
+    mock_gate.commit_pre_claim_cancel = Mock()
+    mock_gate.abort_pre_claim_cancel = Mock()
     manager._resolution_gate = mock_gate
 
     cmd = admit_test_command(store, "session_1", ep.endpoint_id, 101, 1)
@@ -150,11 +148,10 @@ def test_different_message_duplicate_cancel(tmp_path):
 
     mock_gate = Mock()
     def fake_route(*args, **kwargs):
-        cb = kwargs.get("pre_claim_callback")
-        if cb:
-            cb()
-        return StopRouteState.PRE_CLAIM_CANCELLED
+        return StopRouteState.PRE_CLAIM_CANCELLING
     mock_gate.route_stop_request.side_effect = fake_route
+    mock_gate.commit_pre_claim_cancel = Mock()
+    mock_gate.abort_pre_claim_cancel = Mock()
     manager._resolution_gate = mock_gate
 
     cmd1 = admit_test_command(store, "session_1", ep.endpoint_id, 104, 1)
@@ -191,11 +188,10 @@ def test_targeted_identity_replacement(tmp_path):
 
     mock_gate = Mock()
     def fake_route(*args, **kwargs):
-        cb = kwargs.get("pre_claim_callback")
-        if cb:
-            cb()
-        return StopRouteState.PRE_CLAIM_CANCELLED
+        return StopRouteState.PRE_CLAIM_CANCELLING
     mock_gate.route_stop_request.side_effect = fake_route
+    mock_gate.commit_pre_claim_cancel = Mock()
+    mock_gate.abort_pre_claim_cancel = Mock()
     manager._resolution_gate = mock_gate
 
     cmd1 = admit_test_command(store, "session_1", ep.endpoint_id, 110, 1)
@@ -240,11 +236,10 @@ def test_concurrent_duplicate_cancellation(tmp_path):
 
     mock_gate = Mock()
     def fake_route(*args, **kwargs):
-        cb = kwargs.get("pre_claim_callback")
-        if cb:
-            cb()
-        return StopRouteState.PRE_CLAIM_CANCELLED
+        return StopRouteState.PRE_CLAIM_CANCELLING
     mock_gate.route_stop_request.side_effect = fake_route
+    mock_gate.commit_pre_claim_cancel = Mock()
+    mock_gate.abort_pre_claim_cancel = Mock()
     manager._resolution_gate = mock_gate
 
     errors = []

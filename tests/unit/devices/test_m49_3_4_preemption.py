@@ -201,7 +201,8 @@ def test_preclaim_gate_authority_deterministic(gate, transport, publisher, regis
 
     # Step 1: Pre-claim cancellation via Gate (before any worker interaction)
     route_result = gate.route_stop_request(exec_id, 1)
-    assert route_result == StopRouteState.PRE_CLAIM_CANCELLED
+    assert route_result == StopRouteState.PRE_CLAIM_CANCELLING
+    gate.commit_pre_claim_cancel(exec_id, 1)
 
     # Step 2: Verify Gate record
     rec = gate._records[exec_id]
@@ -250,6 +251,7 @@ def test_preclaim_no_worker_local_preempted_bypass(gate, transport, publisher, r
 
     # Pre-claim cancel via Gate
     gate.route_stop_request(exec_id, 1)
+    gate.commit_pre_claim_cancel(exec_id, 1)
 
     # Worker claim must fail because Gate already resolved
     claimed = gate.claim_execution_ownership(exec_id, 1)
@@ -318,6 +320,7 @@ def test_preclaim_gate_then_worker_dequeue_integration(gate, transport, publishe
 
     # While worker is blocked at barrier, pre-claim cancel via Gate
     gate.route_stop_request(exec_id, 1)
+    gate.commit_pre_claim_cancel(exec_id, 1)
     assert gate._records[exec_id].current_state == CommandState.PREEMPTED
     assert gate._records[exec_id].terminal_resolution_status is True
 

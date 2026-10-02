@@ -21,7 +21,7 @@ class ExecutionResolutionGate(IExecutionResolutionGate):
     - Preserves monotonic event_sequence per execution.
     - Prevents mutating terminal states once reached.
     """
-    
+
     def is_capacity_release_terminal(self, state: str) -> bool:
         """Returns True if the state represents authoritative evidence for capacity release."""
         return state in (
@@ -198,6 +198,9 @@ class ExecutionResolutionGate(IExecutionResolutionGate):
             if record.terminal_resolution_status:
                 return False
 
+            if record.stop_route_state == StopRouteState.PRE_CLAIM_CANCELLING:
+                return False
+
             # If already claimed (shouldn't happen twice in valid flow, but safe)
             if record.execution_claimed:
                 return True
@@ -231,22 +234,22 @@ class ExecutionResolutionGate(IExecutionResolutionGate):
                 return record.stop_route_state
 
             if not record.execution_claimed:
-                # Pre-claim non-started cancellation
+                # Pre-claim non-started cancellation INTENT
                 updated_record = AuthoritativeExecutionRecord(
                     execution_id=execution_id,
-                    current_state=CommandState.PREEMPTED,
+                    current_state=CommandState.PREEMPT_REQUESTED,
                     latest_accepted_sequence=record.latest_accepted_sequence,
-                    terminal_resolution_status=True,
+                    terminal_resolution_status=False,
                     terminal_event_id=None,
                     source_authority=None,
                     lifecycle_generation=record.lifecycle_generation,
                     timeout_status=record.timeout_status,
                     quarantine_consequence=record.quarantine_consequence,
                     execution_claimed=False,
-                    stop_route_state=StopRouteState.PRE_CLAIM_CANCELLED,
+                    stop_route_state=StopRouteState.PRE_CLAIM_CANCELLING,
                 )
                 self._records[execution_id] = updated_record
-                return StopRouteState.PRE_CLAIM_CANCELLED
+                return StopRouteState.PRE_CLAIM_CANCELLING
 
             if record.stop_route_state in (StopRouteState.PHYSICAL_ROUTING_ACCEPTED, StopRouteState.ALREADY_ROUTED):
                 return StopRouteState.ALREADY_ROUTED
@@ -267,3 +270,55 @@ class ExecutionResolutionGate(IExecutionResolutionGate):
             )
             self._records[execution_id] = updated_record
             return StopRouteState.PHYSICAL_ROUTING_ACCEPTED
+
+    def commit_pre_claim_cancel(self, execution_id: str, lifecycle_generation: int) -> None:
+        """Commit the pre-claim cancellation after durable write succeeds."""
+        lock = self._get_lock(execution_id)
+        with lock:
+            record = self._records.get(execution_id)
+            if not record or record.lifecycle_generation != lifecycle_generation:
+                return
+
+            if record.stop_route_state != StopRouteState.PRE_CLAIM_CANCELLING:
+                return
+
+            updated_record = AuthoritativeExecutionRecord(
+                execution_id=execution_id,
+                current_state=CommandState.PREEMPTED,
+                latest_accepted_sequence=record.latest_accepted_sequence,
+                terminal_resolution_status=True,
+                terminal_event_id=None,
+                source_authority=None,
+                lifecycle_generation=record.lifecycle_generation,
+                timeout_status=record.timeout_status,
+                quarantine_consequence=record.quarantine_consequence,
+                execution_claimed=False,
+                stop_route_state=StopRouteState.PRE_CLAIM_CANCELLED,
+            )
+            self._records[execution_id] = updated_record
+
+    def abort_pre_claim_cancel(self, execution_id: str, lifecycle_generation: int) -> None:
+        """Abort the pre-claim cancellation if durable write fails."""
+        lock = self._get_lock(execution_id)
+        with lock:
+            record = self._records.get(execution_id)
+            if not record or record.lifecycle_generation != lifecycle_generation:
+                return
+
+            if record.stop_route_state != StopRouteState.PRE_CLAIM_CANCELLING:
+                return
+
+            updated_record = AuthoritativeExecutionRecord(
+                execution_id=execution_id,
+                current_state=CommandState.ACCEPTED,
+                latest_accepted_sequence=record.latest_accepted_sequence,
+                terminal_resolution_status=False,
+                terminal_event_id=None,
+                source_authority=None,
+                lifecycle_generation=record.lifecycle_generation,
+                timeout_status=record.timeout_status,
+                quarantine_consequence=record.quarantine_consequence,
+                execution_claimed=False,
+                stop_route_state=StopRouteState.NOT_REQUESTED,
+            )
+            self._records[execution_id] = updated_record

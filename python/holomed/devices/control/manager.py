@@ -961,8 +961,15 @@ class DeviceControlManager(IService):
 
         if route_state == StopRouteState.PHYSICAL_ROUTING_ACCEPTED:
             target_endpoint.request_stop(execution_id)
-        elif route_state == StopRouteState.PRE_CLAIM_CANCELLED:
-            self.durably_record_terminal_state(execution_id, "PREEMPTED")
+        elif route_state == StopRouteState.PRE_CLAIM_CANCELLING:
+            from holomed.persistence.exceptions import PersistenceLifecycleError
+            try:
+                self.durably_record_terminal_state(execution_id, "PREEMPTED")
+            except PersistenceLifecycleError:
+                self._resolution_gate.abort_pre_claim_cancel(execution_id, lifecycle_generation)
+                raise
+
+            self._resolution_gate.commit_pre_claim_cancel(execution_id, lifecycle_generation)
             self._release_physical_lease(execution_id)
         elif route_state == StopRouteState.ALREADY_TERMINAL:
             self._logger.warning(f"preempt_execution: execution_id {execution_id} is already terminal.")
