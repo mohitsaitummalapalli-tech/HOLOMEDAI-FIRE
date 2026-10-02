@@ -145,6 +145,7 @@ def test_duplicate_cancel_during_retention(tmp_path):
 def test_cancel_after_five_seconds(tmp_path):
     store = create_store(tmp_path)
     manager, ep = create_test_manager(store)
+    manager._capacity_snapshot_provider = store.get_active_operations_snapshot
 
     exec_id = "exec-4"
     cmd = PhysicalCommand(
@@ -162,6 +163,49 @@ def test_cancel_after_five_seconds(tmp_path):
     # Simulate timeout loop popping _active_commands
     manager._active_commands.pop(exec_id, None)
 
-    # Preempt should do nothing (Unknown)
+    # Preempt should now fallback to durable store and cancel it
     manager.preempt_execution('session_1', "cam1", "USB:1", exec_id, 1)
+
+    record = manager._resolution_gate.resolve_timeout(exec_id, 1)
+    assert record.stop_route_state == StopRouteState.PRE_CLAIM_CANCELLED
+
+
+def test_auth_01_real_production_linearization(tmp_path):
+    store = create_store(tmp_path)
+    manager, ep = create_test_manager(store)
+    manager._capacity_snapshot_provider = store.get_active_operations_snapshot
+
+    # 1. Simulate handle_command (this normally sets up active_commands and durable store)
+    exec_id = "prod_exec_1"
+
+    # We directly mock the admission step that handle_command would perform
+    store.record_operation_admitted(
+        session_id="session_1", endpoint_id="USB:1", device_id="cam1", device_epoch=1,
+        controller_epoch=1, physical_operation_id="op-prod-1", command_nonce="nonce-prod-1",
+        execution_id=exec_id, command_name="test_prod"
+    )
+
+    cmd = PhysicalCommand(
+        device_epoch=1, controller_epoch=1, physical_operation_id="op-prod-1", command_nonce="nonce-prod-1",
+        endpoint_id="USB:1", session_id="session_1", lifecycle_generation=1, endpoint_lease_generation=1,
+        execution_id=exec_id, capability_scope=frozenset(["test"]), command_sequence=1, operation="test", parameters={}
+    )
+    manager._active_commands[exec_id] = cmd
+
+    # 2. Simulate Cache Expiry (long running operation)
+    manager._active_commands.pop(exec_id, None)
+
+    # 3. Simulate Authorized Preemption
+    manager.preempt_execution('session_1', "cam1", "USB:1", exec_id, 1)
+
+    # 4. Verify Resolution
+    assert exec_id in manager._resolution_gate._records
+    assert manager._resolution_gate._records[exec_id].stop_route_state == StopRouteState.PRE_CLAIM_CANCELLED
+
+    # Verify physical capacity was released
+    snapshot = store.get_active_operations_snapshot()
+    # Ensure exec_id is NOT active in durable store (meaning capacity was released)
+    for canon, payload in snapshot.items():
+        if payload.get("execution_id") == exec_id:
+            assert payload.get("resolution") != "IN_FLIGHT"
 

@@ -103,6 +103,7 @@ def manager_and_gate(store):
         resolution_gate=gate,
         capacity_admitter=store.record_operation_admitted,
         capacity_snapshot_provider=store.get_active_operations_snapshot,
+        capacity_releaser=store.record_operation_terminated,
         authoritative_epoch_provider=lambda: 0
     )
     return mgr, gate, store

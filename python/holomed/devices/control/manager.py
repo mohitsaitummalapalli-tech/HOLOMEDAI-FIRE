@@ -159,30 +159,45 @@ class DeviceControlManager(IService):
 
     def durably_record_terminal_state(self, execution_id: str, terminal_state: str) -> None:
         """Atomically records a terminal software resolution in the durable journal."""
+        if not self._capacity_releaser:
+            return
+
         with self._timeout_lock:
             cmd = self._active_commands.get(execution_id)
 
-        if not cmd or not self._capacity_releaser:
-            return
+        binding_canon = None
+        binding_session = None
 
-        device_id = None
-        for device in self._registry.all_devices:
-            for endpoint in device.endpoints:
-                if endpoint.endpoint_id == cmd.endpoint_id:
-                    device_id = device.device_id
+        if cmd:
+            device_id = None
+            for device in self._registry.all_devices:
+                for endpoint in device.endpoints:
+                    if endpoint.endpoint_id == cmd.endpoint_id:
+                        device_id = device.device_id
+                        break
+                if device_id:
                     break
             if device_id:
-                break
+                binding_canon = (device_id, cmd.device_epoch, cmd.controller_epoch, cmd.physical_operation_id, cmd.command_nonce)
+                binding_session = cmd.session_id
+        else:
+            if self._capacity_snapshot_provider:
+                active_ops = self._capacity_snapshot_provider()
+                for canon, payload in active_ops.items():
+                    if payload.get("execution_id") == execution_id:
+                        binding_canon = canon
+                        binding_session = payload.get("_original_session_id")
+                        break
 
-        if device_id:
+        if binding_canon and binding_session:
             val = str(getattr(terminal_state, "value", terminal_state))
             self._capacity_releaser(
-                cmd.session_id,
-                device_id,
-                cmd.device_epoch,
-                cmd.controller_epoch,
-                cmd.physical_operation_id,
-                cmd.command_nonce,
+                binding_session,
+                binding_canon[0],
+                binding_canon[1],
+                binding_canon[2],
+                binding_canon[3],
+                binding_canon[4],
                 val
             )
 
@@ -898,6 +913,8 @@ class DeviceControlManager(IService):
 
         is_known = False
         is_authorized = False
+        binding_canon = None
+        binding_session = None
 
         with self._timeout_lock:
             cmd = self._active_commands.get(execution_id)
@@ -905,19 +922,34 @@ class DeviceControlManager(IService):
         if cmd:
             is_known = True
             if cmd.session_id == session_id and cmd.endpoint_id == endpoint_id:
-                is_authorized = True
+                # Need device_id to form canon
+                target_device_id = None
+                for d in self._registry.all_devices:
+                    if any(e.endpoint_id == endpoint_id for e in d.endpoints):
+                        target_device_id = d.device_id
+                        break
+                if target_device_id == device_id:
+                    is_authorized = True
+                    binding_canon = (device_id, cmd.device_epoch, cmd.controller_epoch, cmd.physical_operation_id, cmd.command_nonce)
+                    binding_session = session_id
         else:
             if self._capacity_snapshot_provider:
                 active_ops = self._capacity_snapshot_provider()
                 for canon, payload in active_ops.items():
                     if payload.get("execution_id") == execution_id:
                         is_known = True
-                        if payload.get("_original_session_id") == session_id and payload.get("endpoint_id") == endpoint_id:
+                        if (
+                            payload.get("_original_session_id") == session_id and
+                            payload.get("endpoint_id") == endpoint_id and
+                            canon[0] == device_id
+                        ):
                             is_authorized = True
+                            binding_canon = canon
+                            binding_session = payload.get("_original_session_id")
                         break
 
         if not is_known:
-            self._logger.warning(f"preempt_execution rejected: execution_id {execution_id} is unknown.")
+            self._logger.warning(f"preempt_execution rejected: execution_id {execution_id} is unknown or already terminal.")
             return
 
         if not is_authorized:
@@ -932,6 +964,9 @@ class DeviceControlManager(IService):
         elif route_state == StopRouteState.PRE_CLAIM_CANCELLED:
             self.durably_record_terminal_state(execution_id, "PREEMPTED")
             self._release_physical_lease(execution_id)
+        elif route_state == StopRouteState.ALREADY_TERMINAL:
+            self._logger.warning(f"preempt_execution: execution_id {execution_id} is already terminal.")
+            pass
 
     # --------------------------------------------------------------------------
     # Private Helpers

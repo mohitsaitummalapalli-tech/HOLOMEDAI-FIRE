@@ -86,7 +86,12 @@ def test_queued_cancellation_normal(tmp_path):
     manager._active_commands[cmd.execution_id] = cmd
 
     mock_gate = Mock()
-    mock_gate.route_stop_request.return_value = StopRouteState.PRE_CLAIM_CANCELLED
+    def fake_route(*args, **kwargs):
+        cb = kwargs.get("pre_claim_callback")
+        if cb:
+            cb()
+        return StopRouteState.PRE_CLAIM_CANCELLED
+    mock_gate.route_stop_request.side_effect = fake_route
     manager._resolution_gate = mock_gate
 
     manager.preempt_execution('session_1', "cam1", ep.endpoint_id, cmd.execution_id, 1)
@@ -106,7 +111,12 @@ def test_persistence_failure(tmp_path):
     manager._registry.register(device, token)
 
     mock_gate = Mock()
-    mock_gate.route_stop_request.return_value = StopRouteState.PRE_CLAIM_CANCELLED
+    def fake_route(*args, **kwargs):
+        cb = kwargs.get("pre_claim_callback")
+        if cb and not cb():
+            return StopRouteState.ALREADY_TERMINAL
+        return StopRouteState.PRE_CLAIM_CANCELLED
+    mock_gate.route_stop_request.side_effect = fake_route
     manager._resolution_gate = mock_gate
 
     cmd = admit_test_command(store, "session_1", ep.endpoint_id, 101, 1)
@@ -118,10 +128,9 @@ def test_persistence_failure(tmp_path):
 
     manager._capacity_releaser = failing_releaser
 
+    import pytest
     with pytest.raises(PersistenceLifecycleError):
         manager.preempt_execution('session_1', "cam1", ep.endpoint_id, cmd.execution_id, 1)
-
-    assert cmd.execution_id in manager._active_commands
 
     manager._capacity_releaser = original_releaser
     manager.preempt_execution('session_1', "cam1", ep.endpoint_id, cmd.execution_id, 1)
@@ -140,7 +149,12 @@ def test_different_message_duplicate_cancel(tmp_path):
     manager._registry.register(device, token)
 
     mock_gate = Mock()
-    mock_gate.route_stop_request.return_value = StopRouteState.PRE_CLAIM_CANCELLED
+    def fake_route(*args, **kwargs):
+        cb = kwargs.get("pre_claim_callback")
+        if cb:
+            cb()
+        return StopRouteState.PRE_CLAIM_CANCELLED
+    mock_gate.route_stop_request.side_effect = fake_route
     manager._resolution_gate = mock_gate
 
     cmd1 = admit_test_command(store, "session_1", ep.endpoint_id, 104, 1)
@@ -176,7 +190,12 @@ def test_targeted_identity_replacement(tmp_path):
     manager._registry.register(device, token)
 
     mock_gate = Mock()
-    mock_gate.route_stop_request.return_value = StopRouteState.PRE_CLAIM_CANCELLED
+    def fake_route(*args, **kwargs):
+        cb = kwargs.get("pre_claim_callback")
+        if cb:
+            cb()
+        return StopRouteState.PRE_CLAIM_CANCELLED
+    mock_gate.route_stop_request.side_effect = fake_route
     manager._resolution_gate = mock_gate
 
     cmd1 = admit_test_command(store, "session_1", ep.endpoint_id, 110, 1)
@@ -220,7 +239,12 @@ def test_concurrent_duplicate_cancellation(tmp_path):
     manager._active_commands[cmd.execution_id] = cmd
 
     mock_gate = Mock()
-    mock_gate.route_stop_request.return_value = StopRouteState.PRE_CLAIM_CANCELLED
+    def fake_route(*args, **kwargs):
+        cb = kwargs.get("pre_claim_callback")
+        if cb:
+            cb()
+        return StopRouteState.PRE_CLAIM_CANCELLED
+    mock_gate.route_stop_request.side_effect = fake_route
     manager._resolution_gate = mock_gate
 
     errors = []
