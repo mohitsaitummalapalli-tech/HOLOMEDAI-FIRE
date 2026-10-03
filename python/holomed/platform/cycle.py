@@ -28,6 +28,12 @@ class CycleCoordinator:
         self._epoch_id = epoch_id
         self._cycle_history: list[CycleSummary] = []
 
+        from holomed.input.intent import IntentDetector, IntentConfig
+        from holomed.ultron.proposer import UltronProposer
+
+        self._intent_detector = IntentDetector(IntentConfig())
+        self._proposer = UltronProposer()
+
     @property
     def cycle_history(self) -> tuple[CycleSummary, ...]:
         return tuple(self._cycle_history)
@@ -71,6 +77,39 @@ class CycleCoordinator:
         gesture_srv = services.get("gesture_service")
         if gesture_srv is not None:
             phases_completed.append("INTERACTION")
+
+        # Live Ingress Bridge
+        if cycle_params and "observation" in cycle_params:
+            obs = cycle_params["observation"]
+            if type(obs).__name__ == "PerceptionObservation":
+                intent = self._intent_detector.process_observation(obs)
+                if intent:
+                    dcm = services.get("device_control_manager")
+                    if dcm:
+                        target_device = cycle_params.get("target_device_id", "default_device")
+                        target_endpoint = cycle_params.get("target_endpoint_id", "default_endpoint")
+
+                        gate = session_manager.get_lifecycle_gate(session_id)
+                        lifecycle_gen = gate.generation if gate else 1
+
+                        from holomed.input.intent import ACTION_GRASP, ACTION_RELEASE, ACTION_CANCEL
+
+                        if intent.action in (ACTION_RELEASE, ACTION_CANCEL):
+                            if hasattr(dcm, "preempt_by_correlation"):
+                                dcm.preempt_by_correlation(intent.correlation_id)
+                        elif intent.action == ACTION_GRASP:
+                            proposal = self._proposer.process_intent(intent, target_device)
+                            if proposal:
+                                from holomed.ultron.proposer import create_envelope_from_proposal
+                                envelope = create_envelope_from_proposal(
+                                    proposal,
+                                    session_id=session_id,
+                                    lifecycle_gen=lifecycle_gen,
+                                    execution_id=str(uuid.uuid4()),
+                                    command_nonce=str(uuid.uuid4())
+                                )
+                                res = dcm.handle_command(envelope)  # type: ignore
+
 
         # Phase 4: Multimodal Reasoning (Ultron)
         ultron_srv = services.get("ultron_service")

@@ -85,7 +85,7 @@ class DeviceControlManager(IService):
         resolution_gate: Optional[IExecutionResolutionGate] = None,
         capacity_checker: Optional[Callable[[str], int]] = None,
         capacity_releaser: Optional[Callable[[str, str, int, int, str, str, str], None]] = None,
-        capacity_admitter: Optional[Callable[[str, str, str, int, int, Optional[str], str, str, str, str], tuple[str, bool, Optional[str]]]] = None,
+        capacity_admitter: Optional[Callable[[str, str, str, int, int, Optional[str], str, str, str, str, str], tuple[str, bool, Optional[str]]]] = None,
         capacity_snapshot_provider: Optional[Callable[[], dict[tuple, dict]]] = None,
         authoritative_epoch_provider: Optional[Callable[[], int]] = None,
         rehydration_engine: Optional["StateRehydrationEngine"] = None,
@@ -419,6 +419,23 @@ class DeviceControlManager(IService):
 
         # 1. Parse required routing parameters
         payload = envelope.payload
+
+        if "correlation_id" in payload:
+            payload_correlation_id = payload["correlation_id"]
+            if type(payload_correlation_id) is not str:
+                return create_error_response(
+                    request=envelope,
+                    responder_source=self.name,
+                    error_code="ERR_VALIDATION_ERROR",
+                    error_message="correlation_id in payload must be a string",
+                )
+            if payload_correlation_id != envelope.correlation_id:
+                return create_error_response(
+                    request=envelope,
+                    responder_source=self.name,
+                    error_code="ERR_VALIDATION_ERROR",
+                    error_message=f"Envelope correlation_id and payload correlation_id conflict: {envelope.correlation_id} vs {payload_correlation_id}",
+                )
         device_id = payload.get("device_id")
         command_name = payload.get("command")
         raw_params = payload.get("parameters", {})
@@ -495,6 +512,11 @@ class DeviceControlManager(IService):
         is_physical = bool(req_cap and req_cap.requires_physical_endpoint)
 
         if is_physical:
+            session_id = payload.get("session_id")
+            execution_id = payload.get("execution_id")
+            lifecycle_generation = payload.get("session_lifecycle_generation")
+            command_nonce = payload.get("command_nonce")
+
             if self._admission_state != AdmissionState.READY:
                 return create_error_response(
                     request=envelope,
@@ -503,10 +525,6 @@ class DeviceControlManager(IService):
                     error_message=f"Physical admission forbidden: control plane is {self._admission_state.value}",
                 )
 
-            session_id = payload.get("session_id")
-            lifecycle_generation = payload.get("session_lifecycle_generation")
-            execution_id = payload.get("execution_id")
-            command_nonce = payload.get("command_nonce")
             if not session_id or not execution_id or lifecycle_generation is None or not command_nonce:
                 return create_error_response(
                     request=envelope,
@@ -596,6 +614,7 @@ class DeviceControlManager(IService):
                         d_epoch,
                         c_epoch,
                         command_nonce,
+                        envelope.correlation_id,
                         execution_id,
                         command_name,
                         fingerprint,
@@ -897,6 +916,68 @@ class DeviceControlManager(IService):
         self._admission_state = AdmissionState.READY
 
 
+    def preempt_by_correlation(
+        self,
+        correlation_id: str,
+    ) -> None:
+        """Preempts an active execution by its correlation ID.
+
+        Must fail-closed if there are multiple active executions with the same correlation_id.
+        0 matches -> idempotent no-op
+        1 match -> resolve exact binding and invoke sealed preempt path
+        >1 matches -> fail closed as durable-state corruption
+        """
+        self._require_started("preempt_by_correlation")
+
+        if not self._capacity_snapshot_provider:
+            self._logger.error("preempt_by_correlation requires a capacity snapshot provider")
+            return
+
+        active_ops = self._capacity_snapshot_provider()
+
+        matches = []
+        for canon, payload in active_ops.items():
+            if payload.get("correlation_id") == correlation_id:
+                matches.append(payload)
+
+        if not matches:
+            return  # 0 matches -> idempotent no-op
+
+        if len(matches) > 1:
+            # > 1 matches -> fail closed as durable-state corruption
+            from holomed.devices.control.exceptions import DeviceControlError
+            raise DeviceControlError(
+                f"FATAL: Durable state corruption. Multiple active executions found for correlation_id {correlation_id}."
+            )
+
+        match = matches[0]
+        execution_id = match.get("execution_id")
+        session_id = match.get("_original_session_id")
+        endpoint_id = match.get("endpoint_id")
+        device_id = None
+        for canon, payload in active_ops.items():
+            if payload == match:
+                device_id = canon[0]
+                break
+
+        lifecycle_generation = match.get("lifecycle_generation", 1)
+
+        if execution_id is None or session_id is None or endpoint_id is None or device_id is None:
+            from holomed.devices.control.exceptions import DeviceControlError
+            raise DeviceControlError(f"FATAL: Durable state corruption. Incomplete record for correlation_id {correlation_id}.")
+
+        if type(lifecycle_generation) is not int:
+            from holomed.devices.control.exceptions import DeviceControlError
+            raise DeviceControlError(f"FATAL: Durable state corruption. Invalid lifecycle_generation for correlation_id {correlation_id}.")
+
+        self.preempt_execution(
+            session_id=str(session_id),
+            device_id=str(device_id),
+            endpoint_id=str(endpoint_id),
+            execution_id=str(execution_id),
+            lifecycle_generation=int(lifecycle_generation),
+        )
+
     def preempt_execution(self, session_id: str, device_id: str, endpoint_id: str, execution_id: str, lifecycle_generation: int) -> None:
         """Issue an authoritative preemption routing request for a specific execution."""
         # 1. Device and endpoint validation
@@ -1073,6 +1154,7 @@ class DeviceControlManager(IService):
         d_epoch: int,
         c_epoch: int,
         command_nonce: str,
+        correlation_id: str,
         execution_id: str,
         command_name: str,
         fingerprint: str,
@@ -1088,7 +1170,7 @@ class DeviceControlManager(IService):
             raise ControlCapacityError("No capacity admitter configured. Cannot perform authoritative admission.")
 
         physical_operation_id, is_replay, resolution = self._capacity_admitter(
-            session_id, endpoint_id, device_id, d_epoch, c_epoch, None, command_nonce, execution_id, command_name, fingerprint
+            session_id, endpoint_id, device_id, d_epoch, c_epoch, None, command_nonce, correlation_id, execution_id, command_name, fingerprint
         )
 
         import hmac

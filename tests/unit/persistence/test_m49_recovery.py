@@ -39,7 +39,8 @@ def test_rehydration_active_capacity(tmp_path):
         physical_operation_id="op1",
         command_nonce="nonce1",
         execution_id="exec1",
-        command_name="test.cmd"
+        command_name="test.cmd",
+        correlation_id="corr1"
     )
 
     assert store.get_active_physical_operations() == 1
@@ -88,7 +89,8 @@ def test_rehydration_terminal_capacity(tmp_path):
         physical_operation_id="op2",
         command_nonce="nonce2",
         execution_id="exec2",
-        command_name="test.cmd"
+        command_name="test.cmd",
+        correlation_id="corr2"
     )
 
     store.record_operation_terminated(
@@ -138,7 +140,8 @@ def test_journal_tail_failure(tmp_path):
         physical_operation_id="op3",
         command_nonce="nonce3",
         execution_id="exec3",
-        command_name="test.cmd"
+        command_name="test.cmd",
+        correlation_id="corr3"
     )
 
     # Corrupt the journal by appending a partial JSON line
@@ -178,7 +181,8 @@ def test_old_operation_wrong_authority_rejection(tmp_path):
         physical_operation_id="op_auth",
         command_nonce="nonce_auth",
         execution_id="exec_auth",
-        command_name="test.cmd"
+        command_name="test.cmd",
+        correlation_id="corr_auth"
     )
 
     # New epoch
@@ -219,7 +223,8 @@ def test_old_operation_new_authority_recovery(tmp_path):
         physical_operation_id="op_auth",
         command_nonce="nonce_auth",
         execution_id="exec_auth",
-        command_name="test.cmd"
+        command_name="test.cmd",
+        correlation_id="corr_auth"
     )
 
     # New epoch
@@ -271,7 +276,8 @@ def test_journal_middle_corruption_fail_closed(tmp_path):
         physical_operation_id="op_middle1",
         command_nonce="nonce1",
         execution_id="exec1",
-        command_name="test.cmd"
+        command_name="test.cmd",
+        correlation_id="corr_mid1"
     )
 
     store.record_operation_admitted(
@@ -283,7 +289,8 @@ def test_journal_middle_corruption_fail_closed(tmp_path):
         physical_operation_id="op_middle2",
         command_nonce="nonce2",
         execution_id="exec2",
-        command_name="test.cmd"
+        command_name="test.cmd",
+        correlation_id="corr_mid2"
     )
 
     journal_file = store_dir / f"{session.session_id}.jsonl"
@@ -325,7 +332,8 @@ def test_end_to_end_recovery_engine(tmp_path):
         physical_operation_id="op_e2e",
         command_nonce="nonce_e2e",
         execution_id="exec_e2e",
-        command_name="test.cmd"
+        command_name="test.cmd",
+        correlation_id="corr_e2e"
     )
 
     # Capacity is 1

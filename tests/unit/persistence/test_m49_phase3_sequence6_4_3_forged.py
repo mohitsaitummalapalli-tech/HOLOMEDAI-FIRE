@@ -36,7 +36,8 @@ def test_forged_epoch_rejection(tmp_path):
             physical_operation_id=None,
             command_nonce="nonce-1",
             execution_id="exec-1",
-            command_name="test_cmd"
+            command_name="test_cmd",
+            correlation_id="corr_1"
         )
     
     # Now allocate epoch 1
@@ -54,7 +55,8 @@ def test_forged_epoch_rejection(tmp_path):
             physical_operation_id=None,
             command_nonce="nonce-2",
             execution_id="exec-2",
-            command_name="test_cmd"
+            command_name="test_cmd",
+            correlation_id="corr_2"
         )
         
     # Try to admit with epoch 0 (stale)
@@ -68,7 +70,8 @@ def test_forged_epoch_rejection(tmp_path):
             physical_operation_id=None,
             command_nonce="nonce-3",
             execution_id="exec-3",
-            command_name="test_cmd"
+            command_name="test_cmd",
+            correlation_id="corr_3"
         )
         
     # Admit with correct epoch to get an operation
@@ -81,7 +84,8 @@ def test_forged_epoch_rejection(tmp_path):
         physical_operation_id=None,
         command_nonce="nonce-valid",
         execution_id="exec-valid",
-        command_name="test_cmd"
+        command_name="test_cmd",
+        correlation_id="corr_valid"
     )
     
     # Now try to terminate with forged epoch

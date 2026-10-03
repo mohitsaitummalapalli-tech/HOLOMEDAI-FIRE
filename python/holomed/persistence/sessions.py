@@ -301,6 +301,7 @@ class DurableSessionStore:
         controller_epoch: int,
         physical_operation_id: Optional[str],
         command_nonce: str,
+        correlation_id: str,
         execution_id: str,
         command_name: str,
         request_fingerprint: str = "",
@@ -352,13 +353,20 @@ class DurableSessionStore:
                             break
 
                 if existing_payload:
-                    if existing_payload.get("request_fingerprint") == request_fingerprint:
-                        resolution = existing_payload.get("resolution") # Will be None if in-flight (active)
-                        return existing_payload["physical_operation_id"], True, resolution
-                    else:
+                    if existing_payload.get("request_fingerprint") != request_fingerprint:
                         raise PersistenceIdempotencyError(
-                            f"Idempotency conflict for session {session_id}, nonce {command_nonce}"
+                            f"Idempotency conflict for session {session_id}, nonce {command_nonce}: fingerprint mismatch"
                         )
+                    if existing_payload.get("correlation_id") != correlation_id:
+                        raise PersistenceIdentityReuseError(
+                            f"Idempotency bypass rejected: existing execution is bound to correlation {existing_payload.get('correlation_id')} not {correlation_id}"
+                        )
+                    if existing_payload.get("execution_id") != execution_id:
+                        raise PersistenceIdentityReuseError(
+                            f"Idempotency bypass rejected: existing execution is bound to execution {existing_payload.get('execution_id')} not {execution_id}"
+                        )
+                    resolution = existing_payload.get("resolution") # Will be None if in-flight (active)
+                    return existing_payload["physical_operation_id"], True, resolution
 
                 # New operation - allocate physical_operation_id if not provided
                 if not physical_operation_id:
@@ -383,6 +391,20 @@ class DurableSessionStore:
                             raise PersistenceIdentityReuseError(
                                 f"Execution ID {execution_id} is already bound to a terminated operation. Rebinding is forbidden."
                             )
+
+                # Verify Correlation-ID non-rebinding invariant
+                for c, p in active.items():
+                    if p.get("correlation_id") == correlation_id:
+                        if p.get("execution_id") != execution_id:
+                            raise PersistenceIdentityReuseError(
+                                f"Correlation ID {correlation_id} is already bound to active execution {p.get('execution_id')}. Rebinding is forbidden."
+                            )
+                for c, p in terminated.items():
+                    if p.get("correlation_id") == correlation_id:
+                        raise PersistenceIdentityReuseError(
+                            f"Correlation ID {correlation_id} was bound to a terminated execution and cannot be reused."
+                        )
+
 
                 if canonical_identity in active:
                     return physical_operation_id, True, None  # Unlikely with uuid4, but kept for structural completeness
@@ -411,6 +433,7 @@ class DurableSessionStore:
                     "controller_epoch": controller_epoch,
                     "physical_operation_id": physical_operation_id,
                     "command_nonce": command_nonce,
+                    "correlation_id": correlation_id,
                     "execution_id": execution_id,
                     "command_name": command_name,
                     "request_fingerprint": request_fingerprint
