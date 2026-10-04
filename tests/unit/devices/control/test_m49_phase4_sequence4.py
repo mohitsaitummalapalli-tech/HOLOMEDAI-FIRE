@@ -89,7 +89,7 @@ def test_race_a_timeout_first(components):
     store.record_operation_admitted(
         endpoint_id="end-1", session_id=session_id, device_id="dev-1",
         device_epoch=1, controller_epoch=store._epoch_id,
-        physical_operation_id="op-1", command_nonce="nonce-1",
+        physical_operation_id="op-1", command_nonce="nonce-1", correlation_id="nonce-1",
         execution_id=exec_id, command_name="cmd1"
     )
 
@@ -141,7 +141,7 @@ def test_race_a_timeout_first(components):
         store.record_operation_admitted(
             endpoint_id="end-dummy", session_id=session_id, device_id="dev-1",
             device_epoch=1, controller_epoch=store._epoch_id,
-            physical_operation_id="op-dummy", command_nonce="nonce-dummy",
+            physical_operation_id="op-dummy", command_nonce="nonce-dummy", correlation_id="nonce-dummy",
             execution_id=dummy_id, command_name="cmd-sync"
         )
         dummy_evt = create_event(dummy_id, 1, CommandState.OPERATION_COMPLETED, session_id, store._epoch_id, {"physical_operation_id": "op-dummy", "command_nonce": "nonce-dummy"})
@@ -164,7 +164,7 @@ def test_race_b_evidence_first(components):
     store.record_operation_admitted(
         endpoint_id="end-1", session_id=session_id, device_id="dev-1",
         device_epoch=1, controller_epoch=store._epoch_id,
-        physical_operation_id="op-1", command_nonce="nonce-1",
+        physical_operation_id="op-1", command_nonce="nonce-1", correlation_id="nonce-1",
         execution_id=exec_id, command_name="cmd1"
     )
 
@@ -217,7 +217,7 @@ def test_race_b_evidence_first(components):
         store.record_operation_admitted(
             endpoint_id="end-dummy", session_id=session_id, device_id="dev-1",
             device_epoch=1, controller_epoch=store._epoch_id,
-            physical_operation_id="op-dummy", command_nonce="nonce-dummy",
+            physical_operation_id="op-dummy", command_nonce="nonce-dummy", correlation_id="nonce-dummy",
             execution_id=dummy_id, command_name="cmd-sync"
         )
         dummy_evt = create_event(dummy_id, 1, CommandState.OPERATION_COMPLETED, session_id, store._epoch_id, {"physical_operation_id": "op-dummy", "command_nonce": "nonce-dummy"})
@@ -243,7 +243,7 @@ def test_restart_durable_outcome_evidence_end_to_end(components):
     store.record_operation_admitted(
         endpoint_id="end-1", session_id=session_id, device_id="dev-1",
         device_epoch=1, controller_epoch=store._epoch_id,
-        physical_operation_id="op-1", command_nonce="nonce-1",
+        physical_operation_id="op-1", command_nonce="nonce-1", correlation_id="nonce-1",
         execution_id=exec_id, command_name="cmd1"
     )
 
@@ -285,7 +285,7 @@ def test_restart_durable_outcome_evidence_end_to_end(components):
     store2.record_operation_admitted(
         endpoint_id="end-dummy", session_id=session_id2, device_id="dev-1",
         device_epoch=1, controller_epoch=store2._epoch_id,
-        physical_operation_id="op-dummy", command_nonce="nonce-dummy",
+        physical_operation_id="op-dummy", command_nonce="nonce-dummy", correlation_id="nonce-dummy",
         execution_id=dummy_id, command_name="cmd1"
     )
     dummy_evt = create_event(dummy_id, 1, CommandState.OPERATION_COMPLETED, session_id2, store2._epoch_id, {"physical_operation_id": "op-dummy", "command_nonce": "nonce-dummy"})
@@ -309,7 +309,7 @@ def test_late_timeout_after_successful_terminal_evidence(components):
     store.record_operation_admitted(
         endpoint_id="end-1", session_id=session_id, device_id="dev-1",
         device_epoch=1, controller_epoch=store._epoch_id,
-        physical_operation_id="op-1", command_nonce="nonce-1",
+        physical_operation_id="op-1", command_nonce="nonce-1", correlation_id="nonce-1",
         execution_id=exec_id, command_name="cmd1"
     )
 
@@ -346,7 +346,7 @@ def test_late_terminal_telemetry_after_timeout(components):
     store.record_operation_admitted(
         endpoint_id="end-1", session_id=session_id, device_id="dev-1",
         device_epoch=1, controller_epoch=store._epoch_id,
-        physical_operation_id="op-1", command_nonce="nonce-1",
+        physical_operation_id="op-1", command_nonce="nonce-1", correlation_id="nonce-1",
         execution_id=exec_id, command_name="cmd1"
     )
 
@@ -372,7 +372,7 @@ def test_late_terminal_telemetry_after_timeout(components):
     store.record_operation_admitted(
         endpoint_id="end-dummy", session_id=session_id, device_id="dev-1",
         device_epoch=1, controller_epoch=store._epoch_id,
-        physical_operation_id="op-dummy", command_nonce="nonce-dummy",
+        physical_operation_id="op-dummy", command_nonce="nonce-dummy", correlation_id="nonce-dummy",
         execution_id=dummy_id, command_name="cmd-sync"
     )
     dummy_evt = create_event(dummy_id, 1, CommandState.OPERATION_COMPLETED, session_id, store._epoch_id, {"physical_operation_id": "op-dummy", "command_nonce": "nonce-dummy"})
@@ -393,7 +393,7 @@ def test_duplicate_terminal_evidence_and_repeated_timeout(components):
     store.record_operation_admitted(
         endpoint_id="end-1", session_id=session_id, device_id="dev-1",
         device_epoch=1, controller_epoch=store._epoch_id,
-        physical_operation_id="op-1", command_nonce="nonce-1",
+        physical_operation_id="op-1", command_nonce="nonce-1", correlation_id="nonce-1",
         execution_id=exec_id, command_name="cmd1"
     )
 
@@ -422,7 +422,7 @@ def test_duplicate_terminal_evidence_and_repeated_timeout(components):
     store.record_operation_admitted(
         endpoint_id="end-dummy", session_id=session_id, device_id="dev-1",
         device_epoch=1, controller_epoch=store._epoch_id,
-        physical_operation_id="op-dummy", command_nonce="nonce-dummy",
+        physical_operation_id="op-dummy", command_nonce="nonce-dummy", correlation_id="nonce-dummy",
         execution_id=dummy_id, command_name="cmd-sync"
     )
     dummy_evt = create_event(dummy_id, 1, CommandState.OPERATION_COMPLETED, session_id, store._epoch_id, {"physical_operation_id": "op-dummy", "command_nonce": "nonce-dummy"})
@@ -443,7 +443,7 @@ def test_future_epoch_evidence_through_real_path(components):
     store.record_operation_admitted(
         endpoint_id="end-1", session_id=session_id, device_id="dev-1",
         device_epoch=1, controller_epoch=store._epoch_id,
-        physical_operation_id="op-1", command_nonce="nonce-1",
+        physical_operation_id="op-1", command_nonce="nonce-1", correlation_id="nonce-1",
         execution_id=exec_id, command_name="cmd1"
     )
 
@@ -466,7 +466,7 @@ def test_future_epoch_evidence_through_real_path(components):
     store.record_operation_admitted(
         endpoint_id="end-dummy", session_id=session_id, device_id="dev-1",
         device_epoch=1, controller_epoch=store._epoch_id,
-        physical_operation_id="op-dummy", command_nonce="nonce-dummy",
+        physical_operation_id="op-dummy", command_nonce="nonce-dummy", correlation_id="nonce-dummy",
         execution_id=dummy_id, command_name="cmd-sync"
     )
     dummy_evt = create_event(dummy_id, 1, CommandState.OPERATION_COMPLETED, session_id, store._epoch_id, {"physical_operation_id": "op-dummy", "command_nonce": "nonce-dummy"})

@@ -66,6 +66,7 @@ def _issue_capability(cmd, lease):
         d_epoch=cmd.device_epoch,
         c_epoch=cmd.controller_epoch,
         command_nonce=cmd.command_nonce,
+        correlation_id="corr1",
         execution_id=cmd.execution_id,
         command_name=cmd.operation,
         fingerprint=fingerprint,

@@ -960,13 +960,13 @@ class DeviceControlManager(IService):
                 device_id = canon[0]
                 break
 
-        lifecycle_generation = match.get("lifecycle_generation", 1)
+        lifecycle_generation = match.get("lifecycle_generation", match.get("controller_epoch"))
 
         if execution_id is None or session_id is None or endpoint_id is None or device_id is None:
             from holomed.devices.control.exceptions import DeviceControlError
             raise DeviceControlError(f"FATAL: Durable state corruption. Incomplete record for correlation_id {correlation_id}.")
 
-        if type(lifecycle_generation) is not int:
+        if lifecycle_generation is None or type(lifecycle_generation) is not int:
             from holomed.devices.control.exceptions import DeviceControlError
             raise DeviceControlError(f"FATAL: Durable state corruption. Invalid lifecycle_generation for correlation_id {correlation_id}.")
 

@@ -61,8 +61,7 @@ def admit_test_command(store, session_id, ep_id, op_id, nonce):
         device_epoch=1,
         controller_epoch=1,
         physical_operation_id=str(op_id),
-        command_nonce=str(nonce),
-        execution_id=f"exec-{op_id}",
+        command_nonce=str(nonce), correlation_id=str(nonce), execution_id=f"exec-{op_id}",
         command_name="test"
     )
     cmd = Mock(spec=PhysicalCommand)

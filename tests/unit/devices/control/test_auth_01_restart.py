@@ -29,7 +29,7 @@ def test_restart_with_tombstone(tmp_path):
     # 1. Pre-claim cancelled
     store.record_operation_admitted(
         session_id="session-1", endpoint_id="USB:1", device_id="cam1", device_epoch=1,
-        controller_epoch=1, physical_operation_id="op-1", command_nonce="nonce-1",
+        controller_epoch=1, physical_operation_id="op-1", command_nonce="nonce-1", correlation_id="nonce-1",
         execution_id=exec_id_1, command_name="test1"
     )
     store.record_operation_terminated(
@@ -40,7 +40,7 @@ def test_restart_with_tombstone(tmp_path):
     # 2. Accepted but not claimed cancelled (same durable state, just for completeness)
     store.record_operation_admitted(
         session_id="session-1", endpoint_id="USB:1", device_id="cam1", device_epoch=1,
-        controller_epoch=1, physical_operation_id="op-2", command_nonce="nonce-2",
+        controller_epoch=1, physical_operation_id="op-2", command_nonce="nonce-2", correlation_id="nonce-2",
         execution_id=exec_id_2, command_name="test2"
     )
     store.record_operation_terminated(
@@ -51,7 +51,7 @@ def test_restart_with_tombstone(tmp_path):
     # 3. Terminal execution awaiting tombstone expiry
     store.record_operation_admitted(
         session_id="session-1", endpoint_id="USB:1", device_id="cam1", device_epoch=1,
-        controller_epoch=1, physical_operation_id="op-3", command_nonce="nonce-3",
+        controller_epoch=1, physical_operation_id="op-3", command_nonce="nonce-3", correlation_id="nonce-3",
         execution_id="exec-3", command_name="test3"
     )
     store.record_operation_terminated(

@@ -172,7 +172,7 @@ class TestCapacitySnapshotProviderAuthoritativeBinding:
         store.record_operation_admitted(
             session_id="session_1", endpoint_id="USB:1", device_id="cam1",
             device_epoch=1, controller_epoch=1,
-            physical_operation_id="op-100", command_nonce="nonce-100",
+            physical_operation_id="op-100", command_nonce="nonce-100", correlation_id="nonce-100",
             execution_id="exec-100", command_name="TEST"
         )
 
@@ -213,7 +213,7 @@ class TestCapacitySnapshotProviderAuthoritativeBinding:
         store.record_operation_admitted(
             session_id="session_1", endpoint_id="USB:1", device_id="cam1",
             device_epoch=1, controller_epoch=1,
-            physical_operation_id="op-101", command_nonce="nonce-101",
+            physical_operation_id="op-101", command_nonce="nonce-101", correlation_id="nonce-101",
             execution_id="exec-101", command_name="TEST"
         )
         # Terminate first to free endpoint capacity (limit=1)
@@ -226,7 +226,7 @@ class TestCapacitySnapshotProviderAuthoritativeBinding:
         store.record_operation_admitted(
             session_id="session_2", endpoint_id="USB:1", device_id="cam1",
             device_epoch=1, controller_epoch=1,
-            physical_operation_id="op-102", command_nonce="nonce-102",
+            physical_operation_id="op-102", command_nonce="nonce-102", correlation_id="nonce-102",
             execution_id="exec-102", command_name="TEST"
         )
 
@@ -255,7 +255,7 @@ class TestCapacitySnapshotProviderAuthoritativeBinding:
         store.record_operation_admitted(
             session_id="session_1", endpoint_id="USB:1", device_id="cam1",
             device_epoch=1, controller_epoch=1,
-            physical_operation_id="op-103", command_nonce="nonce-103",
+            physical_operation_id="op-103", command_nonce="nonce-103", correlation_id="nonce-103",
             execution_id="exec-103", command_name="TEST"
         )
 
@@ -302,7 +302,7 @@ class TestRealProductionLongRunning:
         phys_op_id, is_replay, _ = store.record_operation_admitted(
             session_id="session_1", endpoint_id="USB:1", device_id="cam1",
             device_epoch=1, controller_epoch=1,
-            physical_operation_id="op-lr-1", command_nonce="nonce-lr-1",
+            physical_operation_id="op-lr-1", command_nonce="nonce-lr-1", correlation_id="nonce-lr-1",
             execution_id=exec_id, command_name="TEST_LR"
         )
         assert not is_replay
@@ -382,7 +382,7 @@ class TestTerminalUncachedCase:
         store.record_operation_admitted(
             session_id="session_1", endpoint_id="USB:1", device_id="cam1",
             device_epoch=1, controller_epoch=1,
-            physical_operation_id="op-term-1", command_nonce="nonce-term-1",
+            physical_operation_id="op-term-1", command_nonce="nonce-term-1", correlation_id="nonce-term-1",
             execution_id=exec_id, command_name="TEST_TERM"
         )
         store.record_operation_terminated(
@@ -417,7 +417,7 @@ class TestTerminalUncachedCase:
         store.record_operation_admitted(
             session_id="session_1", endpoint_id="USB:1", device_id="cam1",
             device_epoch=1, controller_epoch=1,
-            physical_operation_id="op-pre-1", command_nonce="nonce-pre-1",
+            physical_operation_id="op-pre-1", command_nonce="nonce-pre-1", correlation_id="nonce-pre-1",
             execution_id=exec_id, command_name="TEST_PRE"
         )
         store.record_operation_terminated(
@@ -453,7 +453,7 @@ class TestAuthorizationMatrix:
         store.record_operation_admitted(
             session_id="session_1", endpoint_id="USB:1", device_id="cam1",
             device_epoch=1, controller_epoch=1,
-            physical_operation_id="op-am-1", command_nonce="nonce-am-1",
+            physical_operation_id="op-am-1", command_nonce="nonce-am-1", correlation_id="nonce-am-1",
             execution_id=exec_id, command_name="TEST"
         )
 
@@ -475,7 +475,7 @@ class TestAuthorizationMatrix:
         store.record_operation_admitted(
             session_id="session_1", endpoint_id="USB:1", device_id="cam1",
             device_epoch=1, controller_epoch=1,
-            physical_operation_id="op-am-2", command_nonce="nonce-am-2",
+            physical_operation_id="op-am-2", command_nonce="nonce-am-2", correlation_id="nonce-am-2",
             execution_id=exec_id, command_name="TEST"
         )
 
@@ -498,7 +498,7 @@ class TestAuthorizationMatrix:
         store.record_operation_admitted(
             session_id="session_1", endpoint_id="USB:1", device_id="cam1",
             device_epoch=1, controller_epoch=1,
-            physical_operation_id="op-am-3", command_nonce="nonce-am-3",
+            physical_operation_id="op-am-3", command_nonce="nonce-am-3", correlation_id="nonce-am-3",
             execution_id=exec_id, command_name="TEST"
         )
 
@@ -520,7 +520,7 @@ class TestAuthorizationMatrix:
         store.record_operation_admitted(
             session_id="session_1", endpoint_id="USB:1", device_id="cam1",
             device_epoch=1, controller_epoch=1,
-            physical_operation_id="op-am-4", command_nonce="nonce-am-4",
+            physical_operation_id="op-am-4", command_nonce="nonce-am-4", correlation_id="nonce-am-4",
             execution_id=exec_id, command_name="TEST"
         )
 
@@ -545,7 +545,7 @@ class TestAuthorizationMatrix:
         store.record_operation_admitted(
             session_id="session_1", endpoint_id="USB:1", device_id="cam1",
             device_epoch=1, controller_epoch=1,
-            physical_operation_id="op-am-5", command_nonce="nonce-am-5",
+            physical_operation_id="op-am-5", command_nonce="nonce-am-5", correlation_id="nonce-am-5",
             execution_id=exec_id, command_name="TEST"
         )
 
@@ -574,7 +574,7 @@ class TestAuthorizationMatrix:
         store.record_operation_admitted(
             session_id="session_1", endpoint_id="USB:1", device_id="cam1",
             device_epoch=1, controller_epoch=1,
-            physical_operation_id="op-am-6", command_nonce="nonce-am-6",
+            physical_operation_id="op-am-6", command_nonce="nonce-am-6", correlation_id="nonce-am-6",
             execution_id=exec_id, command_name="TEST"
         )
 
@@ -627,7 +627,7 @@ class TestIntegrityAudit:
         phys_op_id, is_replay, _ = store.record_operation_admitted(
             session_id="session_1", endpoint_id="USB:1", device_id="cam1",
             device_epoch=1, controller_epoch=1,
-            physical_operation_id="op-future", command_nonce="nonce-future",
+            physical_operation_id="op-future", command_nonce="nonce-future", correlation_id="nonce-future",
             execution_id=target_id, command_name="TEST"
         )
         assert not is_replay
@@ -655,7 +655,7 @@ class TestIntegrityAudit:
         store.record_operation_admitted(
             session_id="session_1", endpoint_id="USB:1", device_id="cam1",
             device_epoch=1, controller_epoch=1,
-            physical_operation_id="op-dp-1", command_nonce="nonce-dp-1",
+            physical_operation_id="op-dp-1", command_nonce="nonce-dp-1", correlation_id="nonce-dp-1",
             execution_id=exec_id, command_name="TEST"
         )
 

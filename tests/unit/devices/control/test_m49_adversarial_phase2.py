@@ -41,7 +41,7 @@ def test_atomic_capacity_admission(tmp_path: Path):
             device_epoch=1,
             controller_epoch=1,
             physical_operation_id=f"op_{i}",
-            command_nonce=f"nonce_{i}",
+            command_nonce=f"nonce_{i}", correlation_id=f"nonce_{i}",
             execution_id=f"exec_{i}",
             command_name="test"
         )
@@ -61,7 +61,7 @@ def test_atomic_capacity_admission(tmp_path: Path):
                 device_epoch=1,
                 controller_epoch=1,
                 physical_operation_id=f"op_concurrent_{idx}",
-                command_nonce=f"nonce_concurrent_{idx}",
+                command_nonce=f"nonce_concurrent_{idx}", correlation_id=f"nonce_concurrent_{idx}",
                 execution_id=f"exec_concurrent_{idx}",
                 command_name="test"
             )
@@ -93,7 +93,7 @@ def test_status_query_unknown(tmp_path: Path):
     store.start_session("session_1", store._epoch_id)
     init_device_auth(store, "dev_1")
     store.record_operation_admitted(
-        "session_1", "ep_1", "dev_1", 1, 1, "op_1", "nonce_1", "exec_1", "test"
+        "session_1", "ep_1", "dev_1", 1, 1, "op_1", "nonce_1", "corr_" + "exec_1","exec_1", "test"
     )
     
     assert store.get_active_physical_operations() == 1
@@ -109,7 +109,7 @@ def test_operation_specific_idle_proof(tmp_path: Path):
     store.start_session("session_1", store._epoch_id)
     init_device_auth(store, "dev_1")
     store.record_operation_admitted(
-        "session_1", "ep_1", "dev_1", 1, 1, "op_1", "nonce_1", "exec_1", "test"
+        "session_1", "ep_1", "dev_1", 1, 1, "op_1", "nonce_1", "corr_" + "exec_1","exec_1", "test"
     )
     assert store.get_active_physical_operations() == 1
     
@@ -127,13 +127,13 @@ def test_atomic_terminal_commit(tmp_path: Path):
     store.start_session("session_1", store._epoch_id)
     init_device_auth(store, "dev_1")
     store.record_operation_admitted(
-        "session_1", "ep_1", "dev_1", 1, 1, "op_1", "nonce_1", "exec_1", "test"
+        "session_1", "ep_1", "dev_1", 1, 1, "op_1", "nonce_1", "corr_" + "exec_1","exec_1", "test"
     )
     assert store.get_active_physical_operations() == 1
     
     # Idempotent admission test
     store.record_operation_admitted(
-        "session_1", "ep_1", "dev_1", 1, 1, "op_1", "nonce_1", "exec_1", "test"
+        "session_1", "ep_1", "dev_1", 1, 1, "op_1", "nonce_1", "corr_" + "exec_1","exec_1", "test"
     )
     assert store.get_active_physical_operations() == 1
 
@@ -153,12 +153,12 @@ def test_quarantine_retains_capacity(tmp_path: Path):
     for i in range(GLOBAL_PHYSICAL_OPERATION_CAPACITY):
         init_device_auth(store, f"dev_{i}")
         store.record_operation_admitted(
-            "session_1", f"ep_{i}", f"dev_{i}", 1, 1, f"op_{i}", f"nonce_{i}", f"exec_{i}", "test"
+            "session_1", f"ep_{i}", f"dev_{i}", 1, 1, f"op_{i}", f"nonce_{i}", f"corr_{i}", f"exec_{i}", "test"
         )
     assert store.get_active_physical_operations() == GLOBAL_PHYSICAL_OPERATION_CAPACITY
     
     with pytest.raises(PersistenceCapacityError):
         init_device_auth(store, f"dev_{GLOBAL_PHYSICAL_OPERATION_CAPACITY}")
         store.record_operation_admitted(
-            "session_1", f"ep_{GLOBAL_PHYSICAL_OPERATION_CAPACITY}", f"dev_{GLOBAL_PHYSICAL_OPERATION_CAPACITY}", 1, 1, f"op_{GLOBAL_PHYSICAL_OPERATION_CAPACITY}", f"nonce_{GLOBAL_PHYSICAL_OPERATION_CAPACITY}", f"exec_{GLOBAL_PHYSICAL_OPERATION_CAPACITY}", "test"
+            "session_1", f"ep_{GLOBAL_PHYSICAL_OPERATION_CAPACITY}", f"dev_{GLOBAL_PHYSICAL_OPERATION_CAPACITY}", 1, 1, f"op_{GLOBAL_PHYSICAL_OPERATION_CAPACITY}", f"nonce_{GLOBAL_PHYSICAL_OPERATION_CAPACITY}", f"nonce_{GLOBAL_PHYSICAL_OPERATION_CAPACITY}", f"exec_{GLOBAL_PHYSICAL_OPERATION_CAPACITY}", "test"
         )

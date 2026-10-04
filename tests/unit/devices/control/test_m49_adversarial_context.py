@@ -71,7 +71,7 @@ def test_A_same_op_id_forged_nonce(manager):
     lease = _create_mock_lease()
     fp = _get_fingerprint(cmd, lease)
     with manager.admit_physical_command(
-        cmd.session_id, cmd.endpoint_id, lease.device_id, 1, 1, cmd.command_nonce, cmd.execution_id, cmd.operation, fp, lease.endpoint_lease_generation
+        cmd.session_id, cmd.endpoint_id, lease.device_id, 1, 1, cmd.command_nonce, cmd.command_nonce, cmd.execution_id, cmd.operation, fp, lease.endpoint_lease_generation
     ) as ctx:
         cap = ctx.capability
         
@@ -86,7 +86,7 @@ def test_B_same_op_id_different_lease(manager):
     lease = _create_mock_lease()
     fp = _get_fingerprint(cmd, lease)
     with manager.admit_physical_command(
-        cmd.session_id, cmd.endpoint_id, lease.device_id, 1, 1, cmd.command_nonce, cmd.execution_id, cmd.operation, fp, lease.endpoint_lease_generation
+        cmd.session_id, cmd.endpoint_id, lease.device_id, 1, 1, cmd.command_nonce, cmd.command_nonce, cmd.execution_id, cmd.operation, fp, lease.endpoint_lease_generation
     ) as ctx:
         cap = ctx.capability
         
@@ -102,7 +102,7 @@ def test_C_same_op_id_forged_generation(manager):
     lease = _create_mock_lease()
     fp = _get_fingerprint(cmd, lease)
     with manager.admit_physical_command(
-        cmd.session_id, cmd.endpoint_id, lease.device_id, 1, 1, cmd.command_nonce, cmd.execution_id, cmd.operation, fp, lease.endpoint_lease_generation
+        cmd.session_id, cmd.endpoint_id, lease.device_id, 1, 1, cmd.command_nonce, cmd.command_nonce, cmd.execution_id, cmd.operation, fp, lease.endpoint_lease_generation
     ) as ctx:
         cap = ctx.capability
         
@@ -117,7 +117,7 @@ def test_D_same_op_id_modified_payload(manager):
     lease = _create_mock_lease()
     fp = _get_fingerprint(cmd, lease)
     with manager.admit_physical_command(
-        cmd.session_id, cmd.endpoint_id, lease.device_id, 1, 1, cmd.command_nonce, cmd.execution_id, cmd.operation, fp, lease.endpoint_lease_generation
+        cmd.session_id, cmd.endpoint_id, lease.device_id, 1, 1, cmd.command_nonce, cmd.command_nonce, cmd.execution_id, cmd.operation, fp, lease.endpoint_lease_generation
     ) as ctx:
         cap = ctx.capability
         
@@ -131,7 +131,7 @@ def test_E_capability_from_A_command_from_B(manager):
     lease1 = _create_mock_lease()
     fp1 = _get_fingerprint(cmd1, lease1)
     with manager.admit_physical_command(
-        cmd1.session_id, cmd1.endpoint_id, lease1.device_id, 1, 1, cmd1.command_nonce, cmd1.execution_id, cmd1.operation, fp1, lease1.endpoint_lease_generation
+        cmd1.session_id, cmd1.endpoint_id, lease1.device_id, 1, 1, cmd1.command_nonce, cmd1.command_nonce, cmd1.execution_id, cmd1.operation, fp1, lease1.endpoint_lease_generation
     ) as ctx1:
         cap1 = ctx1.capability
 
@@ -139,7 +139,7 @@ def test_E_capability_from_A_command_from_B(manager):
     lease2 = _create_mock_lease()
     fp2 = _get_fingerprint(cmd2, lease2)
     with manager.admit_physical_command(
-        cmd2.session_id, cmd2.endpoint_id, lease2.device_id, 1, 1, cmd2.command_nonce, cmd2.execution_id, cmd2.operation, fp2, lease2.endpoint_lease_generation
+        cmd2.session_id, cmd2.endpoint_id, lease2.device_id, 1, 1, cmd2.command_nonce, cmd2.command_nonce, cmd2.execution_id, cmd2.operation, fp2, lease2.endpoint_lease_generation
     ) as ctx2:
         cap2 = ctx2.capability
 
@@ -153,7 +153,7 @@ def test_F_capability_from_A_lease_from_B(manager):
     lease1 = _create_mock_lease(device_id="dev1")
     fp1 = _get_fingerprint(cmd1, lease1)
     with manager.admit_physical_command(
-        cmd1.session_id, cmd1.endpoint_id, lease1.device_id, 1, 1, cmd1.command_nonce, cmd1.execution_id, cmd1.operation, fp1, lease1.endpoint_lease_generation
+        cmd1.session_id, cmd1.endpoint_id, lease1.device_id, 1, 1, cmd1.command_nonce, cmd1.command_nonce, cmd1.execution_id, cmd1.operation, fp1, lease1.endpoint_lease_generation
     ) as ctx1:
         cap1 = ctx1.capability
 
@@ -170,7 +170,7 @@ def test_G_no_reusable_signer(manager):
     lease = _create_mock_lease()
     fp = _get_fingerprint(cmd, lease)
     with manager.admit_physical_command(
-        cmd.session_id, cmd.endpoint_id, lease.device_id, 1, 1, cmd.command_nonce, cmd.execution_id, cmd.operation, fp, lease.endpoint_lease_generation
+        cmd.session_id, cmd.endpoint_id, lease.device_id, 1, 1, cmd.command_nonce, cmd.command_nonce, cmd.execution_id, cmd.operation, fp, lease.endpoint_lease_generation
     ) as ctx:
         # Context must not have issue_capability method
         assert not hasattr(ctx, "issue_capability")
@@ -185,7 +185,7 @@ def test_H_no_admitter_fails_closed(manager):
     fp = _get_fingerprint(cmd, lease)
     with pytest.raises(ControlCapacityError, match="No capacity admitter configured"):
         with manager.admit_physical_command(
-            cmd.session_id, cmd.endpoint_id, lease.device_id, 1, 1, cmd.command_nonce, cmd.execution_id, cmd.operation, fp, lease.endpoint_lease_generation
+            cmd.session_id, cmd.endpoint_id, lease.device_id, 1, 1, cmd.command_nonce, cmd.command_nonce, cmd.execution_id, cmd.operation, fp, lease.endpoint_lease_generation
         ) as ctx:
             pass
 
@@ -199,7 +199,7 @@ def test_I_admission_failure_before_yield(manager):
     fp = _get_fingerprint(cmd, lease)
     with pytest.raises(ControlCapacityError, match="Forced failure"):
         with manager.admit_physical_command(
-            cmd.session_id, cmd.endpoint_id, lease.device_id, 1, 1, cmd.command_nonce, cmd.execution_id, cmd.operation, fp, lease.endpoint_lease_generation
+            cmd.session_id, cmd.endpoint_id, lease.device_id, 1, 1, cmd.command_nonce, cmd.command_nonce, cmd.execution_id, cmd.operation, fp, lease.endpoint_lease_generation
         ) as ctx:
             pass
     # No capability produced
@@ -211,7 +211,7 @@ def test_J_exception_inside_context_doesnt_leave_signer(manager):
     ctx = None
     try:
         with manager.admit_physical_command(
-            cmd.session_id, cmd.endpoint_id, lease.device_id, 1, 1, cmd.command_nonce, cmd.execution_id, cmd.operation, fp, lease.endpoint_lease_generation
+            cmd.session_id, cmd.endpoint_id, lease.device_id, 1, 1, cmd.command_nonce, cmd.command_nonce, cmd.execution_id, cmd.operation, fp, lease.endpoint_lease_generation
         ) as ctx:
             raise ValueError("Inner failure")
     except ValueError:

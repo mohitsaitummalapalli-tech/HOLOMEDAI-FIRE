@@ -74,7 +74,7 @@ def test_controller_recovery_preserves_historical_device_epoch(stores, temp_stor
         device_epoch=1,
         controller_epoch=1,
         physical_operation_id="op1",
-        command_nonce="nonce1",
+        command_nonce="nonce1", correlation_id="nonce1",
         execution_id="test",
         endpoint_id="ep1",
         command_name="cmd1"
@@ -100,7 +100,7 @@ def test_device_recovery_preserves_historical_controller_epoch(stores, temp_stor
         device_epoch=1,
         controller_epoch=1,
         physical_operation_id="op1",
-        command_nonce="nonce1",
+        command_nonce="nonce1", correlation_id="nonce1",
         execution_id="test",
         endpoint_id="ep1",
         command_name="cmd1"
@@ -126,7 +126,7 @@ def test_simultaneous_restart_has_independent_c_and_d(stores, temp_storage):
         device_epoch=1,
         controller_epoch=1,
         physical_operation_id="op1",
-        command_nonce="nonce1",
+        command_nonce="nonce1", correlation_id="nonce1",
         execution_id="test",
         endpoint_id="ep1",
         command_name="cmd1"
@@ -187,7 +187,7 @@ def test_unresolved_capacity_survives_rehydration(stores, temp_storage):
         device_epoch=1,
         controller_epoch=1,
         physical_operation_id="op1",
-        command_nonce="nonce1",
+        command_nonce="nonce1", correlation_id="nonce1",
         execution_id="test",
         endpoint_id="ep1",
         command_name="cmd1"
@@ -216,7 +216,7 @@ def test_rehydration_does_not_rewrite_canonical_identity(stores, temp_storage):
         device_epoch=1,
         controller_epoch=1,
         physical_operation_id="op1",
-        command_nonce="nonce1",
+        command_nonce="nonce1", correlation_id="nonce1",
         execution_id="test",
         endpoint_id="ep1",
         command_name="cmd1"
@@ -251,7 +251,7 @@ def test_pre_ready_recovery_blocks_telemetry_mutation(stores, temp_storage):
         device_epoch=1,
         controller_epoch=1,
         physical_operation_id="op1",
-        command_nonce="nonce1",
+        command_nonce="nonce1", correlation_id="nonce1",
         execution_id="test",
         endpoint_id="ep1",
         command_name="cmd1"
@@ -344,7 +344,7 @@ def test_adversarial_forged_historical_recovery_is_rejected(stores, temp_storage
         device_epoch=1,
         controller_epoch=1,
         physical_operation_id="op1",
-        command_nonce="nonce1",
+        command_nonce="nonce1", correlation_id="nonce1",
         execution_id="test",
         endpoint_id="ep1",
         command_name="cmd1"
@@ -386,7 +386,7 @@ def test_correct_historical_recovery_classification_succeeds(stores, temp_storag
         device_epoch=1,
         controller_epoch=1,
         physical_operation_id="op1",
-        command_nonce="nonce1",
+        command_nonce="nonce1", correlation_id="nonce1",
         execution_id="test",
         endpoint_id="ep1",
         command_name="cmd1"
@@ -430,7 +430,7 @@ def test_adversarial_historical_recovery_newer_than_authority_rejected(stores, t
         device_epoch=1,
         controller_epoch=1,
         physical_operation_id="op1",
-        command_nonce="nonce1",
+        command_nonce="nonce1", correlation_id="nonce1",
         execution_id="test",
         endpoint_id="ep1",
         command_name="cmd1"

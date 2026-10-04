@@ -224,8 +224,10 @@ def _worker_session_journal_write(
             controller_epoch=epoch,
             physical_operation_id=f"op-{operation_label}",
             command_nonce=f"nonce-{operation_label}",
+            correlation_id=f"corr-{operation_label}",
             execution_id=f"exec-{operation_label}",
             command_name=f"cmd-{operation_label}",
+            request_fingerprint="fp1",
         )
         result_queue.put(("ADMITTED", os.getpid(), operation_label))
     except Exception as e:
@@ -293,8 +295,10 @@ def _worker_same_session_contention(
             controller_epoch=epoch,
             physical_operation_id=f"op-{operation_label}",
             command_nonce=f"nonce-{operation_label}",
+            correlation_id=f"corr-{operation_label}",
             execution_id=f"exec-{operation_label}",
             command_name=f"cmd-{operation_label}",
+            request_fingerprint="fp1",
         )
         result_queue.put(("ADMITTED", os.getpid(), operation_label))
     except Exception as e:

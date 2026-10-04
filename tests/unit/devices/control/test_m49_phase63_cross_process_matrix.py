@@ -61,7 +61,7 @@ def _worker_d_crash_after_validation(storage_str: str, epoch: int, session: str,
             os._exit(0)
 
         with patch('holomed.persistence.journal.JournalWriter.append_entry', _mock_append):
-            store.record_operation_admitted(session, "ep1", "dev1", 1, epoch, "op1", "nonce1", "exec1", "cmd1")
+            store.record_operation_admitted(session, "ep1", "dev1", 1, epoch, "op1", "nonce1", "corr_" + "exec1","exec1", "cmd1")
     except Exception as e:
         q.put(("ERROR", str(type(e)) + ": " + str(e)))
 
@@ -83,7 +83,7 @@ def _worker_e_crash_before_fsync(storage_str: str, epoch: int, session: str, q: 
             os._exit(0)
 
         with patch('holomed.persistence.journal.os.fsync', _mock_fsync):
-            store.record_operation_admitted(session, "ep1", "dev1", 1, epoch, "op_e", "nonce_e", "exec_e", "cmd_e")
+            store.record_operation_admitted(session, "ep1", "dev1", 1, epoch, "op_e", "nonce_e", "corr_" + "exec_e","exec_e", "cmd_e")
     except Exception as e:
         q.put(("ERROR", str(type(e)) + ": " + str(e)))
 
@@ -107,7 +107,7 @@ def _worker_f_crash_after_fsync(storage_str: str, epoch: int, session: str, q: m
             os._exit(0)
 
         with patch('holomed.persistence.journal.os.fsync', _mock_fsync):
-            store.record_operation_admitted(session, "ep1", "dev1", 1, epoch, "op_f", "nonce_f", "exec_f", "cmd_f")
+            store.record_operation_admitted(session, "ep1", "dev1", 1, epoch, "op_f", "nonce_f", "corr_" + "exec_f","exec_f", "cmd_f")
     except Exception as e:
         q.put(("ERROR", str(type(e)) + ": " + str(e)))
 
@@ -169,7 +169,7 @@ def _worker_s_admission(storage_str: str, epoch: int, session: str, q_res: multi
 
         # Race! We safely acquire the admission lock because isolation released it,
         # and we safely write because isolation hasn't locked the session yet.
-        op_id, is_replay, res = store.record_operation_admitted(session, "ep2", "dev1", 1, epoch, "op_adm", "nonce_adm", "exec_adm", "cmd_adm")
+        op_id, is_replay, res = store.record_operation_admitted(session, "ep2", "dev1", 1, epoch, "op_adm", "nonce_adm", "corr_" + "exec_adm","exec_adm", "cmd_adm")
         q_res.put(("ADMITTED", op_id))
 
         # Let isolation proceed
@@ -237,7 +237,7 @@ def _worker_t_admission_e1(storage_str: str, stale_epoch: int, session: str, q_r
 
         with patch('holomed.persistence.authority.ControllerAuthorityStore.hold_authority', _mock_hold_authority):
             try:
-                store.record_operation_admitted(session, "ep1", "dev1", 1, stale_epoch, "op_stale", "nonce_stale", "exec_stale", "cmd_stale")
+                store.record_operation_admitted(session, "ep1", "dev1", 1, stale_epoch, "op_stale", "nonce_stale", "corr_" + "exec_stale","exec_stale", "cmd_stale")
                 q_res.put("ERROR: ADMISSION_SUCCEEDED")
             except PersistenceEpochMismatchError as e:
                 q_res.put(("REJECTED_EPOCH", str(e)))
@@ -336,7 +336,7 @@ class TestM49Phase63FailureMatrixCrossProcess:
 
         # Verify idempotency re-resolves the exact identity
         op_id, is_replay, resolution = store.record_operation_admitted(
-            session, "ep1", "dev1", 1, epoch, "op_f", "nonce_f", "exec_f", "cmd_f"
+            session, "ep1", "dev1", 1, epoch, "op_f", "nonce_f", "corr_" + "exec_f","exec_f", "cmd_f"
         )
         assert is_replay is True
         assert resolution is None
@@ -352,7 +352,7 @@ class TestM49Phase63FailureMatrixCrossProcess:
         store_setup = DurableSessionStore(storage, epoch_id=epoch)
         store_setup.restore_session_from_disk(session)
         op_iso_id, _, _ = store_setup.record_operation_admitted(
-            session, "ep1", "dev1", 1, epoch, "op_iso", "nonce_iso", "exec_iso", "cmd_iso"
+            session, "ep1", "dev1", 1, epoch, "op_iso", "nonce_iso", "corr_" + "exec_iso","exec_iso", "cmd_iso"
         )
         assert store_setup.get_active_physical_operations() == 1
 
@@ -501,7 +501,7 @@ class TestM49Phase63FailureMatrixCrossProcess:
         store_setup.restore_session_from_disk(session)
         # Pre-admit real op
         op_iso_id, _, _ = store_setup.record_operation_admitted(
-            session, "ep1", "dev1", 1, epoch, "op_iso", "nonce_iso", "exec_iso", "cmd_iso"
+            session, "ep1", "dev1", 1, epoch, "op_iso", "nonce_iso", "corr_" + "exec_iso","exec_iso", "cmd_iso"
         )
         assert store_setup.get_active_physical_operations() == 1
 
@@ -611,10 +611,10 @@ class TestM49Phase63FailureMatrixCrossProcess:
         # Pre-admit two real ops with identical physical operation IDs but different nonces
         # This simulates an invalid / corrupt journal state where an identifier resolves ambiguously
         op_iso_id_1, _, _ = store.record_operation_admitted(
-            session, "ep1", "dev1", 1, epoch, "op_iso", "nonce_1", "exec_1", "cmd_1"
+            session, "ep1", "dev1", 1, epoch, "op_iso", "nonce_1", "corr_" + "exec_1","exec_1", "cmd_1"
         )
         op_iso_id_2, _, _ = store.record_operation_admitted(
-            session, "ep2", "dev1", 1, epoch, "op_iso", "nonce_2", "exec_2", "cmd_2"
+            session, "ep2", "dev1", 1, epoch, "op_iso", "nonce_2", "corr_" + "exec_2","exec_2", "cmd_2"
         )
 
         assert store.get_active_physical_operations() == 2
@@ -648,7 +648,7 @@ class TestM49Phase63FailureMatrixCrossProcess:
         store.restore_session_from_disk(session)
 
         op_iso_id, _, _ = store.record_operation_admitted(
-            session, "ep1", "dev1", 1, epoch, "op_iso", "nonce_iso", "exec_iso", "cmd_iso"
+            session, "ep1", "dev1", 1, epoch, "op_iso", "nonce_iso", "corr_" + "exec_iso","exec_iso", "cmd_iso"
         )
         assert store.get_active_physical_operations() == 1
 

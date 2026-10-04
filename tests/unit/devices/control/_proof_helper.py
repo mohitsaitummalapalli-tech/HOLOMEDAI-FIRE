@@ -40,7 +40,7 @@ def run_epoch_race_worker_a(store_path: str, epoch: int):
         assert device_epoch == 1, f"Expected initial device epoch 1, got {device_epoch}"
         
         store.record_operation_admitted(
-            "proof_session", "ep_a", "dev_a", 1, epoch, "op_a", "nonce_a", "exec_a", "test"
+            "proof_session", "ep_a", "dev_a", 1, epoch, "op_a", "nonce_a", "corr_" + "exec_a","exec_a", "test"
         )
         print("SUCCESS")
     except Exception as e:
@@ -120,7 +120,7 @@ def run_capacity_worker(store_path: str, epoch: int, endpoint_id: str, op_id: st
     while True:
         try:
             store.record_operation_admitted(
-                "proof_session", endpoint_id, f"dev_{op_id}", 1, 1, op_id, f"nonce_{op_id}", f"exec_{op_id}", "test"
+                "proof_session", endpoint_id, f"dev_{op_id}", 1, 1, op_id, f"nonce_{op_id}", f"nonce_{op_id}", f"exec_{op_id}", "test"
             )
             print("ADMITTED")
             break
@@ -153,7 +153,7 @@ def run_concurrency_worker(store_path: str, epoch: int, op_id: str):
         for _ in range(200):  # High retry count for heavy contention
             try:
                 store.record_operation_admitted(
-                    "proof_session", f"ep_{op_id}_{i}", f"dev_{op_id}", 1, 1, f"op_{op_id}_{i}", f"nonce_{op_id}_{i}", f"exec_{op_id}_{i}", "test"
+                    "proof_session", f"ep_{op_id}_{i}", f"dev_{op_id}", 1, 1, f"op_{op_id}_{i}", f"nonce_{op_id}_{i}", f"nonce_{op_id}_{i}", f"exec_{op_id}_{i}", "test"
                 )
                 print("ADMITTED")
                 success = True
@@ -223,7 +223,7 @@ def run_admission_termination_race_b(store_path: str, epoch: int, op_id: str):
     for _ in range(10):
         try:
             store.record_operation_admitted(
-                "proof_session", "ep_a", "dev_a", 1, 1, op_id, "nonce_a", "exec_a", "test"
+                "proof_session", "ep_a", "dev_a", 1, 1, op_id, "nonce_a", "corr_" + "exec_a","exec_a", "test"
             )
             print("ADMITTED")
         except PersistenceLifecycleError:

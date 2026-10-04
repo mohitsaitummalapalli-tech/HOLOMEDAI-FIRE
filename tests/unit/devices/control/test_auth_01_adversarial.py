@@ -67,7 +67,7 @@ def admit_test_command(store, session_id, ep_id, op_id, nonce):
         device_epoch=1,
         controller_epoch=1,
         physical_operation_id=str(op_id),
-        command_nonce=str(nonce),
+        command_nonce=str(nonce), correlation_id=str(nonce),
         execution_id=f"exec-{op_id}",
         command_name="test"
     )
@@ -291,8 +291,7 @@ class TestConditionalDurableTransition:
         store.record_operation_admitted(
             session_id="session_1", endpoint_id="USB:1",
             device_id="cam1", device_epoch=1, controller_epoch=1,
-            physical_operation_id="300", command_nonce="1",
-            execution_id="exec-300", command_name="test"
+            physical_operation_id="300", command_nonce="1", correlation_id="1", execution_id="exec-300", command_name="test"
         )
         store.record_operation_terminated(
             session_id="session_1", device_id="cam1",
@@ -315,8 +314,7 @@ class TestConditionalDurableTransition:
         store.record_operation_admitted(
             session_id="session_1", endpoint_id="USB:1",
             device_id="cam1", device_epoch=1, controller_epoch=1,
-            physical_operation_id="301", command_nonce="1",
-            execution_id="exec-301", command_name="test"
+            physical_operation_id="301", command_nonce="1", correlation_id="1", execution_id="exec-301", command_name="test"
         )
         store.record_operation_terminated(
             session_id="session_1", device_id="cam1",
@@ -338,8 +336,7 @@ class TestConditionalDurableTransition:
         store.record_operation_admitted(
             session_id="session_1", endpoint_id="USB:1",
             device_id="cam1", device_epoch=1, controller_epoch=1,
-            physical_operation_id="302", command_nonce="1",
-            execution_id="exec-302", command_name="test"
+            physical_operation_id="302", command_nonce="1", correlation_id="1", execution_id="exec-302", command_name="test"
         )
 
         results = {"cancel": None, "complete": None}

@@ -56,7 +56,7 @@ if __name__ == "__main__":
         
         os.fsync = mocked_fsync
         
-        store.record_operation_admitted(session_id, "ep_e", "dev_e", 1, 1, "op_e", "nonce_e", "exec_e", "test_cmd")
+        store.record_operation_admitted(session_id, "ep_e", "dev_e", 1, 1, "op_e", "nonce_e", "corr_" + "exec_e","exec_e", "test_cmd")
         
     elif action == "crash_after_fsync":
         # F. crash after fsync
@@ -77,7 +77,7 @@ if __name__ == "__main__":
         
         os.fsync = mocked_fsync
 
-        store.record_operation_admitted(session_id, "ep_f", "dev_f", 1, 1, "op_f", "nonce_f", "exec_f", "test_cmd")
+        store.record_operation_admitted(session_id, "ep_f", "dev_f", 1, 1, "op_f", "nonce_f", "corr_" + "exec_f","exec_f", "test_cmd")
         
     elif action == "wait_and_crash":
         # B. crash while waiting for lock

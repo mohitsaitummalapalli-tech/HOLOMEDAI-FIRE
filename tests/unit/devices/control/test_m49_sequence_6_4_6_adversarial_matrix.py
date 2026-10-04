@@ -45,7 +45,7 @@ def setup_environment(temp_storage):
         device_epoch=1,
         controller_epoch=1,
         physical_operation_id="op1",
-        command_nonce="nonce1",
+        command_nonce="nonce1", correlation_id="nonce1",
         execution_id="test_exec",
         command_name="cmd1"
     )
@@ -361,7 +361,7 @@ def p1_admission_attempt(temp_storage_str):
             device_epoch=1,
             controller_epoch=1,
             physical_operation_id="op2",
-            command_nonce="nonce2",
+            command_nonce="nonce2", correlation_id="nonce2",
             execution_id="test_exec_2",
             command_name="cmd2"
         )

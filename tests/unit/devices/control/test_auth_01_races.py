@@ -72,7 +72,7 @@ def test_cancel_vs_submit_rejection_race(tmp_path):
     )
     store.record_operation_admitted(
         session_id="session_1", endpoint_id="USB:1", device_id="cam1", device_epoch=1,
-        controller_epoch=1, physical_operation_id="op-1", command_nonce="nonce-1",
+        controller_epoch=1, physical_operation_id="op-1", command_nonce="nonce-1", correlation_id="nonce-1",
         execution_id=exec_id, command_name="test"
     )
     manager._active_commands[exec_id] = cmd
@@ -104,7 +104,7 @@ def test_cancel_vs_submit_acceptance_race(tmp_path):
     )
     store.record_operation_admitted(
         session_id="session_1", endpoint_id="USB:1", device_id="cam1", device_epoch=1,
-        controller_epoch=1, physical_operation_id="op-2", command_nonce="nonce-2",
+        controller_epoch=1, physical_operation_id="op-2", command_nonce="nonce-2", correlation_id="nonce-2",
         execution_id=exec_id, command_name="test"
     )
     manager._active_commands[exec_id] = cmd
@@ -132,7 +132,7 @@ def test_duplicate_cancel_during_retention(tmp_path):
     )
     store.record_operation_admitted(
         session_id="session_1", endpoint_id="USB:1", device_id="cam1", device_epoch=1,
-        controller_epoch=1, physical_operation_id="op-3", command_nonce="nonce-3",
+        controller_epoch=1, physical_operation_id="op-3", command_nonce="nonce-3", correlation_id="nonce-3",
         execution_id=exec_id, command_name="test"
     )
     manager._active_commands[exec_id] = cmd
@@ -155,7 +155,7 @@ def test_cancel_after_five_seconds(tmp_path):
     )
     store.record_operation_admitted(
         session_id="session_1", endpoint_id="USB:1", device_id="cam1", device_epoch=1,
-        controller_epoch=1, physical_operation_id="op-4", command_nonce="nonce-4",
+        controller_epoch=1, physical_operation_id="op-4", command_nonce="nonce-4", correlation_id="nonce-4",
         execution_id=exec_id, command_name="test"
     )
     manager._active_commands[exec_id] = cmd
@@ -181,7 +181,7 @@ def test_auth_01_real_production_linearization(tmp_path):
     # We directly mock the admission step that handle_command would perform
     store.record_operation_admitted(
         session_id="session_1", endpoint_id="USB:1", device_id="cam1", device_epoch=1,
-        controller_epoch=1, physical_operation_id="op-prod-1", command_nonce="nonce-prod-1",
+        controller_epoch=1, physical_operation_id="op-prod-1", command_nonce="nonce-prod-1", correlation_id="nonce-prod-1",
         execution_id=exec_id, command_name="test_prod"
     )
 

@@ -127,7 +127,7 @@ def test_known_long_running_execution_preempt_after_cache_expiry(manager_and_gat
         device_epoch=0,
         controller_epoch=0,
         physical_operation_id="phys_1",
-        command_nonce="nonce_1",
+        command_nonce="nonce_1", correlation_id="nonce_1",
         execution_id=exec_id,
         command_name="TEST_CMD"
     )
@@ -150,7 +150,7 @@ def test_known_execution_unauthorized_preempt_rejected(manager_and_gate):
         device_epoch=0,
         controller_epoch=0,
         physical_operation_id="phys_2",
-        command_nonce="nonce_2",
+        command_nonce="nonce_2", correlation_id="nonce_2",
         execution_id=exec_id,
         command_name="TEST_CMD"
     )
@@ -173,7 +173,7 @@ def test_unknown_id_cannot_poison_future_admission(manager_and_gate):
         device_epoch=0,
         controller_epoch=0,
         physical_operation_id="phys_3",
-        command_nonce="nonce_3",
+        command_nonce="nonce_3", correlation_id="nonce_3",
         execution_id=exec_id,
         command_name="TEST_CMD"
     )
@@ -190,7 +190,7 @@ def test_known_execution_id_cannot_be_rebound(manager_and_gate):
         device_epoch=0,
         controller_epoch=0,
         physical_operation_id="phys_4",
-        command_nonce="nonce_4",
+        command_nonce="nonce_4", correlation_id="nonce_4",
         execution_id=exec_id,
         command_name="TEST_CMD"
     )
@@ -203,7 +203,7 @@ def test_known_execution_id_cannot_be_rebound(manager_and_gate):
             device_epoch=0,
             controller_epoch=0,
             physical_operation_id="phys_5",
-            command_nonce="nonce_5",
+            command_nonce="nonce_5", correlation_id="nonce_5",
             execution_id=exec_id,
             command_name="TEST_CMD"
         )

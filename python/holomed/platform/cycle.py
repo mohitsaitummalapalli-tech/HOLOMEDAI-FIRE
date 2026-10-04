@@ -96,7 +96,7 @@ class CycleCoordinator:
 
                         if intent.action in (ACTION_RELEASE, ACTION_CANCEL):
                             if hasattr(dcm, "preempt_by_correlation"):
-                                dcm.preempt_by_correlation(intent.correlation_id)
+                                dcm.preempt_by_correlation(intent.correlation_id)  # type: ignore
                         elif intent.action == ACTION_GRASP:
                             proposal = self._proposer.process_intent(intent, target_device)
                             if proposal:

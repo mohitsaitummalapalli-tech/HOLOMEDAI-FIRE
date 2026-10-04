@@ -142,7 +142,7 @@ def test_h_i_epoch_rollover_races(shared_store_path):
         store.record_operation_admitted(
             session_id=session, endpoint_id="ep_h", device_id="dev_h",
             device_epoch=1, controller_epoch=epoch, # Stale!
-            physical_operation_id="op_h", command_nonce="nonce_h",
+            physical_operation_id="op_h", command_nonce="nonce_h", correlation_id="nonce_h",
             execution_id="exec_h", command_name="cmd_h"
         )
     assert store.get_active_physical_operations() == 0
@@ -166,7 +166,7 @@ def test_t_reinitialization_race_stale_controller(shared_store_path):
         store.record_operation_admitted(
             session_id=session, endpoint_id="ep_t", device_id="dev_t",
             device_epoch=new_device_epoch - 1, controller_epoch=epoch,
-            physical_operation_id="op_t", command_nonce="nonce_t",
+            physical_operation_id="op_t", command_nonce="nonce_t", correlation_id="nonce_t",
             execution_id="exec_t", command_name="cmd_t"
         )
         
@@ -181,14 +181,14 @@ def test_j_duplicate_command_race(shared_store_path):
     # J: Admit the first
     init_device_auth(store, "dev_j")
     store.record_operation_admitted(
-        session, "ep_j", "dev_j", 1, epoch, "op_j", "nonce_j", "exec_j", "cmd_j", request_fingerprint="fp1"
+        session, "ep_j", "dev_j", 1, epoch, "op_j", "nonce_j", "corr_" + "exec_j","exec_j", "cmd_j", request_fingerprint="fp1"
     )
     
     # Check duplicate admission (which simulates process 2 waking up after wait)
     # The existing physical_operation_id is "op_j". If Process 2 tries to admit again with DIFFERENT op_id but SAME nonce and DIFFERENT fingerprint, it fails.
     with pytest.raises(PersistenceIdempotencyError):
         store.record_operation_admitted(
-            session, "ep_j", "dev_j", 1, epoch, "op_j_different", "nonce_j", "exec_j", "cmd_j_different", request_fingerprint="fp2"
+            session, "ep_j", "dev_j", 1, epoch, "op_j_different", "nonce_j", "corr_" + "exec_j","exec_j", "cmd_j_different", request_fingerprint="fp2"
         )
 
 def test_k_l_duplicate_after_restart_and_completion(shared_store_path):
@@ -198,14 +198,14 @@ def test_k_l_duplicate_after_restart_and_completion(shared_store_path):
     
     # L. Duplicate after terminal completion
     init_device_auth(store, "dev_l")
-    store.record_operation_admitted(session, "ep_l", "dev_l", 1, epoch, "op_l", "nonce_l", "exec_l", "cmd_l")
+    store.record_operation_admitted(session, "ep_l", "dev_l", 1, epoch, "op_l", "nonce_l", "corr_" + "exec_l","exec_l", "cmd_l")
     store.record_operation_terminated(session, "dev_l", 1, epoch, "op_l", "nonce_l", CommandState.COMPLETED)
     
     # Restart the store (K)
     store2 = DurableSessionStore(shared_store_path, epoch_id=epoch)
     store2.restore_session_from_disk(session)
     
-    op_id, is_replay, resolution = store2.record_operation_admitted(session, "ep_l", "dev_l", 1, epoch, "op_l", "nonce_l", "exec_l", "cmd_l")
+    op_id, is_replay, resolution = store2.record_operation_admitted(session, "ep_l", "dev_l", 1, epoch, "op_l", "nonce_l", "corr_" + "exec_l","exec_l", "cmd_l")
     assert is_replay is True
     assert resolution == CommandState.COMPLETED
 
@@ -219,7 +219,7 @@ def test_m_stale_telemetry(shared_store_path):
     store.restore_session_from_disk(session)
     
     init_device_auth(store, "dev_m")
-    store.record_operation_admitted(session, "ep_m", "dev_m", 1, epoch, "op_m", "nonce_m", "exec_m", "cmd_m")
+    store.record_operation_admitted(session, "ep_m", "dev_m", 1, epoch, "op_m", "nonce_m", "corr_" + "exec_m","exec_m", "cmd_m")
     store.record_operation_terminated(session, "dev_m", 1, epoch, "op_m", "nonce_m", CommandState.COMPLETED)
     
     # Another termination/telemetry arrives
@@ -246,13 +246,13 @@ def test_r_capacity_contention(shared_store_path):
     for i in range(GLOBAL_PHYSICAL_OPERATION_CAPACITY):
         init_device_auth(store, f"dev_{i}")
         store.record_operation_admitted(
-            session, f"ep_{i}", f"dev_{i}", 1, epoch, f"op_{i}", f"nonce_{i}", f"exec_{i}", "cmd"
+            session, f"ep_{i}", f"dev_{i}", 1, epoch, f"op_{i}", f"nonce_{i}", f"corr_{i}", f"exec_{i}", "cmd"
         )
         
     with pytest.raises(PersistenceCapacityError):
         init_device_auth(store, "dev_overflow")
         store.record_operation_admitted(
-            session, "ep_overflow", "dev_overflow", 1, epoch, "op_overflow", "nonce_overflow", "exec_overflow", "cmd"
+            session, "ep_overflow", "dev_overflow", 1, epoch, "op_overflow", "nonce_overflow", "corr_" + "exec_overflow","exec_overflow", "cmd"
         )
 
 # ==============================================================================
@@ -301,14 +301,14 @@ def test_lease_failure_distinctions(shared_store_path):
     # If the process crashes *after* lease succeeds, before dispatch -> FAULTED_UNKNOWN.
     # We verify that if an operation is admitted and never terminated, it resolves to FAULTED_UNKNOWN on restart.
     init_device_auth(store, "dev_l")
-    store.record_operation_admitted(session, "ep_l", "dev_l", 1, epoch, "op_l", "nonce_l", "exec_l", "cmd_l")
+    store.record_operation_admitted(session, "ep_l", "dev_l", 1, epoch, "op_l", "nonce_l", "corr_" + "exec_l","exec_l", "cmd_l")
     
     # Restart
     store2 = DurableSessionStore(shared_store_path, epoch_id=epoch)
     store2.restore_session_from_disk(session)
     
     # Check the result of a re-admission (simulating duplicate/replay after crash)
-    op_id, is_replay, resolution = store2.record_operation_admitted(session, "ep_l", "dev_l", 1, epoch, "op_l", "nonce_l", "exec_l", "cmd_l")
+    op_id, is_replay, resolution = store2.record_operation_admitted(session, "ep_l", "dev_l", 1, epoch, "op_l", "nonce_l", "corr_" + "exec_l","exec_l", "cmd_l")
     assert is_replay is True
     # The resolution is None because it was never terminated, meaning FAULTED_UNKNOWN in physical layer timeout
     assert resolution is None

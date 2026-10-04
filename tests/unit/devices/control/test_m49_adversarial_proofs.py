@@ -74,7 +74,7 @@ def test_stale_epoch_rejection(shared_store_path):
     with pytest.raises(PersistenceEpochMismatchError):
         init_device_auth(store_a, "dev_a")
         store_a.record_operation_admitted(
-            session, "ep_a", "dev_a", 1, 1, "op_a", "nonce_a", "exec_a", "test"
+            session, "ep_a", "dev_a", 1, 1, "op_a", "nonce_a", "corr_" + "exec_a","exec_a", "test"
         )
 
 # ---------------------------------------------------------
@@ -168,7 +168,7 @@ def test_crash_tail_recovery_proof(shared_store_path):
     store.restore_session_from_disk(session)
     init_device_auth(store, "dev_c")
     store.record_operation_admitted(
-        session, "ep_c", "dev_c", 1, 1, "op_c", "nonce_c", "exec_c", "test"
+        session, "ep_c", "dev_c", 1, 1, "op_c", "nonce_c", "corr_" + "exec_c","exec_c", "test"
     )
 
     # Append corrupted JSON directly
@@ -180,7 +180,7 @@ def test_crash_tail_recovery_proof(shared_store_path):
     store2.restore_session_from_disk(session)
     init_device_auth(store2, "dev_c2")
     store2.record_operation_admitted(
-        session, "ep_c2", "dev_c2", 1, 1, "op_c2", "nonce_c2", "exec_c2", "test"
+        session, "ep_c2", "dev_c2", 1, 1, "op_c2", "nonce_c2", "corr_" + "exec_c2","exec_c2", "test"
     )
 
     from holomed.persistence.journal import JournalReader
@@ -199,11 +199,11 @@ def test_active_duplicate_canonical_admission(shared_store_path):
 
     init_device_auth(store, "dev_d")
     store.record_operation_admitted(
-        session, "ep_d", "dev_d", 1, 1, "op_d", "nonce_d", "exec_d1", "test"
+        session, "ep_d", "dev_d", 1, 1, "op_d", "nonce_d", "corr_nonce_d","exec_d1", "test"
     )
 
     store.record_operation_admitted(
-        session, "ep_d", "dev_d", 1, 1, "op_d", "nonce_d", "exec_d2", "test"
+        session, "ep_d", "dev_d", 1, 1, "op_d", "nonce_d", "corr_nonce_d","exec_d1", "test"
     )
 
     assert store.get_active_physical_operations() == 1
@@ -224,7 +224,7 @@ def test_terminated_identity_reuse_rejection(shared_store_path):
 
     init_device_auth(store, "dev_t")
     store.record_operation_admitted(
-        session, "ep_t", "dev_t", 1, 1, "op_t", "nonce_t", "exec_t1", "test"
+        session, "ep_t", "dev_t", 1, 1, "op_t", "nonce_t", "corr_nonce_t","exec_t1", "test"
     )
     store.record_operation_terminated(
         session, "dev_t", 1, 1, "op_t", "nonce_t", "OPERATION_COMPLETED"
@@ -234,7 +234,7 @@ def test_terminated_identity_reuse_rejection(shared_store_path):
 
     # Exact replay of (session, nonce) should bypass and return exact replay result
     physical_operation_id, is_replay, resolution = store.record_operation_admitted(
-        session, "ep_t", "dev_t", 1, 1, "op_t", "nonce_t", "exec_t2", "test"
+        session, "ep_t", "dev_t", 1, 1, "op_t", "nonce_t", "corr_nonce_t","exec_t1", "test"
     )
     assert physical_operation_id == "op_t"
     assert is_replay is True
@@ -245,7 +245,7 @@ def test_terminated_identity_reuse_rejection(shared_store_path):
 
     with pytest.raises(PersistenceIdentityReuseError):
         store.record_operation_admitted(
-            "session_diff", "ep_t", "dev_t", 1, 1, "op_t", "nonce_t", "exec_t3", "test"
+            "session_diff", "ep_t", "dev_t", 1, 1, "op_t", "nonce_t", "corr_" + "exec_t3","exec_t3", "test"
         )
 
 # ---------------------------------------------------------
@@ -258,7 +258,7 @@ def test_non_terminal_resolution_rejection(shared_store_path):
 
     init_device_auth(store, "dev_n")
     store.record_operation_admitted(
-        session, "ep_n", "dev_n", 1, 1, "op_n", "nonce_n", "exec_n", "test"
+        session, "ep_n", "dev_n", 1, 1, "op_n", "nonce_n", "corr_" + "exec_n","exec_n", "test"
     )
 
     non_terminals = ["QUARANTINED", "RECOVERY_REQUIRED", "UNKNOWN", "ISOLATION_PREPARE", "DISPATCHING", "RUNNING"]
@@ -279,7 +279,7 @@ def test_valid_terminal_release(shared_store_path):
         store = DurableSessionStore(shared_store_path / state, epoch_id=epoch)
         store.restore_session_from_disk(session)
         init_device_auth(store, "dev_v")
-        store.record_operation_admitted(session, "ep_v", "dev_v", 1, 1, "op_v", "nonce_v", "exec_v", "test")
+        store.record_operation_admitted(session, "ep_v", "dev_v", 1, 1, "op_v", "nonce_v", "corr_" + "exec_v","exec_v", "test")
 
         store.record_operation_terminated(session, "dev_v", 1, 1, "op_v", "nonce_v", state)
         assert store.get_active_physical_operations() == 0
@@ -293,7 +293,7 @@ def test_conflicting_terminal_resolution_rejection(shared_store_path):
     store.restore_session_from_disk(session)
 
     init_device_auth(store, "dev_c")
-    store.record_operation_admitted(session, "ep_c", "dev_c", 1, 1, "op_c", "nonce_c", "exec_c", "test")
+    store.record_operation_admitted(session, "ep_c", "dev_c", 1, 1, "op_c", "nonce_c", "corr_" + "exec_c","exec_c", "test")
     store.record_operation_terminated(session, "dev_c", 1, 1, "op_c", "nonce_c", "OPERATION_COMPLETED")
 
     with pytest.raises(PersistenceLifecycleError, match="Conflict"):
@@ -308,7 +308,7 @@ def test_duplicate_identical_terminal_idempotency(shared_store_path):
     store.restore_session_from_disk(session)
 
     init_device_auth(store, "dev_i")
-    store.record_operation_admitted(session, "ep_i", "dev_i", 1, 1, "op_i", "nonce_i", "exec_i", "test")
+    store.record_operation_admitted(session, "ep_i", "dev_i", 1, 1, "op_i", "nonce_i", "corr_" + "exec_i","exec_i", "test")
     store.record_operation_terminated(session, "dev_i", 1, 1, "op_i", "nonce_i", "OPERATION_COMPLETED")
     store.record_operation_terminated(session, "dev_i", 1, 1, "op_i", "nonce_i", "OPERATION_COMPLETED")
 
@@ -325,7 +325,7 @@ def test_admission_termination_race(shared_store_path):
     store = DurableSessionStore(shared_store_path, epoch_id=epoch)
     store.restore_session_from_disk(session)
     init_device_auth(store, "dev_t")
-    store.record_operation_admitted(session, "ep_t", "dev_t", 1, 1, "op_t", "nonce_t", "exec_t", "test")
+    store.record_operation_admitted(session, "ep_t", "dev_t", 1, 1, "op_t", "nonce_t", "corr_" + "exec_t","exec_t", "test")
 
     pa = subprocess.Popen([sys.executable, str(HELPER_SCRIPT), "adm_term_race_a", str(shared_store_path), str(epoch), "op_a"], stdout=subprocess.PIPE, text=True)
     pb = subprocess.Popen([sys.executable, str(HELPER_SCRIPT), "adm_term_race_b", str(shared_store_path), str(epoch), "op_a"], stdout=subprocess.PIPE, text=True)
@@ -351,7 +351,7 @@ def test_restart_only_durable_routing(shared_store_path):
     store = DurableSessionStore(shared_store_path, epoch_id=epoch)
     store.restore_session_from_disk(session)
     init_device_auth(store, "dev_r")
-    store.record_operation_admitted(session, "ep_r", "dev_r", 1, 1, "op_r", "nonce_r", "exec_r", "test")
+    store.record_operation_admitted(session, "ep_r", "dev_r", 1, 1, "op_r", "nonce_r", "corr_" + "exec_r","exec_r", "test")
     assert store.get_active_physical_operations() == 1
 
     del store
@@ -383,7 +383,7 @@ def test_evidence_identity_generation_mismatch_rejection(shared_store_path):
     store = DurableSessionStore(shared_store_path, epoch_id=epoch)
     store.restore_session_from_disk(session)
     init_device_auth(store, "dev_e")
-    store.record_operation_admitted(session, "ep_e", "dev_e", 1, epoch, "op_e", "nonce_e", "exec_e", "test")
+    store.record_operation_admitted(session, "ep_e", "dev_e", 1, epoch, "op_e", "nonce_e", "corr_" + "exec_e","exec_e", "test")
 
     # 1. Setup production path components
     token = RegistryAuthorityToken()
@@ -701,7 +701,7 @@ def test_durable_admission_closes_toctou(shared_store_path):
             device_epoch=1,
             controller_epoch=epoch, # STALE EPOCH
             physical_operation_id="op_123",
-            command_nonce="nonce_123",
+            command_nonce="nonce_123", correlation_id="nonce_123",
             execution_id="exec_1",
             command_name="test_actuate"
         )

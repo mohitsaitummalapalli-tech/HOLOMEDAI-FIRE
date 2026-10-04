@@ -147,7 +147,7 @@ def test_terminal_resolution_capacity(components):
         device_epoch=1,
         controller_epoch=epoch,
         physical_operation_id="op-1",
-        command_nonce="nonce-1",
+        command_nonce="nonce-1", correlation_id="nonce-1",
         execution_id=execution_id,
         command_name="test_cmd"
     )
@@ -318,7 +318,7 @@ def test_duplicate_telemetry_concurrently(components):
         device_epoch=1,
         controller_epoch=epoch,
         physical_operation_id="op-1",
-        command_nonce="nonce-1",
+        command_nonce="nonce-1", correlation_id="nonce-1",
         execution_id=execution_id,
         command_name="test_cmd"
     )
@@ -404,7 +404,7 @@ def test_reconciliation_vs_admission(components):
     session_store.record_operation_admitted(
         endpoint_id="end-1", session_id=session_id, device_id="dev-ra",
         device_epoch=1, controller_epoch=epoch, physical_operation_id="op-ra-1",
-        command_nonce="nonce-ra-1", execution_id=exec_1, command_name="cmd"
+        command_nonce="nonce-ra-1", correlation_id="nonce-ra-1", execution_id=exec_1, command_name="cmd"
     )
 
     # Publish terminal telemetry for exec_1
@@ -423,7 +423,7 @@ def test_reconciliation_vs_admission(components):
             session_store.record_operation_admitted(
                 endpoint_id="end-2", session_id=session_id, device_id="dev-ra",
                 device_epoch=1, controller_epoch=epoch, physical_operation_id="op-ra-2",
-                command_nonce="nonce-ra-2", execution_id=exec_2, command_name="cmd"
+                command_nonce="nonce-ra-2", correlation_id="nonce-ra-2", execution_id=exec_2, command_name="cmd"
             )
         except Exception as e:
             errors.append(e)
@@ -469,7 +469,7 @@ def test_reconciliation_vs_recovery(components):
     session_store.record_operation_admitted(
         endpoint_id="end-1", session_id=session_id, device_id="dev-1",
         device_epoch=1, controller_epoch=epoch, physical_operation_id="op-1",
-        command_nonce="nonce-1", execution_id=old_exec, command_name="cmd"
+        command_nonce="nonce-1", correlation_id="nonce-1", execution_id=old_exec, command_name="cmd"
     )
 
     # 2. Terminal resolve old execution via telemetry
@@ -486,7 +486,7 @@ def test_reconciliation_vs_recovery(components):
     session_store.record_operation_admitted(
         endpoint_id="end-1", session_id=session_id, device_id="dev-1",
         device_epoch=2, controller_epoch=epoch, physical_operation_id="op-new",
-        command_nonce="nonce-new", execution_id=new_exec, command_name="cmd"
+        command_nonce="nonce-new", correlation_id="nonce-new", execution_id=new_exec, command_name="cmd"
     )
 
     assert session_store.get_active_physical_operations() == 1
@@ -536,7 +536,7 @@ def test_faulted_unknown_capacity_preserved(components):
     session_store.record_operation_admitted(
         endpoint_id="end-1", session_id=session_id, device_id="dev-f",
         device_epoch=1, controller_epoch=epoch, physical_operation_id="op-f",
-        command_nonce="nonce-f", execution_id=execution_id, command_name="cmd"
+        command_nonce="nonce-f", correlation_id="nonce-f", execution_id=execution_id, command_name="cmd"
     )
     assert session_store.get_active_physical_operations() == 1
 
@@ -575,7 +575,7 @@ def test_operation_completed_releases_exactly_once(components):
     session_store.record_operation_admitted(
         endpoint_id="end-1", session_id=session_id, device_id="dev-1",
         device_epoch=1, controller_epoch=epoch, physical_operation_id="op-1",
-        command_nonce="nonce-1", execution_id=execution_id, command_name="cmd"
+        command_nonce="nonce-1", correlation_id="nonce-1", execution_id=execution_id, command_name="cmd"
     )
     assert session_store.get_active_physical_operations() == 1
 
@@ -599,7 +599,7 @@ def test_evidence_identity_mismatch_rejection(components):
     session_store.record_operation_admitted(
         endpoint_id="end-1", session_id=session_id, device_id="dev-ev",
         device_epoch=1, controller_epoch=epoch, physical_operation_id="op-ev",
-        command_nonce="nonce-ev", execution_id=execution_id, command_name="cmd"
+        command_nonce="nonce-ev", correlation_id="nonce-ev", execution_id=execution_id, command_name="cmd"
     )
     
     from holomed.persistence.exceptions import PersistenceTerminationConflictError
@@ -635,7 +635,7 @@ def test_real_g8_telemetry_trust_path(components):
     session_store.record_operation_admitted(
         endpoint_id="end-1", session_id=session_id, device_id="dev-g8",
         device_epoch=1, controller_epoch=epoch, physical_operation_id="op-g8",
-        command_nonce="nonce-g8", execution_id=execution_id, command_name="cmd"
+        command_nonce="nonce-g8", correlation_id="nonce-g8", execution_id=execution_id, command_name="cmd"
     )
     assert session_store.get_active_physical_operations() == 1
     
@@ -722,7 +722,7 @@ def test_real_g8_telemetry_trust_path(components):
     session_store.record_operation_admitted(
         endpoint_id="end-2", session_id=session_id, device_id="dev-g8-valid",
         device_epoch=1, controller_epoch=epoch, physical_operation_id="op-g8-valid",
-        command_nonce="nonce-g8-valid", execution_id=valid_exec_id, command_name="cmd"
+        command_nonce="nonce-g8-valid", correlation_id="nonce-g8-valid", execution_id=valid_exec_id, command_name="cmd"
     )
     assert session_store.get_active_physical_operations() == 2
 
@@ -748,7 +748,7 @@ def test_real_g8_telemetry_trust_path(components):
     session_store.record_operation_admitted(
         endpoint_id="end-3", session_id=session_id, device_id="dev-g8-missing",
         device_epoch=1, controller_epoch=epoch, physical_operation_id="op-g8-missing",
-        command_nonce="nonce-g8-missing", execution_id=missing_id_exec, command_name="cmd"
+        command_nonce="nonce-g8-missing", correlation_id="nonce-g8-missing", execution_id=missing_id_exec, command_name="cmd"
     )
     assert session_store.get_active_physical_operations() == 2
     missing_id_event = create_event(missing_id_exec, 11, CommandState.OPERATION_COMPLETED, session_id=session_id)
@@ -765,7 +765,7 @@ def test_real_g8_telemetry_trust_path(components):
     session_store.record_operation_admitted(
         endpoint_id="end-4", session_id=session_id, device_id="dev-g8-bad",
         device_epoch=1, controller_epoch=epoch, physical_operation_id="op-g8-bad",
-        command_nonce="nonce-g8-bad", execution_id=bad_hist_exec, command_name="cmd"
+        command_nonce="nonce-g8-bad", correlation_id="nonce-g8-bad", execution_id=bad_hist_exec, command_name="cmd"
     )
     
     good_hist_exec = "exec-hist-good"
@@ -773,7 +773,7 @@ def test_real_g8_telemetry_trust_path(components):
     session_store.record_operation_admitted(
         endpoint_id="end-5", session_id=session_id, device_id="dev-g8-good",
         device_epoch=1, controller_epoch=epoch, physical_operation_id="op-g8-good",
-        command_nonce="nonce-g8-good", execution_id=good_hist_exec, command_name="cmd"
+        command_nonce="nonce-g8-good", correlation_id="nonce-g8-good", execution_id=good_hist_exec, command_name="cmd"
     )
     
     assert session_store.get_active_physical_operations() == 4
