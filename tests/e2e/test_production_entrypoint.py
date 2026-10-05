@@ -9,7 +9,7 @@ def test_production_entry_point_startup_and_shutdown() -> None:
     """Verify that the production entry point runs a full cycle and cleanly shuts down."""
     
     # Run the module directly as a subprocess to verify the entire __main__ stack
-    cmd = [sys.executable, "-m", "holomed", "--cycles", "1", "--headless"]
+    cmd = [sys.executable, "-m", "holomed", "--cycles", "1"]
     
     # We set cwd to the project root
     project_root = os.path.join(os.path.dirname(__file__), "..", "..")

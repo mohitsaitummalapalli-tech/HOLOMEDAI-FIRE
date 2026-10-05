@@ -42,14 +42,17 @@ class ConcreteMediaPipeAdapter(IMediaPipeAdapter):
     Expects image_data to be an RGB numpy array.
     """
     def __init__(self, min_detection_confidence: float = 0.5, min_tracking_confidence: float = 0.5):
+        self._landmarker = None
         if not HAS_MEDIAPIPE:
-            raise ImportError("mediapipe is not installed but ConcreteMediaPipeAdapter requires it.")
+            logger.warning("mediapipe is not installed. ConcreteMediaPipeAdapter will fail safely.")
+            return
         
         import os
         model_path = os.path.join(os.path.dirname(__file__), "..", "..", "..", "tests", "assets", "hand_landmarker.task")
         
         if not os.path.exists(model_path):
-            raise FileNotFoundError(f"Missing hand_landmarker.task at {model_path}")
+            logger.warning(f"Missing hand_landmarker.task at {model_path}. ConcreteMediaPipeAdapter will fail safely.")
+            return
             
         base_options = mp_python.BaseOptions(model_asset_path=model_path) # type: ignore
         options = mp_vision.HandLandmarkerOptions( # type: ignore
@@ -61,6 +64,8 @@ class ConcreteMediaPipeAdapter(IMediaPipeAdapter):
         self._landmarker = mp_vision.HandLandmarker.create_from_options(options) # type: ignore
 
     def process_frame(self, image_data: Any) -> Tuple[bool, float, tuple[tuple[float, float, float], ...]]:
+        if self._landmarker is None:
+            return False, 0.0, ()
         if not HAS_MEDIAPIPE or np is None or not isinstance(image_data, np.ndarray): # type: ignore
             return False, 0.0, ()
 

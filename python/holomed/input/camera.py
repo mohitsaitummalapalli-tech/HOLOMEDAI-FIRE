@@ -35,6 +35,42 @@ class ICameraSource(abc.ABC):
         """Return True if the camera is currently open and ready."""
 
 
+class OpenCVCameraSource(ICameraSource):
+    """
+    Physical camera source using OpenCV.
+    Fails safely if cv2 is not installed or camera is unavailable.
+    """
+    def __init__(self, camera_index: int = 0):
+        self._cap = None
+        try:
+            import cv2
+            self._cap = cv2.VideoCapture(camera_index)
+        except ImportError:
+            logger.warning("cv2 is not installed. OpenCVCameraSource will fail safely.")
+        except Exception as e:
+            logger.warning(f"Failed to initialize camera {camera_index}: {e}")
+
+    def read(self) -> Tuple[bool, Any]:
+        if self._cap is None:
+            return False, None
+        success, frame = self._cap.read()
+        if success:
+            try:
+                import cv2
+                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            except Exception:
+                pass
+        return success, frame
+
+    def release(self) -> None:
+        if self._cap is not None:
+            self._cap.release()
+            self._cap = None
+
+    def is_opened(self) -> bool:
+        return self._cap is not None and self._cap.isOpened()
+
+
 class CameraInputNode:
     """
     Manages the physical camera lifecycle, reads frames in a background thread,

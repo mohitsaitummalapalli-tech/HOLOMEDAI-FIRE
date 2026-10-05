@@ -18,7 +18,7 @@ def main() -> int:
     """Run the HoloMed AI pipeline."""
     parser = argparse.ArgumentParser(description="HoloMed AI Production Runner")
     parser.add_argument("--cycles", type=int, default=1, help="Number of simulation cycles to run")
-    parser.add_argument("--headless", action="store_true", default=True, help="Run in headless simulation mode")
+    parser.add_argument("--live", action="store_true", help="Run with real camera feed instead of headless simulation")
     
     args = parser.parse_args()
     
@@ -35,16 +35,18 @@ def main() -> int:
             session_id = str(uuid.uuid4())
             logger.info(f"Starting session {session_id}")
             
-            # For this step, run the headless cycles
-            if args.headless:
+            if not args.live:
                 logger.info(f"Running {args.cycles} headless cycles...")
                 success = runner.run_headless_cycles(session_id=session_id, count=args.cycles)
                 if not success:
                     logger.error("Headless cycles encountered errors.")
                     return 1
             else:
-                logger.error("Interactive mode not yet implemented for Phase 3.2-I")
-                return 1
+                logger.info(f"Running {args.cycles} LIVE cycles...")
+                success = runner.run_live_cycles(session_id=session_id, count=args.cycles)
+                if not success:
+                    logger.error("Live cycles encountered errors.")
+                    return 1
                 
             logger.info("Cycles completed successfully.")
             
