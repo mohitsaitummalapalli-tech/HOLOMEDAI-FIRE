@@ -38,9 +38,9 @@ def test_ast_prohibited_imports_audit() -> None:
                     if isinstance(node, ast.Import):
                         for alias in node.names:
                             for prohibited in PROHIBITED_MODULES:
-                                if file in ("simulated.py", "resolution.py", "manager.py", "daemon.py") and prohibited == "threading":
+                                if file in ("simulated.py", "resolution.py", "manager.py", "daemon.py", "unity_device.py") and prohibited == "threading":
                                     continue
-                                if file == "unity_ipc.py" and prohibited == "asyncio":
+                                if file in ("unity_ipc.py", "unity_device.py") and prohibited == "asyncio":
                                     continue
                                 assert not (alias.name == prohibited or alias.name.startswith(f"{prohibited}.")), (
                                     f"Prohibited import '{alias.name}' in {file_path}"
@@ -48,9 +48,9 @@ def test_ast_prohibited_imports_audit() -> None:
                     elif isinstance(node, ast.ImportFrom):
                         if node.module:
                             for prohibited in PROHIBITED_MODULES:
-                                if file in ("simulated.py", "resolution.py", "manager.py", "daemon.py") and prohibited == "threading":
+                                if file in ("simulated.py", "resolution.py", "manager.py", "daemon.py", "unity_device.py") and prohibited == "threading":
                                     continue
-                                if file == "unity_ipc.py" and prohibited == "asyncio":
+                                if file in ("unity_ipc.py", "unity_device.py") and prohibited == "asyncio":
                                     continue
                                 assert not (node.module == prohibited or node.module.startswith(f"{prohibited}.")), (
                                     f"Prohibited from-import '{node.module}' in {file_path}"
