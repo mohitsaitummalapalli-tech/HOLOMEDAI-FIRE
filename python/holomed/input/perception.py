@@ -36,6 +36,10 @@ class IMediaPipeAdapter(abc.ABC):
         If success is False, the frame did not contain a valid detection (e.g., no hand).
         """
 
+    def close(self) -> None:
+        """Release any underlying resources (e.g. MediaPipe models)."""
+        pass
+
 class ConcreteMediaPipeAdapter(IMediaPipeAdapter):
     """
     Concrete implementation wrapping the real mediapipe Hands solution.
@@ -89,6 +93,11 @@ class ConcreteMediaPipeAdapter(IMediaPipeAdapter):
         # Convert landmarks
         landmarks = tuple((float(lm.x), float(lm.y), float(lm.z)) for lm in hand_landmarks)
         return True, confidence, landmarks
+
+    def close(self) -> None:
+        if self._landmarker is not None:
+            self._landmarker.close()
+            self._landmarker = None
 
 
 class MediaPipePerceptionPipeline:
@@ -150,6 +159,10 @@ class MediaPipePerceptionPipeline:
 
         if self._thread and self._thread.is_alive():
             self._thread.join()
+
+        with self._lock:
+            if hasattr(self._adapter, "close"):
+                self._adapter.close()
 
     def get_latest_observation(self) -> Optional[PerceptionObservation]:
         """

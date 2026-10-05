@@ -52,9 +52,9 @@ def test_zero_runtime_dependencies_contract():
     assert project.get("license") == "Apache-2.0", "PEP 639 license expression must be Apache-2.0"
     assert project.get("license-files") == ["LICENSE"], "PEP 639 license-files must be ['LICENSE']"
 
-    # Verify optional test dependencies contain only pytest
+    # Verify optional test dependencies contain only pytest and vision
     optional_deps = project.get("optional-dependencies", {})
-    assert set(optional_deps.keys()) == {"test"}
+    assert set(optional_deps.keys()) == {"test", "vision"}
     assert len(optional_deps["test"]) == 2
     deps_names = sorted([d.split(">=")[0] for d in optional_deps["test"]])
     assert deps_names == ["pytest", "pytest-asyncio"], f"Unexpected test dependencies: {optional_deps['test']}"
