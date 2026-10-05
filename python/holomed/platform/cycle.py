@@ -110,7 +110,6 @@ class CycleCoordinator:
                                 )
                                 res = dcm.handle_command(envelope)  # type: ignore
 
-
         # Phase 4: Multimodal Reasoning (Ultron)
         ultron_srv = services.get("ultron_service")
         if ultron_srv is not None:

@@ -101,7 +101,8 @@ def create_envelope_from_proposal(proposal: CommandRequest, session_id: str, lif
     import uuid
 
     # The payload combines the untrusted proposal data with the caller's session context
-    payload = dict(proposal.payload)
+    payload = {}
+    payload["parameters"] = dict(proposal.payload)
     payload["device_id"] = proposal.device_id
     payload["command"] = proposal.action
     # Add session context for admission

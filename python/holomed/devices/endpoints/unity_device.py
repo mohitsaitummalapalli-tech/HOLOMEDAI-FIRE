@@ -192,7 +192,7 @@ class UnityVirtualEndpoint(IPhysicalEndpoint):
                 sequence_number=command.command_sequence,
                 geometry_version=self._server._canonical_geometry_version,
                 message_type="physical_command",
-                payload={"action": command.operation, "data": command.parameters}
+                payload={"action": command.operation, "data": dict(command.parameters)}
             )
             await self._broadcast(env)
             # Fake immediate completion telemetry in the bridge

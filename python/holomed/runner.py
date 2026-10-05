@@ -158,6 +158,20 @@ class ProductionLiveSliceRunner:
         """Start all services in topological order."""
         self.dispatcher.start()
 
+        # Register Unity spatial interaction command to DCM
+        def handle_interact(dev, params):
+            return {"status": "success"}
+
+        try:
+            self.dcm.register_command(
+                command_name="sys.input.interact",
+                handler=handle_interact,
+                required_capability_id="grasp",
+                allow_ready=True,
+            )
+        except Exception:
+            pass
+
         self.dm.start()
         self.dcm.start()
 
