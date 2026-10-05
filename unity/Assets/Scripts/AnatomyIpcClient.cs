@@ -143,6 +143,29 @@ namespace HoloMedAI.IPC
             // Route message based on message_type to specific handlers
             // E.g., GeometryUpdateHandler, ErrorHandler
             Debug.Log($"[HoloMedAI] Received: {json}");
+
+            // M49 Phase F: Minimal Visible Anatomy Response Integration
+            if (json.Contains("\"message_type\":\"physical_command\"") && json.Contains("\"action\":\"sys.input.interact\""))
+            {
+                bool isPressed = json.Contains("\"state\":\"pressed\"");
+                
+                // Minimal visual response: Highlight the Heart GameObject
+                GameObject heart = GameObject.Find("Heart");
+                if (heart != null)
+                {
+                    Renderer renderer = heart.GetComponent<Renderer>();
+                    if (renderer != null)
+                    {
+                        // Visually highlight when pinched/grasped, return to white when released
+                        renderer.material.color = isPressed ? Color.red : Color.white;
+                        Debug.Log($"[HoloMedAI] Anatomy Response: Heart highlighted {isPressed}");
+                    }
+                }
+                else
+                {
+                    Debug.LogWarning("[HoloMedAI] Anatomy Response: Heart GameObject not found in scene.");
+                }
+            }
         }
 
         private void OnDestroy()

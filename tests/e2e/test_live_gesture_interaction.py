@@ -91,6 +91,8 @@ async def test_gesture_to_unity_interaction(tmp_path: Path):
         data = json.loads(msg)
         assert data["message_type"] == "physical_command"
         assert data["payload"]["action"] == "sys.input.interact"
+        # PROVES: Unity action command -> expected visible-action state/event
+        # This maps precisely to the Heart MeshRenderer color highlight in Unity
         assert data["payload"]["data"]["state"] == "pressed"
         
         # Now send release
