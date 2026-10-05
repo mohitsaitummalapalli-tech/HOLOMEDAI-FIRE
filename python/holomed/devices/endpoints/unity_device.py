@@ -290,19 +290,42 @@ class UnityVirtualDevice(IDevice):
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         self._loop = loop
-        
-        async def run_server_task():
+
+        async def run_server_task() -> None:
             await self._server.start()
             while not self._shutdown_event.is_set():
-                await asyncio.sleep(0.1)
-                
+                await asyncio.sleep(0.05)
+
+        async def graceful_shutdown() -> None:
+            """Perform full async teardown within the worker loop."""
+            # 1. Close the websockets server listener (stops accepting new conns)
+            if self._server.server is not None:
+                self._server.server.close()
+                await self._server.server.wait_closed()
+
+            # 2. Close all active client connections
+            for conn in list(self._server._active_connections):
+                try:
+                    await conn.close()
+                except Exception:
+                    pass
+            self._server._active_connections.clear()
+            self._server.server = None
+
+            # 3. Cancel any remaining tasks on this loop
+            pending = [t for t in asyncio.all_tasks(loop) if t is not asyncio.current_task()]
+            for task in pending:
+                task.cancel()
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
+
         try:
             loop.run_until_complete(run_server_task())
         except Exception as e:
             logger.error(f"UnityVirtualDevice server error: {e}")
         finally:
             try:
-                loop.run_until_complete(self._server.stop())
+                loop.run_until_complete(graceful_shutdown())
             except Exception:
                 pass
             loop.close()
@@ -321,18 +344,14 @@ class UnityVirtualDevice(IDevice):
         self._state = DeviceState.READY
 
     def stop(self, accessor: DeviceResourceAccessor) -> None:
+        # Signal the worker thread to exit the polling loop
         self._shutdown_event.set()
-        if self._loop and not self._loop.is_closed():
-            future = asyncio.run_coroutine_threadsafe(self._server.stop(), self._loop)
-            try:
-                future.result(timeout=2.0)
-            except Exception:
-                pass
-            self._loop.call_soon_threadsafe(self._loop.stop)
-            
+
+        # Wait for the worker thread to complete its graceful_shutdown sequence
         if self._worker_thread and self._worker_thread.is_alive():
-            self._worker_thread.join(timeout=2.0)
-            
+            self._worker_thread.join(timeout=5.0)
+
+        self._loop = None
         self._state = DeviceState.STOPPED
         accessor.release(self._acquired.resource_id)
 
