@@ -245,7 +245,8 @@ class ProductionLiveSliceRunner:
                     break
                 time.sleep(0.033)
 
-            cycle_params = {
+            from typing import Any
+            cycle_params: dict[str, Any] = {
                 "target_device_id": "unity_slice_01",
                 "target_endpoint_id": "end_01"
             }

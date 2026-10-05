@@ -43,7 +43,7 @@ class OpenCVCameraSource(ICameraSource):
     def __init__(self, camera_index: int = 0):
         self._cap = None
         try:
-            import cv2
+            import cv2  # type: ignore
             self._cap = cv2.VideoCapture(camera_index)
         except ImportError:
             logger.warning("cv2 is not installed. OpenCVCameraSource will fail safely.")
@@ -56,7 +56,7 @@ class OpenCVCameraSource(ICameraSource):
         success, frame = self._cap.read()
         if success:
             try:
-                import cv2
+                import cv2  # type: ignore
                 frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             except Exception:
                 pass

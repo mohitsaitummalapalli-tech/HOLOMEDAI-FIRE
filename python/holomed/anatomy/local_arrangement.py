@@ -131,9 +131,6 @@ def subdivide_cutter_triangle(
             if _lines_intersect(canon_points[e1[0]], canon_points[e1[1]], canon_points[e2[0]], canon_points[e2[1]]):
                 raise CutterPartitionError("Proper crossing of segments detected in cutter arrangement")
 
-    print(f"DEBUG: canon_points: {canon_points}")
-    print(f"DEBUG: edges: {edges}")
-
     adj: dict[int, list[tuple[int, float]]] = {i: [] for i in range(len(canon_points))}
     for u_idx, v_idx in edges:
         dx1, dy1 = canon_points[v_idx][0] - canon_points[u_idx][0], canon_points[v_idx][1] - canon_points[u_idx][1]
