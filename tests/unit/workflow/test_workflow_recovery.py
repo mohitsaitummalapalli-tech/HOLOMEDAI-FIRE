@@ -100,3 +100,129 @@ def test_workflow_recovery_corrupted_journal_enters_recovery_required(
     assert snap.current_phase == WorkflowPhase.RECOVERY_REQUIRED
 
     pers.stop()
+
+from unittest.mock import MagicMock
+from holomed.workflow.exceptions import WorkflowRecoveryError
+from holomed.persistence.models import ReplayStatus, ReplayVerificationReport
+
+def test_workflow_recovery_replay_exception_triggers_recovery_required(
+    temp_storage_root: Path,
+    runtime_context: RuntimeContext,
+    secret_filter: SecretFilter,
+) -> None:
+    pers = PersistenceService(
+        storage_root=temp_storage_root,
+        secret_filter=secret_filter,
+    )
+    # Don't start or initialize, so replay_session fails
+    snap = WorkflowRecoveryEngine.recover_workflow_state(
+        session_id="no_such_session",
+        epoch_id=1,
+        procedure=STANDARD_SURGICAL_GUIDANCE_V1,
+        persistence_service=pers,
+    )
+    assert snap.current_phase == WorkflowPhase.RECOVERY_REQUIRED
+
+
+def test_workflow_recovery_empty_session_starts_at_patient_context(
+    temp_storage_root: Path,
+    runtime_context: RuntimeContext,
+    secret_filter: SecretFilter,
+) -> None:
+    pers = PersistenceService(
+        storage_root=temp_storage_root,
+        secret_filter=secret_filter,
+    )
+    pers.initialize(runtime_context)
+    pers.start()
+
+    sess_id = "sess_empty_01"
+    # Create an empty file
+    journal_path = temp_storage_root / f"{sess_id}.jsonl"
+    journal_path.touch()
+
+    snap = WorkflowRecoveryEngine.recover_workflow_state(
+        session_id=sess_id,
+        epoch_id=1,
+        procedure=STANDARD_SURGICAL_GUIDANCE_V1,
+        persistence_service=pers,
+    )
+    assert snap.current_phase == WorkflowPhase.PATIENT_CONTEXT
+
+
+def test_workflow_recovery_corrupted_hash_chain(
+    temp_storage_root: Path,
+    runtime_context: RuntimeContext,
+    secret_filter: SecretFilter,
+) -> None:
+    pers = MagicMock(spec=PersistenceService)
+    pers.replay_session.return_value = ReplayVerificationReport(
+        session_id="sess_hash_fail",
+        replay_status=ReplayStatus.VERIFIED,
+        hash_chain_valid=False,
+        total_entries_verified=1,
+        initial_sequence=0,
+        final_sequence=0,
+        state_divergences=("Hash mismatch",),
+    )
+
+    snap = WorkflowRecoveryEngine.recover_workflow_state(
+        session_id="sess_hash_fail",
+        epoch_id=1,
+        procedure=STANDARD_SURGICAL_GUIDANCE_V1,
+        persistence_service=pers,
+    )
+    assert snap.current_phase == WorkflowPhase.RECOVERY_REQUIRED
+
+
+def test_workflow_recovery_get_session_failure(
+    temp_storage_root: Path,
+    runtime_context: RuntimeContext,
+    secret_filter: SecretFilter,
+) -> None:
+    pers = MagicMock(spec=PersistenceService)
+    pers.replay_session.return_value = ReplayVerificationReport(
+        session_id="sess_get_fail",
+        replay_status=ReplayStatus.VERIFIED,
+        hash_chain_valid=True,
+        total_entries_verified=2,
+        initial_sequence=0,
+        final_sequence=1,
+        state_divergences=(),
+    )
+    pers.get_session.side_effect = RuntimeError("Disk failure")
+
+    with pytest.raises(WorkflowRecoveryError, match="Disk failure"):
+        WorkflowRecoveryEngine.recover_workflow_state(
+            session_id="sess_get_fail",
+            epoch_id=1,
+            procedure=STANDARD_SURGICAL_GUIDANCE_V1,
+            persistence_service=pers,
+        )
+
+
+def test_workflow_recovery_stopped_session(
+    temp_storage_root: Path,
+    runtime_context: RuntimeContext,
+    secret_filter: SecretFilter,
+) -> None:
+    pers = PersistenceService(
+        storage_root=temp_storage_root,
+        secret_filter=secret_filter,
+    )
+    pers.initialize(runtime_context)
+    pers.start()
+
+    sess_id = "sess_stopped_01"
+    pers.start_session(sess_id)
+    summary = CycleSummary("c_01", 1, sess_id, 0, CycleStatus.COMPLETED, 1.0, ("P",), 1, 0, 0, 1.0, 0.0)
+    pers.record_cycle(sess_id, 0, summary)
+    pers.close_session(sess_id)
+
+    snap = WorkflowRecoveryEngine.recover_workflow_state(
+        session_id=sess_id,
+        epoch_id=1,
+        procedure=STANDARD_SURGICAL_GUIDANCE_V1,
+        persistence_service=pers,
+    )
+    assert snap.current_phase == WorkflowPhase.COMPLETION

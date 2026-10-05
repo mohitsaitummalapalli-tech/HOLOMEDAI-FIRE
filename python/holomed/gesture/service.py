@@ -436,7 +436,7 @@ class GestureService(IService):
             if self._processed_observations > 0
             else 0.0
         )
-        tracks = ()
+        tracks: tuple[Any, ...] = ()
         active_gestures = 0
         if sess_id and sess_id in self._session_pipelines:
             tracks = self._session_trackers[sess_id].export_sorted_tracks()
@@ -501,7 +501,7 @@ class GestureService(IService):
             raise GestureSessionMismatchError("Envelope session_id does not match payload session_id")
 
         sess_id = auth_session_id
-        tracks = ()
+        tracks: tuple[Any, ...] = ()
         if sess_id and sess_id in self._session_trackers:
             tracks = self._session_trackers[sess_id].export_sorted_tracks()
         payload = serialize_gesture_payload(

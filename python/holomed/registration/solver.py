@@ -105,7 +105,7 @@ class HornRigidRegistrationSolver:
         w, qx, qy, qz = [v / q_norm for v in q_raw]
 
         # 6. Convert Unit Quaternion to Proper 3x3 Rotation Matrix
-        R: Tuple[Tuple[float, float, float], ...] = (
+        R: tuple[tuple[float, float, float], tuple[float, float, float], tuple[float, float, float]] = (
             (1.0 - 2.0 * (qy * qy + qz * qz), 2.0 * (qx * qy - w * qz), 2.0 * (qx * qz + w * qy)),
             (2.0 * (qx * qy + w * qz), 1.0 - 2.0 * (qx * qx + qz * qz), 2.0 * (qy * qz - w * qx)),
             (2.0 * (qx * qz - w * qy), 2.0 * (qy * qz + w * qx), 1.0 - 2.0 * (qx * qx + qy * qy)),

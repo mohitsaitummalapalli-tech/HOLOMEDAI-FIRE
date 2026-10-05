@@ -114,7 +114,7 @@ def extract_cutter_patch(
         
     # 1. Identify outer boundary of the original cutter mesh
     # Edge -> count. Outer boundaries have count == 1.
-    edge_counts = {}
+    edge_counts: dict[tuple[Point3D, Point3D], int] = {}
     num_cutter_tris = len(cutter.indices) // 3
     for j in range(num_cutter_tris):
         v0 = cutter.vertices[cutter.indices[j*3]]
@@ -168,7 +168,7 @@ def extract_cutter_patch(
             modified_mesh_tris.append((v0, v1, v2))
 
     # 2.5 Deduplicate vertices across all cutter triangles to heal floating-point cracks
-    global_verts = []
+    global_verts: list[Point3D] = []
     def get_global(pt: Point3D) -> Point3D:
         for gv in global_verts:
             if abs(pt.x - gv.x) + abs(pt.y - gv.y) + abs(pt.z - gv.z) < 1e-5:
@@ -182,19 +182,19 @@ def extract_cutter_patch(
     modified_mesh_tris = deduped_tris
     
     deduped_barrier = set()
-    for e in barrier_edges:
-        deduped_barrier.add((get_global(e[0]), get_global(e[1])))
+    for edge in barrier_edges:
+        deduped_barrier.add((get_global(edge[0]), get_global(edge[1])))
     barrier_edges = deduped_barrier
             
     # 3. Build adjacency graph of new triangles
-    edge_to_tris = {}
+    edge_to_tris: dict[tuple[Point3D, Point3D], list[int]] = {}
     tri_to_edges = []
     for i, (va, vb, vc) in enumerate(modified_mesh_tris):
         edges = [(va, vb), (vb, vc), (vc, va)]
         tri_to_edges.append(edges)
-        for e in edges:
-            edge_to_tris.setdefault(e, []).append(i)
-            edge_to_tris.setdefault((e[1], e[0]), []).append(i)
+        for edge in edges:
+            edge_to_tris.setdefault(edge, []).append(i)
+            edge_to_tris.setdefault((edge[1], edge[0]), []).append(i)
             
     # 4. BFS to find components
     visited = set()
@@ -207,10 +207,10 @@ def extract_cutter_patch(
             while queue:
                 curr = queue.pop(0)
                 comp.append(curr)
-                for e in tri_to_edges[curr]:
-                    if e in barrier_edges or (e[1], e[0]) in barrier_edges:
+                for edge in tri_to_edges[curr]:
+                    if edge in barrier_edges or (edge[1], edge[0]) in barrier_edges:
                         continue # Wall
-                    neighbors = edge_to_tris.get((e[1], e[0]), [])
+                    neighbors = edge_to_tris.get((edge[1], edge[0]), [])
                     for n in neighbors:
                         if n not in visited and n != curr:
                             visited.add(n)
@@ -238,7 +238,7 @@ def extract_cutter_patch(
     patch_comp = interior_components[0]
     
     # Generate the AnatomicalMesh for the patch
-    patch_verts = []
+    patch_verts: list[Point3D] = []
     vert_map = {}
     patch_indices = []
     
@@ -259,7 +259,7 @@ def cap_partitioned_mesh(
     Stitches a partition child mesh and a generated cutter patch into a closed manifold mesh.
     Automatically determines the correct patch orientation by analyzing boundary edge winding.
     """
-    merged_vertices = []
+    merged_vertices: list[Point3D] = []
     vert_map = {}
     
     def get_vert_idx(v: Point3D) -> int:
@@ -273,7 +273,7 @@ def cap_partitioned_mesh(
     child_mesh = child.mesh
     new_indices = []
     
-    child_edges = {}
+    child_edges: dict[tuple[int, int], int] = {}
     num_child_tris = len(child_mesh.indices) // 3
     for i in range(num_child_tris):
         i0, i1, i2 = child_mesh.indices[i*3], child_mesh.indices[i*3+1], child_mesh.indices[i*3+2]
@@ -293,7 +293,7 @@ def cap_partitioned_mesh(
     child_boundary = {e for e, count in child_edges.items() if count == 1}
     
     # Analyze patch orientation
-    patch_edges = {}
+    patch_edges: dict[tuple[int, int], int] = {}
     patch_indices_mapped = []
     num_patch_tris = len(patch.indices) // 3
     for i in range(num_patch_tris):

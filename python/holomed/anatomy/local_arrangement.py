@@ -57,7 +57,7 @@ def subdivide_cutter_triangle(
         pv = dx * v.dx + dy * v.dy + dz * v.dz
         return (pu, pv)
 
-    canon_points = []
+    canon_points: list[tuple[float, float]] = []
     canon_3d = []
     
     def get_canon(pt_3d: Point3D) -> int:
@@ -134,7 +134,7 @@ def subdivide_cutter_triangle(
     print(f"DEBUG: canon_points: {canon_points}")
     print(f"DEBUG: edges: {edges}")
 
-    adj = {i: [] for i in range(len(canon_points))}
+    adj: dict[int, list[tuple[int, float]]] = {i: [] for i in range(len(canon_points))}
     for u_idx, v_idx in edges:
         dx1, dy1 = canon_points[v_idx][0] - canon_points[u_idx][0], canon_points[v_idx][1] - canon_points[u_idx][1]
         adj[u_idx].append((v_idx, math.atan2(dy1, dx1)))

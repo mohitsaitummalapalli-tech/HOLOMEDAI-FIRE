@@ -90,3 +90,35 @@ def test_global_transform_accumulation() -> None:
     assert gt.translation.x == 1.0
     assert gt.translation.y == 2.0
     assert gt.translation.z == 0.0
+
+def test_scene_get_descendants_and_remove():
+    """Verify get_descendants and remove_node correctly traverse and prune."""
+    sg = SceneGraph()
+    sg.add_node(make_test_node("root"))
+    sg.add_node(make_test_node("c1", parent_id="root"))
+    sg.add_node(make_test_node("c2", parent_id="root"))
+    sg.add_node(make_test_node("g1", parent_id="c1"))
+
+    descendants = sg.get_descendants("root")
+    # c1 and c2 should be first, then g1
+    assert "c1" in descendants
+    assert "c2" in descendants
+    assert "g1" in descendants
+    assert len(descendants) == 3
+
+    with pytest.raises(XRHierarchyError):
+        sg.get_descendants("invalid_node")
+
+    sg.remove_node("c1")
+    assert sg.node_count == 2
+    assert sg.get_node("root") is not None
+    assert sg.get_node("c2") is not None
+    with pytest.raises(XRHierarchyError):
+        sg.get_node("c1")
+    with pytest.raises(XRHierarchyError):
+        sg.get_node("g1")
+
+    sg.remove_node("root")
+    assert sg.node_count == 0
+
+    sg.remove_node("non_existent") # should not raise

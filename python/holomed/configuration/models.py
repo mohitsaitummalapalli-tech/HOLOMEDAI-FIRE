@@ -30,6 +30,7 @@ class SecretString:
     """Genuinely immutable secret wrapper preventing accidental credential disclosure."""
 
     __slots__ = ("_secret_value",)
+    _secret_value: str
 
     def __init__(self, value: str) -> None:
         if not isinstance(value, str):

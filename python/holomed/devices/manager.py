@@ -513,6 +513,7 @@ class DeviceManager(IService):
                             accessor = DeviceResourceAccessor(self._authority, dev_id)
                             active_dev.stop(accessor)
                             if self._authority.is_device_clean(dev_id):
+                                active_dev._state = DeviceState.STOPPED  # type: ignore
                                 self._registry.deregister(dev_id, self._registry_token)
                                 active_dev._state = DeviceState.UNREGISTERED  # type: ignore
                                 removed.append(dev_id)
@@ -568,6 +569,7 @@ class DeviceManager(IService):
                         failed[dev_id] = "Old device stop left dirty resources; replacement aborted"
                         continue
 
+                    old_dev._state = DeviceState.STOPPED  # type: ignore
                     self._registry.deregister(dev_id, self._registry_token)
                     old_dev._state = DeviceState.UNREGISTERED  # type: ignore
 

@@ -377,7 +377,7 @@ class DriftService(IService):
             # Enforce latching state for DRIFT_EXCEEDED and INTERLOCKED
             # Ordinary landmark evaluation MUST NOT automatically recover from DRIFT_EXCEEDED or INTERLOCKED
             if prev_state in (DriftState.DRIFT_EXCEEDED, DriftState.INTERLOCKED):
-                new_state = prev_state
+                new_state: DriftState = prev_state
             else:
                 new_state = verification.state
 

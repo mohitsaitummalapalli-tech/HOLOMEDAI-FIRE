@@ -30,7 +30,7 @@ class UnityIpcServer:
         self._handlers: Dict[str, Callable[[AnatomyIpcEnvelope], Awaitable[Optional[AnatomyIpcEnvelope]]]] = {}
         self._highest_seen_sequence: int = 0
         self._canonical_geometry_version: int = initial_geometry_version
-        self._active_connections = set()
+        self._active_connections: set[Any] = set()
 
     def set_geometry_version(self, version: int):
         self._canonical_geometry_version = version
@@ -78,12 +78,12 @@ class UnityIpcServer:
                     logger.warning(f"Session replay rejected: {envelope.session_id} != {connection_session_id}")
                     await websocket.send(json.dumps({"error": "session_mismatch"}))
                     continue
-                
+
                 if envelope.sequence_number <= self._highest_seen_sequence:
                     logger.warning(f"Stale/Duplicate sequence rejected: {envelope.sequence_number}")
                     await websocket.send(json.dumps({"error": "stale_sequence"}))
                     continue
-                
+
                 if envelope.geometry_version != self._canonical_geometry_version:
                     logger.warning(f"Stale geometry version rejected: {envelope.geometry_version} != {self._canonical_geometry_version}")
                     await websocket.send(json.dumps({"error": "stale_geometry_version"}))
@@ -108,51 +108,3 @@ class UnityIpcServer:
             pass
         finally:
             self._active_connections.discard(websocket)
-
-class UnityIpcClient:
-    """A mock client representing Unity for testing the transport boundary."""
-    def __init__(self, uri: str):
-        self.uri = uri
-        self.websocket = None
-        self._session_id = uuid4()
-        self._sequence_number = 1
-        self._geometry_version = 1
-
-    def set_geometry_version(self, version: int):
-        self._geometry_version = version
-
-    async def connect(self):
-        self.websocket = await websockets.connect(self.uri)
-
-    async def disconnect(self):
-        if self.websocket:
-            await self.websocket.close()
-
-    async def send_message(self, message_type: str, payload: Dict[str, Any], correlation_id: UUID) -> AnatomyIpcEnvelope:
-        envelope = AnatomyIpcEnvelope(
-            session_id=self._session_id,
-            correlation_id=correlation_id,
-            sequence_number=self._sequence_number,
-            geometry_version=self._geometry_version,
-            message_type=message_type,
-            payload=payload
-        )
-        self._sequence_number += 1
-        assert self.websocket is not None
-        await self.websocket.send(envelope.model_dump_json())
-        return envelope
-
-    async def send_raw(self, data: str):
-        assert self.websocket is not None
-        await self.websocket.send(data)
-
-    async def receive_response(self, timeout: float = 5.0, expected_correlation_id: Optional[UUID] = None) -> Any:
-        assert self.websocket is not None
-        message = await asyncio.wait_for(self.websocket.recv(), timeout=timeout)
-        try:
-            env = AnatomyIpcEnvelope.model_validate_json(message)
-            if expected_correlation_id and env.correlation_id != expected_correlation_id:
-                raise ValueError("correlation_mismatch")
-            return env
-        except ValidationError:
-            return json.loads(message)

@@ -65,7 +65,7 @@ class DurableGlobalCoordinator:
 
         # 1. Acquire GLOBAL_TRANSACTION_LOCK
         with self._authority_store._get_global_transaction_lock():
-            frozen_participants = {}
+            frozen_participants: dict[str, list] = {}
 
             # 2. Acquire GLOBAL PHYSICAL ADMISSION LOCK (to freeze set conceptually or assert state)
             with self._authority_store._get_global_admission_lock():

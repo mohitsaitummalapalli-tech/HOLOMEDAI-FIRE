@@ -55,7 +55,7 @@ def _calculate_normal(v0: Point3D, v1: Point3D, v2: Point3D) -> Vector3D:
     return Vector3D(nx/mag, ny/mag, nz/mag)
 
 def _split_triangle(v0: Point3D, v1: Point3D, v2: Point3D, segments: List[BoundarySegment]) -> Tuple[List[Tuple[Point3D, Point3D, Point3D]], List[Tuple[Point3D, Point3D, Point3D]], List[BoundarySegment]]:
-    adj = {}
+    adj: dict[Point3D, list[Point3D]] = {}
     for seg in segments:
         adj.setdefault(seg.start, []).append(seg.end)
         adj.setdefault(seg.end, []).append(seg.start)
@@ -95,7 +95,7 @@ def _split_triangle(v0: Point3D, v1: Point3D, v2: Point3D, segments: List[Bounda
     
     pts.sort(key=lambda x: x[0])
     
-    unique_pts = []
+    unique_pts: list[tuple[float, Point3D]] = []
     for p in pts:
         if not unique_pts:
             unique_pts.append(p)
@@ -191,14 +191,14 @@ class TargetMeshPartitioner:
                 
         # Build global dual graph
         # Map edge -> list of triangle indices
-        edge_to_tris = {}
+        edge_to_tris: dict[tuple[Point3D, Point3D], list[int]] = {}
         tri_to_edges = []
         for i, (va, vb, vc) in enumerate(modified_mesh_tris):
             edges = [(va, vb), (vb, vc), (vc, va)]
             tri_to_edges.append(edges)
-            for e in edges:
-                edge_to_tris.setdefault(e, []).append(i)
-                edge_to_tris.setdefault((e[1], e[0]), []).append(i)
+            for edge in edges:
+                edge_to_tris.setdefault(edge, []).append(i)
+                edge_to_tris.setdefault((edge[1], edge[0]), []).append(i)
                 
         # BFS
         visited = set()
@@ -212,10 +212,10 @@ class TargetMeshPartitioner:
                 while queue:
                     curr = queue.pop(0)
                     comp.append(curr)
-                    for e in tri_to_edges[curr]:
-                        if e in boundary_edges or (e[1], e[0]) in boundary_edges:
+                    for edge in tri_to_edges[curr]:
+                        if edge in boundary_edges or (edge[1], edge[0]) in boundary_edges:
                             continue # Wall
-                        neighbors = edge_to_tris.get((e[1], e[0]), [])
+                        neighbors = edge_to_tris.get((edge[1], edge[0]), [])
                         for n in neighbors:
                             if n not in visited and n != curr:
                                 visited.add(n)

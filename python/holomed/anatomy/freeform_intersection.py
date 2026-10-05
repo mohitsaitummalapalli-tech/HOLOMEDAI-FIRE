@@ -106,7 +106,7 @@ def _compute_intervals(t: Tuple[Point3D, Point3D, Point3D], dists: List[float]) 
             pts.append(t[i])
             
     # Deduplicate points in 3D
-    unique_pts = []
+    unique_pts: list[Point3D] = []
     for p in pts:
         is_dup = False
         for up in unique_pts:

@@ -100,12 +100,8 @@ def _format_error_code(exc_type_name: str) -> str:
 
 
 def _safe_get_planning_service(srv: Any) -> Any:
-    """Safely extracts _planning_service from srv without autovivifying Mock children."""
+    """Safely extracts _planning_service from srv."""
     if srv is None:
-        return None
-    if hasattr(srv, "_mock_return_value") or type(srv).__name__ in ("MagicMock", "Mock"):
-        if "_planning_service" in srv.__dict__:
-            return srv.__dict__["_planning_service"]
         return None
     return getattr(srv, "_planning_service", None)
 

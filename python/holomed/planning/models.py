@@ -129,8 +129,6 @@ class TrajectoryPlan:
 
 def validate_trajectory_integrity(candidate: TrajectoryPlan, authoritative: TrajectoryPlan) -> None:
     """Validate candidate trajectory integrity against an authoritative trajectory plan using physical dimension tolerances."""
-    if hasattr(candidate, "_mock_return_value") or hasattr(authoritative, "_mock_return_value"):
-        return
 
     if not isinstance(candidate, TrajectoryPlan):
         raise PlanningValidationError(f"Candidate trajectory must be a TrajectoryPlan instance, got {type(candidate).__name__}")
@@ -215,8 +213,6 @@ class SafetyExclusionZone:
 
 def validate_exclusion_zone_integrity(candidate: SafetyExclusionZone, authoritative: SafetyExclusionZone) -> None:
     """Validate candidate exclusion zone integrity against an authoritative exclusion zone using physical dimension tolerances."""
-    if hasattr(candidate, "_mock_return_value") or hasattr(authoritative, "_mock_return_value"):
-        return
 
     if not isinstance(candidate, SafetyExclusionZone):
         raise PlanningValidationError(f"Candidate exclusion zone must be a SafetyExclusionZone instance, got {type(candidate).__name__}")

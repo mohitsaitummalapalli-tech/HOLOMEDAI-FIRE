@@ -45,8 +45,8 @@ class SafeJSONDecoder(json.JSONDecoder):
         self.max_depth = max_depth
         self.current_depth = 0
 
-        orig_parse_object = self.parse_object
-        orig_parse_array = self.parse_array
+        orig_parse_object = self.parse_object  # type: ignore[has-type]
+        orig_parse_array = self.parse_array  # type: ignore[has-type]
 
         def custom_parse_object(
             s_and_end: Tuple[str, int],

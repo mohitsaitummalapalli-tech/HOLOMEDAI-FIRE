@@ -688,7 +688,7 @@ class ProximityService(IService):
             BREACHED -> CLEAR:      proximity.zone.cleared
             ANY -> INTERLOCKED:     proximity.interlock.triggered
         """
-        events = []
+        events: list[tuple[str, dict[str, Any]]] = []
         new_state = evaluation.worst_state
         if new_state == prev_state:
             return events  # No transition

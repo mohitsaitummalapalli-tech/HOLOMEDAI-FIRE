@@ -244,7 +244,7 @@ class DeviceJournalWriter:
                 sequence_number=resolved_sequence,
                 payload=MappingProxyType(dict(payload)),
                 sha256_hash=sha_hash,
-                previous_entry_hash=entry_dict["previous_entry_hash"],
+                previous_entry_hash=str(entry_dict.get("previous_entry_hash", "")),
             )
         finally:
             self._in_transaction = False

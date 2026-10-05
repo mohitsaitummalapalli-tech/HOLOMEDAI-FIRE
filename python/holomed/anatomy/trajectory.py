@@ -65,7 +65,7 @@ def validate_trajectory(traj: CutTrajectory) -> CutTrajectory:
             raise TrajectoryValidationError("Non-monotonic or identical timestamps")
         
     total_length = 0.0
-    filtered_samples = []
+    filtered_samples: list = []
     
     for s in traj.samples:
         if not (math.isfinite(s.position.x) and math.isfinite(s.position.y) and math.isfinite(s.position.z)):

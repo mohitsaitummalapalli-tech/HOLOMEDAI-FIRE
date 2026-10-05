@@ -404,6 +404,7 @@ class SimulatedDevice(IDevice):
         self._fail_on_start: Optional[Exception] = None
         self._fail_on_stop: Optional[Exception] = None
         self._fail_on_health: Optional[Exception] = None
+        self._dirty_on_stop: bool = False
         self._custom_health: Optional[DeviceHealth] = None
         self._endpoints: Tuple[IPhysicalEndpoint, ...] = ()
 
@@ -452,6 +453,9 @@ class SimulatedDevice(IDevice):
                 accessor.mark_release_failed(r_id, str(self._fail_on_stop))
             raise self._fail_on_stop
 
+        if self._dirty_on_stop:
+            return  # Simulate success but leave resources dirty
+
         for r_id in list(self._acquired_resource_ids):
             accessor.release(r_id)
         self._acquired_resource_ids.clear()
@@ -478,6 +482,9 @@ class SimulatedDevice(IDevice):
 
     def set_fail_on_stop(self, exc: Optional[Exception]) -> None:
         self._fail_on_stop = exc
+
+    def set_dirty_on_stop(self, dirty: bool) -> None:
+        self._dirty_on_stop = dirty
 
     def set_fail_on_health(self, exc: Optional[Exception]) -> None:
         self._fail_on_health = exc

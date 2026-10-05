@@ -488,6 +488,7 @@ class GatewayService(IService):
         # Resolve caller session context (M31, M34: isolate visibility to caller's session fail-closed)
         caller_id = query_envelope.source
         caller_conn = self._connections.get(caller_id)
+        caller_session_id: Any = None
         if caller_conn is not None and caller_conn.session is not None:
             caller_session_id = caller_conn.session.session_id
         else:
@@ -536,6 +537,7 @@ class GatewayService(IService):
         # Resolve caller context
         caller_id = command_envelope.source
         caller_conn = self._connections.get(caller_id)
+        caller_session_id: Any = None
         if caller_conn is not None and caller_conn.session is not None:
             caller_session_id = caller_conn.session.session_id
             caller_role = caller_conn.session.client_role

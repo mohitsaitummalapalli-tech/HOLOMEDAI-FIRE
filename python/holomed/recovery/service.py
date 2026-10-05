@@ -522,8 +522,7 @@ class RecoveryService(IService):
                     if traj.trajectory_id == plan_trajectory.trajectory_id:
                         authoritative_traj = traj
                         break
-                if authoritative_traj is None and hasattr(plan_trajectory, "_mock_return_value") and session_plan.trajectories:
-                    authoritative_traj = session_plan.trajectories[0]
+
                 if authoritative_traj is None:
                     raise RecoveryPlanMismatchError(
                         f"Trajectory {plan_trajectory.trajectory_id!r} not found in authoritative locked plan {session_plan.plan_id!r} for session {session_id!r}"
@@ -546,11 +545,7 @@ class RecoveryService(IService):
                 )
 
             if zones is not None:
-                # Handle test mock zones where caller passes unconfigured MagicMock()
-                if len(zones) == 1 and hasattr(zones[0], "_mock_return_value") and auth_zones:
-                    caller_zone_ids = list(auth_zone_ids)
-                else:
-                    caller_zone_ids = [z.zone_id for z in zones]
+                caller_zone_ids = [z.zone_id for z in zones]
                 if len(caller_zone_ids) != len(set(caller_zone_ids)):
                     raise RecoveryPlanMismatchError(
                         f"Caller supplied duplicate zone_ids: {caller_zone_ids}"
@@ -561,16 +556,13 @@ class RecoveryService(IService):
                     )
                 auth_zone_map = {z.zone_id: z for z in auth_zones}
                 for caller_z in zones:
-                    if hasattr(caller_z, "_mock_return_value"):
-                        continue
                     auth_z = auth_zone_map[caller_z.zone_id]
-                    if not hasattr(auth_z, "_mock_return_value"):
-                        try:
-                            validate_exclusion_zone_integrity(caller_z, auth_z)
-                        except Exception as e:
-                            raise RecoveryPlanMismatchError(
-                                f"Caller zone {caller_z.zone_id!r} integrity assertion failed: {e}"
-                            ) from e
+                    try:
+                        validate_exclusion_zone_integrity(caller_z, auth_z)
+                    except Exception as e:
+                        raise RecoveryPlanMismatchError(
+                            f"Caller zone {caller_z.zone_id!r} integrity assertion failed: {e}"
+                        ) from e
 
             # Pre-activation Registration Error / TRE Derivation and Assertion Check
             candidate_tre: Optional[float] = None

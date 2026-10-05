@@ -487,6 +487,7 @@ class DeviceCoordinationService(IService):
 
         payload = envelope.payload
         action = payload.get("action")
+        res_payload: dict[str, Any] = {}
 
         if type(action) is not str:
             return create_error_response(

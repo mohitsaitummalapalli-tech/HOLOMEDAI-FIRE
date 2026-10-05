@@ -280,7 +280,7 @@ class TestRecoveryPartialActivationFailures:
 
         cap3 = make_recovery_capability(svc, "session-01", seq=3)
         with pytest.raises(Exception):
-            svc.activate_recovery("session-01", zones=(MagicMock(),), sequence_number=3, capability=cap3)
+            svc.activate_recovery("session-01", zones=None, sequence_number=3, capability=cap3)
 
         assert svc.get_recovery_status("session-01").state == RecoveryState.FAILED
         event_names = [call[0][0].message_name for call in mock_dispatcher.dispatch.call_args_list]
@@ -315,7 +315,7 @@ class TestRecoveryPartialActivationFailures:
 
         cap3 = make_recovery_capability(svc, "session-01", seq=3)
         with pytest.raises(Exception):
-            svc.activate_recovery("session-01", plan_trajectory=MagicMock(), sequence_number=3, capability=cap3)
+            svc.activate_recovery("session-01", plan_trajectory=None, sequence_number=3, capability=cap3)
 
         assert svc.get_recovery_status("session-01").state == RecoveryState.FAILED
         event_names = [call[0][0].message_name for call in mock_dispatcher.dispatch.call_args_list]

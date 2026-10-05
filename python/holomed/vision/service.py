@@ -427,7 +427,7 @@ class VisionService(IService):
             raise VisionSessionMismatchError("Envelope session_id does not match payload session_id")
 
         sess_id = auth_session_id
-        tracks = ()
+        tracks: tuple[Any, ...] = ()
         if sess_id and sess_id in self._session_trackers:
             tracks = self._session_trackers[sess_id]._export_sorted_tracks()
         payload = serialize_vision_payload(

@@ -122,3 +122,93 @@ def test_refresh_prepare_before_retire_failure_leaves_old_device_active() -> Non
     # Old device remains active and untouched!
     assert old_dev.state == DeviceState.ACTIVE
     assert manager._registry.get("cam1") is old_dev
+
+def test_refresh_retiring_dirty_device_aborts_replacement() -> None:
+    manager = DeviceManager()
+    ctx = make_test_context(epoch_id=1)
+    manager.initialize(ctx)
+    manager.start()
+
+    cap1 = DeviceCapability("cap1", CapabilityCategory.STREAMING, {})
+    cap2 = DeviceCapability("cap2", CapabilityCategory.STREAMING, {})
+    desc1 = DeviceDescriptor("cam1", "USB:1", DeviceType.RGB_CAMERA, (cap1,), {})
+    desc2 = DeviceDescriptor("cam1", "USB:1", DeviceType.RGB_CAMERA, (cap2,), {})
+
+    def factory(desc):
+        return SimulatedDevice(desc.device_id, desc.physical_id, desc.device_type, desc.capabilities)
+
+    manager.register_factory(DeviceType.RGB_CAMERA, factory)
+
+    # First refresh: creates cam1 with desc1
+    manager.refresh_devices(StaticDiscoveryProvider([desc1]))
+    old_dev = manager._registry.get("cam1")
+
+    # Simulate old device leaving dirty resources during stop
+    old_dev.set_dirty_on_stop(True)
+
+    # Second refresh: descriptor changed to desc2
+    rep2 = manager.refresh_devices(StaticDiscoveryProvider([desc2]))
+    assert "cam1" in rep2.failed
+    assert "left dirty resources" in rep2.failed["cam1"]
+
+    # Old device transitions to FAILED
+    assert old_dev.state == DeviceState.FAILED
+
+
+def test_refresh_replacement_fails_during_start() -> None:
+    manager = DeviceManager()
+    ctx = make_test_context(epoch_id=1)
+    manager.initialize(ctx)
+    manager.start()
+
+    cap1 = DeviceCapability("cap1", CapabilityCategory.STREAMING, {})
+    cap2 = DeviceCapability("cap2", CapabilityCategory.STREAMING, {})
+    desc1 = DeviceDescriptor("cam1", "USB:1", DeviceType.RGB_CAMERA, (cap1,), {})
+    desc2 = DeviceDescriptor("cam1", "USB:1", DeviceType.RGB_CAMERA, (cap2,), {})
+
+    call_count = 0
+    def factory(desc):
+        nonlocal call_count
+        call_count += 1
+        dev = SimulatedDevice(desc.device_id, desc.physical_id, desc.device_type, desc.capabilities)
+        if call_count > 1:
+            dev.set_fail_on_start(RuntimeError("Start failed on candidate"))
+        return dev
+
+    manager.register_factory(DeviceType.RGB_CAMERA, factory)
+
+    manager.refresh_devices(StaticDiscoveryProvider([desc1]))
+    old_dev = manager._registry.get("cam1")
+
+    rep2 = manager.refresh_devices(StaticDiscoveryProvider([desc2]))
+    assert "cam1" in rep2.failed
+    assert "Start failed on candidate" in rep2.failed["cam1"]
+
+
+def test_refresh_disappeared_device_left_dirty_resources() -> None:
+    manager = DeviceManager()
+    ctx = make_test_context(epoch_id=1)
+    manager.initialize(ctx)
+    manager.start()
+
+    cap1 = DeviceCapability("cap1", CapabilityCategory.STREAMING, {})
+    desc1 = DeviceDescriptor("cam1", "USB:1", DeviceType.RGB_CAMERA, (cap1,), {})
+
+    def factory(desc):
+        return SimulatedDevice(desc.device_id, desc.physical_id, desc.device_type, desc.capabilities)
+
+    manager.register_factory(DeviceType.RGB_CAMERA, factory)
+
+    manager.refresh_devices(StaticDiscoveryProvider([desc1]))
+    old_dev = manager._registry.get("cam1")
+
+    # Simulate old device leaving dirty resources during stop
+    old_dev.set_dirty_on_stop(True)
+
+    # Refresh with empty discovery (device disappeared)
+    rep = manager.refresh_devices(StaticDiscoveryProvider([]))
+
+    # The device failed to stop cleanly, so it's marked as FAILED and recorded in failures.
+    assert "cam1" in rep.failed
+    assert "remained dirty" in rep.failed["cam1"]
+    assert old_dev.state == DeviceState.FAILED

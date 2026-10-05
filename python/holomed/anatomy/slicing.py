@@ -242,7 +242,7 @@ class PlanarSliceStrategy(SliceStrategy):
         cap_segments_front = []
         cap_segments_back = []
 
-        intersections = {}
+        intersections: dict[tuple[int, int], Point3D] = {}
         def get_intersection(i, j):
             key = tuple(sorted((i, j)))
             if key in intersections: return intersections[key]
@@ -431,10 +431,8 @@ class SliceEngine:
     @staticmethod
     def slice_piece(piece: AnatomicalPiece, operation: SliceOperation) -> SliceResult:
         if isinstance(operation.cut_surface, PlanarCutSurface):
-            strategy = PlanarSliceStrategy()
-            return strategy.slice(piece, operation)
+            return PlanarSliceStrategy().slice(piece, operation)
         elif isinstance(operation.cut_surface, SweptCutSurface):
-            strategy = FreeformSliceStrategy()
-            return strategy.slice(piece, operation)
+            return FreeformSliceStrategy().slice(piece, operation)
         else:
             raise TypeError(f"Unsupported cut surface type: {type(operation.cut_surface).__name__}")

@@ -227,6 +227,43 @@ def test_dispatcher_routes(
     assert resp_ab.message_type.value == "RESPONSE"
     assert resp_ab.payload["current_phase"] == "ABORTED"
 
+    # 5. Confirm command
+    # Must first start a new workflow and request confirmation to have a valid confirmation ID
+    sess_conf = "sess_conf_disp"
+    srv.start_workflow(sess_conf)
+    srv.transition_phase(sess_conf, WorkflowPhase.PRE_PROCEDURE_PLANNING, 1)
+    srv.transition_phase(sess_conf, WorkflowPhase.REGISTRATION, 2)
+    srv.transition_phase(sess_conf, WorkflowPhase.SAFETY_TIMEOUT, 3)
+    req_conf = srv.request_confirmation(sess_conf, WorkflowPhase.NAVIGATION, "Test", 4)
+
+    cmd_conf = create_command(
+        "workflow.confirm",
+        "client",
+        payload={
+            "session_id": sess_conf,
+            "confirmation_id": req_conf.confirmation_id,
+            "approved": True,
+            "operator_id": "disp_operator",
+            "sequence_number": 5
+        },
+    )
+    resp_conf = message_dispatcher.dispatch(cmd_conf)
+    assert resp_conf is not None
+    assert resp_conf.message_type.value == "RESPONSE"
+    assert "resolved_confirmation_id" in resp_conf.payload
+
+    # Error cases for confirm
+    cmd_conf_err = create_command(
+        "workflow.confirm",
+        "client",
+        payload={
+            "session_id": sess_conf,
+        },
+    )
+    resp_conf_err = message_dispatcher.dispatch(cmd_conf_err)
+    assert resp_conf_err is not None
+    assert resp_conf_err.message_type.value == "ERROR"
+
     srv.stop()
 
 
