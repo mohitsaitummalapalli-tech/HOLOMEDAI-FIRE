@@ -24,6 +24,10 @@ test = [
     "pytest>=9.1.1,<10.0.0",
     "pytest-asyncio>=1.4.0",
 ]
+vision = [
+    "opencv-python>=5.0.0.93",
+    "mediapipe>=1.0.1",
+]
 
 [tool.setuptools.packages.find]
 where = ["python"]
